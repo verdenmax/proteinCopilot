@@ -45,6 +45,15 @@ pub enum SearchParamsError {
         /// The maximum allowed.
         max: u32,
     },
+
+    /// A modification has a non-finite mass_delta (NaN or Infinity).
+    #[error("modification \"{name}\" has non-finite mass_delta: {value}")]
+    InvalidModificationMassDelta {
+        /// Name of the modification.
+        name: String,
+        /// The invalid mass_delta value.
+        value: f64,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -219,6 +228,7 @@ impl SearchParams {
     /// - `precursor_tolerance.value` is finite and > 0
     /// - `fragment_tolerance.value` is finite and > 0
     /// - `missed_cleavages` ≤ 5
+    /// - All modification `mass_delta` values are finite
     pub fn validate(&self) -> Result<(), SearchParamsError> {
         if self.database_path.trim().is_empty() {
             return Err(SearchParamsError::EmptyDatabasePath);
@@ -238,6 +248,18 @@ impl SearchParams {
                 actual: self.missed_cleavages,
                 max: MAX_MISSED_CLEAVAGES,
             });
+        }
+        for m in self
+            .fixed_modifications
+            .iter()
+            .chain(&self.variable_modifications)
+        {
+            if !m.mass_delta.is_finite() {
+                return Err(SearchParamsError::InvalidModificationMassDelta {
+                    name: m.name.clone(),
+                    value: m.mass_delta,
+                });
+            }
         }
         Ok(())
     }
@@ -514,5 +536,29 @@ mod tests {
             p.validate(),
             Err(SearchParamsError::InvalidFragmentTolerance { .. })
         ));
+    }
+
+    #[test]
+    fn validate_rejects_nan_fixed_modification_mass_delta() {
+        let mut p = valid_params();
+        p.fixed_modifications[0].mass_delta = f64::NAN;
+        let err = p.validate().unwrap_err();
+        assert!(matches!(
+            err,
+            SearchParamsError::InvalidModificationMassDelta { .. }
+        ));
+        assert!(err.to_string().contains("Carbamidomethyl"));
+    }
+
+    #[test]
+    fn validate_rejects_infinity_variable_modification_mass_delta() {
+        let mut p = valid_params();
+        p.variable_modifications[0].mass_delta = f64::INFINITY;
+        let err = p.validate().unwrap_err();
+        assert!(matches!(
+            err,
+            SearchParamsError::InvalidModificationMassDelta { .. }
+        ));
+        assert!(err.to_string().contains("Oxidation"));
     }
 }
