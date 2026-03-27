@@ -23,15 +23,15 @@ pub enum SearchParamsError {
     #[error("database_path must not be empty")]
     EmptyDatabasePath,
 
-    /// Precursor mass tolerance is not positive.
-    #[error("precursor tolerance must be positive, got {value}")]
+    /// Precursor mass tolerance is not a finite positive value.
+    #[error("precursor tolerance must be a finite positive value, got {value}")]
     InvalidPrecursorTolerance {
         /// The invalid tolerance value.
         value: f64,
     },
 
-    /// Fragment mass tolerance is not positive.
-    #[error("fragment tolerance must be positive, got {value}")]
+    /// Fragment mass tolerance is not a finite positive value.
+    #[error("fragment tolerance must be a finite positive value, got {value}")]
     InvalidFragmentTolerance {
         /// The invalid tolerance value.
         value: f64,
@@ -216,19 +216,19 @@ impl SearchParams {
     ///
     /// Checks:
     /// - `database_path` is not empty
-    /// - `precursor_tolerance.value` > 0
-    /// - `fragment_tolerance.value` > 0
+    /// - `precursor_tolerance.value` is finite and > 0
+    /// - `fragment_tolerance.value` is finite and > 0
     /// - `missed_cleavages` ≤ 5
     pub fn validate(&self) -> Result<(), SearchParamsError> {
         if self.database_path.trim().is_empty() {
             return Err(SearchParamsError::EmptyDatabasePath);
         }
-        if self.precursor_tolerance.value <= 0.0 {
+        if !self.precursor_tolerance.value.is_finite() || self.precursor_tolerance.value <= 0.0 {
             return Err(SearchParamsError::InvalidPrecursorTolerance {
                 value: self.precursor_tolerance.value,
             });
         }
-        if self.fragment_tolerance.value <= 0.0 {
+        if !self.fragment_tolerance.value.is_finite() || self.fragment_tolerance.value <= 0.0 {
             return Err(SearchParamsError::InvalidFragmentTolerance {
                 value: self.fragment_tolerance.value,
             });
@@ -472,5 +472,47 @@ mod tests {
         let mut p = valid_params();
         p.missed_cleavages = 5;
         assert!(p.validate().is_ok());
+    }
+
+    // -- NaN/Infinity validation ----------------------------------------
+
+    #[test]
+    fn validate_rejects_nan_precursor_tolerance() {
+        let mut p = valid_params();
+        p.precursor_tolerance.value = f64::NAN;
+        assert!(matches!(
+            p.validate(),
+            Err(SearchParamsError::InvalidPrecursorTolerance { .. })
+        ));
+    }
+
+    #[test]
+    fn validate_rejects_infinity_precursor_tolerance() {
+        let mut p = valid_params();
+        p.precursor_tolerance.value = f64::INFINITY;
+        assert!(matches!(
+            p.validate(),
+            Err(SearchParamsError::InvalidPrecursorTolerance { .. })
+        ));
+    }
+
+    #[test]
+    fn validate_rejects_nan_fragment_tolerance() {
+        let mut p = valid_params();
+        p.fragment_tolerance.value = f64::NAN;
+        assert!(matches!(
+            p.validate(),
+            Err(SearchParamsError::InvalidFragmentTolerance { .. })
+        ));
+    }
+
+    #[test]
+    fn validate_rejects_neg_infinity_fragment_tolerance() {
+        let mut p = valid_params();
+        p.fragment_tolerance.value = f64::NEG_INFINITY;
+        assert!(matches!(
+            p.validate(),
+            Err(SearchParamsError::InvalidFragmentTolerance { .. })
+        ));
     }
 }

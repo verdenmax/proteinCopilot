@@ -29,6 +29,17 @@ pub enum SpectrumError {
         /// Length of intensity_array.
         intensity_len: usize,
     },
+
+    /// A numeric field contains NaN or Infinity.
+    #[error("{field} contains non-finite value")]
+    NonFiniteValue {
+        /// Name of the field with the invalid value.
+        field: &'static str,
+    },
+
+    /// mz_array is not sorted in ascending order.
+    #[error("mz_array is not sorted in ascending order")]
+    MzArrayNotSorted,
 }
 
 // ---------------------------------------------------------------------------
@@ -123,12 +134,46 @@ impl Spectrum {
     /// Validates internal invariants.
     ///
     /// Call this after deserialization to ensure data consistency.
+    /// Checks:
+    /// - `mz_array` and `intensity_array` have the same length
+    /// - All numeric fields are finite (no NaN or Infinity)
+    /// - `mz_array` is sorted in ascending order
     pub fn validate(&self) -> Result<(), SpectrumError> {
         if self.mz_array.len() != self.intensity_array.len() {
             return Err(SpectrumError::ArrayLengthMismatch {
                 mz_len: self.mz_array.len(),
                 intensity_len: self.intensity_array.len(),
             });
+        }
+        if !self.retention_time_sec.is_finite() {
+            return Err(SpectrumError::NonFiniteValue {
+                field: "retention_time_sec",
+            });
+        }
+        if let Some(ref p) = self.precursor {
+            if !p.mz.is_finite() {
+                return Err(SpectrumError::NonFiniteValue {
+                    field: "precursor.mz",
+                });
+            }
+            if let Some(intensity) = p.intensity {
+                if !intensity.is_finite() {
+                    return Err(SpectrumError::NonFiniteValue {
+                        field: "precursor.intensity",
+                    });
+                }
+            }
+        }
+        if self.mz_array.iter().any(|v| !v.is_finite()) {
+            return Err(SpectrumError::NonFiniteValue { field: "mz_array" });
+        }
+        if self.intensity_array.iter().any(|v| !v.is_finite()) {
+            return Err(SpectrumError::NonFiniteValue {
+                field: "intensity_array",
+            });
+        }
+        if !self.mz_array.windows(2).all(|w| w[0] <= w[1]) {
+            return Err(SpectrumError::MzArrayNotSorted);
         }
         Ok(())
     }
@@ -451,5 +496,111 @@ mod tests {
         let result = Spectrum::new(1, MsLevel::MS1, 0.0, None, vec![], vec![]);
         assert!(result.is_ok());
         assert_eq!(result.unwrap().num_peaks(), 0);
+    }
+
+    // -- NaN/Infinity validation ----------------------------------------
+
+    #[test]
+    fn validate_rejects_nan_retention_time() {
+        let result = Spectrum::new(1, MsLevel::MS2, f64::NAN, None, vec![100.0], vec![1000.0]);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("retention_time"));
+    }
+
+    #[test]
+    fn validate_rejects_infinity_in_mz_array() {
+        let result = Spectrum::new(
+            1,
+            MsLevel::MS2,
+            10.0,
+            None,
+            vec![100.0, f64::INFINITY],
+            vec![1000.0, 2000.0],
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("mz_array"));
+    }
+
+    #[test]
+    fn validate_rejects_nan_in_intensity_array() {
+        let result = Spectrum::new(
+            1,
+            MsLevel::MS2,
+            10.0,
+            None,
+            vec![100.0, 200.0],
+            vec![1000.0, f64::NAN],
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("intensity_array"));
+    }
+
+    #[test]
+    fn validate_rejects_nan_precursor_mz() {
+        let result = Spectrum::new(
+            1,
+            MsLevel::MS2,
+            10.0,
+            Some(PrecursorInfo {
+                mz: f64::NAN,
+                charge: Some(2),
+                intensity: None,
+            }),
+            vec![100.0],
+            vec![1000.0],
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("precursor.mz"));
+    }
+
+    #[test]
+    fn validate_rejects_infinity_precursor_intensity() {
+        let result = Spectrum::new(
+            1,
+            MsLevel::MS2,
+            10.0,
+            Some(PrecursorInfo {
+                mz: 500.0,
+                charge: Some(2),
+                intensity: Some(f64::INFINITY),
+            }),
+            vec![100.0],
+            vec![1000.0],
+        );
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("precursor.intensity"));
+    }
+
+    // -- Sortedness validation ------------------------------------------
+
+    #[test]
+    fn validate_rejects_unsorted_mz_array() {
+        let result = Spectrum::new(
+            1,
+            MsLevel::MS2,
+            10.0,
+            None,
+            vec![300.0, 100.0, 200.0], // not sorted
+            vec![1000.0, 2000.0, 500.0],
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("not sorted"));
+    }
+
+    #[test]
+    fn validate_accepts_equal_adjacent_mz_values() {
+        // Equal adjacent values (plateaus) are allowed
+        let result = Spectrum::new(
+            1,
+            MsLevel::MS2,
+            10.0,
+            None,
+            vec![100.0, 100.0, 200.0],
+            vec![1000.0, 2000.0, 500.0],
+        );
+        assert!(result.is_ok());
     }
 }
