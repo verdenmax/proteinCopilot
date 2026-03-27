@@ -362,14 +362,12 @@ SearchParams ──────▶ SearchEngineAdapter ──▶ SearchResult �
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub enum MsLevel { MS1, MS2, Other(u8) }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct Spectrum {
-    pub scan_number: u32,
-    pub ms_level: MsLevel,
-    pub retention_time_sec: f64,
-    pub precursor: Option<PrecursorInfo>,
-    pub mz_array: Vec<f64>,
-    pub intensity_array: Vec<f64>,
+/// 隔离窗口（DDA 窄窗口, DIA 宽窗口），对齐 mzML <isolationWindow>
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct IsolationWindow {
+    pub target_mz: f64,
+    pub lower_offset: f64,  // Da
+    pub upper_offset: f64,  // Da
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -377,13 +375,24 @@ pub struct PrecursorInfo {
     pub mz: f64,
     pub charge: Option<i32>,
     pub intensity: Option<f64>,
+    pub isolation_window: Option<IsolationWindow>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct Spectrum {
+    pub scan_number: u32,
+    pub ms_level: MsLevel,
+    pub retention_time_sec: f64,
+    pub precursors: Vec<PrecursorInfo>,  // DDA: 1, DIA: 0~1(宽窗口), MS1: empty
+    pub mz_array: Vec<f64>,
+    pub intensity_array: Vec<f64>,
 }
 
 /// LLM 可读的谱图数据摘要——这是 AI 编排层了解数据特征的入口
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct SpectrumSummary {
     pub file_path: String,
-    pub format: String,
+    pub format: SpectrumFormat,  // 改为枚举类型
     pub total_spectra: u64,
     pub ms1_count: u64,
     pub ms2_count: u64,
