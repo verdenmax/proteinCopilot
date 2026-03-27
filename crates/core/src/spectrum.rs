@@ -79,18 +79,43 @@ impl std::fmt::Display for MsLevel {
 }
 
 // ---------------------------------------------------------------------------
+// IsolationWindow
+// ---------------------------------------------------------------------------
+
+/// Isolation window used during precursor selection.
+///
+/// In DDA, the window is typically narrow (1–3 Da).
+/// In DIA, the window is wide (e.g., 25 Da), covering many co-eluting ions.
+/// Aligns with the mzML `<isolationWindow>` element.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct IsolationWindow {
+    /// Center m/z of the isolation window (Da).
+    pub target_mz: f64,
+    /// Offset below `target_mz` (Da, ≥ 0).
+    pub lower_offset: f64,
+    /// Offset above `target_mz` (Da, ≥ 0).
+    pub upper_offset: f64,
+}
+
+// ---------------------------------------------------------------------------
 // PrecursorInfo
 // ---------------------------------------------------------------------------
 
 /// Precursor ion information for MS2+ spectra.
+///
+/// In DDA, a spectrum typically has one precursor with a specific m/z and charge.
+/// In DIA, the precursor describes the isolation window; m/z may be the window
+/// center and charge may be unknown.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct PrecursorInfo {
     /// Precursor m/z value (Da).
     pub mz: f64,
-    /// Charge state (`None` if undetermined).
+    /// Charge state (`None` if undetermined, common in DIA).
     pub charge: Option<i32>,
     /// Intensity (`None` if not available).
     pub intensity: Option<f64>,
+    /// Isolation window (`None` if not recorded).
+    pub isolation_window: Option<IsolationWindow>,
 }
 
 // ---------------------------------------------------------------------------
@@ -101,6 +126,9 @@ pub struct PrecursorInfo {
 ///
 /// `mz_array` and `intensity_array` must always have the same length.
 /// `mz_array` is expected to be sorted in ascending order.
+///
+/// The `precursors` field supports both DDA (typically 1 precursor)
+/// and DIA (0 precursors, or 1 with a wide isolation window).
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct Spectrum {
     /// Scan number (1-based, following mass spectrometry convention).
@@ -109,8 +137,9 @@ pub struct Spectrum {
     pub ms_level: MsLevel,
     /// Retention time in seconds.
     pub retention_time_sec: f64,
-    /// Precursor information (present for MS2+ spectra).
-    pub precursor: Option<PrecursorInfo>,
+    /// Precursor information. DDA: typically 1 entry. DIA: 0 or 1 with wide
+    /// isolation window. MS1: empty.
+    pub precursors: Vec<PrecursorInfo>,
     /// Array of m/z values (Da), sorted ascending.
     pub mz_array: Vec<f64>,
     /// Array of intensity values, same length as `mz_array`.
@@ -120,13 +149,12 @@ pub struct Spectrum {
 impl Spectrum {
     /// Creates a new `Spectrum` with validation.
     ///
-    /// Returns `SpectrumError::ArrayLengthMismatch` if `mz_array` and
-    /// `intensity_array` have different lengths.
+    /// Returns `SpectrumError` if any invariant is violated.
     pub fn new(
         scan_number: u32,
         ms_level: MsLevel,
         retention_time_sec: f64,
-        precursor: Option<PrecursorInfo>,
+        precursors: Vec<PrecursorInfo>,
         mz_array: Vec<f64>,
         intensity_array: Vec<f64>,
     ) -> Result<Self, SpectrumError> {
@@ -134,7 +162,7 @@ impl Spectrum {
             scan_number,
             ms_level,
             retention_time_sec,
-            precursor,
+            precursors,
             mz_array,
             intensity_array,
         };
@@ -148,6 +176,7 @@ impl Spectrum {
     /// Checks:
     /// - `mz_array` and `intensity_array` have the same length
     /// - All numeric fields are finite (no NaN or Infinity)
+    /// - All precursor fields are finite; isolation window offsets ≥ 0
     /// - `mz_array` is sorted in ascending order
     pub fn validate(&self) -> Result<(), SpectrumError> {
         if self.mz_array.len() != self.intensity_array.len() {
@@ -161,19 +190,8 @@ impl Spectrum {
                 field: "retention_time_sec",
             });
         }
-        if let Some(ref p) = self.precursor {
-            if !p.mz.is_finite() {
-                return Err(SpectrumError::NonFiniteValue {
-                    field: "precursor.mz",
-                });
-            }
-            if let Some(intensity) = p.intensity {
-                if !intensity.is_finite() {
-                    return Err(SpectrumError::NonFiniteValue {
-                        field: "precursor.intensity",
-                    });
-                }
-            }
+        for (i, p) in self.precursors.iter().enumerate() {
+            self.validate_precursor(i, p)?;
         }
         if self.mz_array.iter().any(|v| !v.is_finite()) {
             return Err(SpectrumError::NonFiniteValue { field: "mz_array" });
@@ -185,6 +203,47 @@ impl Spectrum {
         }
         if !self.mz_array.windows(2).all(|w| w[0] <= w[1]) {
             return Err(SpectrumError::MzArrayNotSorted);
+        }
+        Ok(())
+    }
+
+    fn validate_precursor(&self, idx: usize, p: &PrecursorInfo) -> Result<(), SpectrumError> {
+        if !p.mz.is_finite() {
+            return Err(SpectrumError::NonFiniteValue {
+                field: if idx == 0 {
+                    "precursors[0].mz"
+                } else {
+                    "precursors[n].mz"
+                },
+            });
+        }
+        if let Some(intensity) = p.intensity {
+            if !intensity.is_finite() {
+                return Err(SpectrumError::NonFiniteValue {
+                    field: if idx == 0 {
+                        "precursors[0].intensity"
+                    } else {
+                        "precursors[n].intensity"
+                    },
+                });
+            }
+        }
+        if let Some(ref w) = p.isolation_window {
+            if !w.target_mz.is_finite()
+                || !w.lower_offset.is_finite()
+                || !w.upper_offset.is_finite()
+            {
+                return Err(SpectrumError::NonFiniteValue {
+                    field: "isolation_window",
+                });
+            }
+            if w.lower_offset < 0.0 || w.upper_offset < 0.0 {
+                return Err(SpectrumError::InvalidRange {
+                    field: "isolation_window offsets",
+                    min: w.lower_offset,
+                    max: w.upper_offset,
+                });
+            }
         }
         Ok(())
     }
@@ -305,6 +364,7 @@ mod tests {
             mz: 500.2534,
             charge: Some(2),
             intensity: Some(1.5e6),
+            isolation_window: None,
         }
     }
 
@@ -313,7 +373,7 @@ mod tests {
             42,
             MsLevel::MS2,
             120.5,
-            Some(sample_precursor()),
+            vec![sample_precursor()],
             vec![100.0, 200.0, 300.0, 400.0],
             vec![1000.0, 2000.0, 500.0, 750.0],
         )
@@ -373,6 +433,7 @@ mod tests {
             mz: 400.0,
             charge: None,
             intensity: None,
+            isolation_window: None,
         };
         let json = serde_json::to_string(&info).unwrap();
         let back: PrecursorInfo = serde_json::from_str(&json).unwrap();
@@ -398,14 +459,14 @@ mod tests {
             1,
             MsLevel::MS1,
             60.0,
-            None,
+            vec![],
             vec![200.0, 400.0],
             vec![1e5, 2e5],
         )
         .unwrap();
         let json = serde_json::to_string(&spectrum).unwrap();
         let back: Spectrum = serde_json::from_str(&json).unwrap();
-        assert!(back.precursor.is_none());
+        assert!(back.precursors.is_empty());
         assert_eq!(back.ms_level, MsLevel::MS1);
     }
 
@@ -549,7 +610,7 @@ mod tests {
             1,
             MsLevel::MS2,
             10.0,
-            None,
+            vec![],
             vec![100.0, 200.0, 300.0],
             vec![1000.0, 2000.0], // one fewer
         );
@@ -572,7 +633,7 @@ mod tests {
             "scan_number": 1,
             "ms_level": "MS2",
             "retention_time_sec": 10.0,
-            "precursor": null,
+            "precursors": [],
             "mz_array": [100.0, 200.0],
             "intensity_array": [1000.0]
         }"#;
@@ -588,7 +649,7 @@ mod tests {
 
     #[test]
     fn spectrum_new_accepts_empty_arrays() {
-        let result = Spectrum::new(1, MsLevel::MS1, 0.0, None, vec![], vec![]);
+        let result = Spectrum::new(1, MsLevel::MS1, 0.0, vec![], vec![], vec![]);
         assert!(result.is_ok());
         assert_eq!(result.unwrap().num_peaks(), 0);
     }
@@ -597,7 +658,7 @@ mod tests {
 
     #[test]
     fn validate_rejects_nan_retention_time() {
-        let result = Spectrum::new(1, MsLevel::MS2, f64::NAN, None, vec![100.0], vec![1000.0]);
+        let result = Spectrum::new(1, MsLevel::MS2, f64::NAN, vec![], vec![100.0], vec![1000.0]);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("retention_time"));
     }
@@ -608,7 +669,7 @@ mod tests {
             1,
             MsLevel::MS2,
             10.0,
-            None,
+            vec![],
             vec![100.0, f64::INFINITY],
             vec![1000.0, 2000.0],
         );
@@ -622,7 +683,7 @@ mod tests {
             1,
             MsLevel::MS2,
             10.0,
-            None,
+            vec![],
             vec![100.0, 200.0],
             vec![1000.0, f64::NAN],
         );
@@ -636,16 +697,17 @@ mod tests {
             1,
             MsLevel::MS2,
             10.0,
-            Some(PrecursorInfo {
+            vec![PrecursorInfo {
                 mz: f64::NAN,
                 charge: Some(2),
                 intensity: None,
-            }),
+                isolation_window: None,
+            }],
             vec![100.0],
             vec![1000.0],
         );
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("precursor.mz"));
+        assert!(result.unwrap_err().to_string().contains("precursors"));
     }
 
     #[test]
@@ -654,19 +716,17 @@ mod tests {
             1,
             MsLevel::MS2,
             10.0,
-            Some(PrecursorInfo {
+            vec![PrecursorInfo {
                 mz: 500.0,
                 charge: Some(2),
                 intensity: Some(f64::INFINITY),
-            }),
+                isolation_window: None,
+            }],
             vec![100.0],
             vec![1000.0],
         );
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("precursor.intensity"));
+        assert!(result.unwrap_err().to_string().contains("precursors"));
     }
 
     // -- Sortedness validation ------------------------------------------
@@ -677,7 +737,7 @@ mod tests {
             1,
             MsLevel::MS2,
             10.0,
-            None,
+            vec![],
             vec![300.0, 100.0, 200.0], // not sorted
             vec![1000.0, 2000.0, 500.0],
         );
@@ -692,10 +752,139 @@ mod tests {
             1,
             MsLevel::MS2,
             10.0,
-            None,
+            vec![],
             vec![100.0, 100.0, 200.0],
             vec![1000.0, 2000.0, 500.0],
         );
         assert!(result.is_ok());
+    }
+
+    // -- DIA / IsolationWindow ------------------------------------------
+
+    #[test]
+    fn isolation_window_serde_roundtrip() {
+        let w = IsolationWindow {
+            target_mz: 500.0,
+            lower_offset: 12.5,
+            upper_offset: 12.5,
+        };
+        let json = serde_json::to_string_pretty(&w).unwrap();
+        let back: IsolationWindow = serde_json::from_str(&json).unwrap();
+        assert_eq!(w, back);
+    }
+
+    #[test]
+    fn dia_spectrum_with_wide_isolation_window() {
+        let spectrum = Spectrum::new(
+            100,
+            MsLevel::MS2,
+            300.0,
+            vec![PrecursorInfo {
+                mz: 500.0,
+                charge: None, // DIA: charge often unknown
+                intensity: None,
+                isolation_window: Some(IsolationWindow {
+                    target_mz: 500.0,
+                    lower_offset: 12.5,
+                    upper_offset: 12.5, // 25 Da window
+                }),
+            }],
+            vec![100.0, 200.0, 300.0],
+            vec![500.0, 1000.0, 750.0],
+        )
+        .unwrap();
+        assert_eq!(spectrum.precursors.len(), 1);
+        assert!(spectrum.precursors[0].charge.is_none());
+        assert!(spectrum.precursors[0].isolation_window.is_some());
+    }
+
+    #[test]
+    fn precursor_with_isolation_window_serde_roundtrip() {
+        let p = PrecursorInfo {
+            mz: 750.0,
+            charge: Some(3),
+            intensity: Some(2e6),
+            isolation_window: Some(IsolationWindow {
+                target_mz: 750.0,
+                lower_offset: 1.0,
+                upper_offset: 1.0,
+            }),
+        };
+        let json = serde_json::to_string_pretty(&p).unwrap();
+        let back: PrecursorInfo = serde_json::from_str(&json).unwrap();
+        assert_eq!(p, back);
+    }
+
+    #[test]
+    fn validate_rejects_negative_isolation_window_offset() {
+        let result = Spectrum::new(
+            1,
+            MsLevel::MS2,
+            10.0,
+            vec![PrecursorInfo {
+                mz: 500.0,
+                charge: None,
+                intensity: None,
+                isolation_window: Some(IsolationWindow {
+                    target_mz: 500.0,
+                    lower_offset: -1.0, // invalid
+                    upper_offset: 12.5,
+                }),
+            }],
+            vec![100.0],
+            vec![1000.0],
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn validate_rejects_nan_isolation_window_target() {
+        let result = Spectrum::new(
+            1,
+            MsLevel::MS2,
+            10.0,
+            vec![PrecursorInfo {
+                mz: 500.0,
+                charge: None,
+                intensity: None,
+                isolation_window: Some(IsolationWindow {
+                    target_mz: f64::NAN,
+                    lower_offset: 12.5,
+                    upper_offset: 12.5,
+                }),
+            }],
+            vec![100.0],
+            vec![1000.0],
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("isolation_window"));
+    }
+
+    #[test]
+    fn multiple_precursors_valid() {
+        // Chimeric DDA spectrum with 2 co-fragmented precursors
+        let result = Spectrum::new(
+            1,
+            MsLevel::MS2,
+            10.0,
+            vec![
+                PrecursorInfo {
+                    mz: 400.0,
+                    charge: Some(2),
+                    intensity: Some(1e6),
+                    isolation_window: None,
+                },
+                PrecursorInfo {
+                    mz: 401.5,
+                    charge: Some(3),
+                    intensity: Some(5e5),
+                    isolation_window: None,
+                },
+            ],
+            vec![100.0, 200.0],
+            vec![1000.0, 2000.0],
+        );
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().precursors.len(), 2);
     }
 }
