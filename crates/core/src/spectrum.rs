@@ -12,6 +12,24 @@ use std::collections::HashMap;
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
+
+// ---------------------------------------------------------------------------
+// Errors
+// ---------------------------------------------------------------------------
+
+/// Errors related to spectrum data validation.
+#[derive(Debug, Error)]
+pub enum SpectrumError {
+    /// mz_array and intensity_array have different lengths.
+    #[error("mz_array length ({mz_len}) does not match intensity_array length ({intensity_len})")]
+    ArrayLengthMismatch {
+        /// Length of mz_array.
+        mz_len: usize,
+        /// Length of intensity_array.
+        intensity_len: usize,
+    },
+}
 
 // ---------------------------------------------------------------------------
 // MsLevel
@@ -78,6 +96,43 @@ pub struct Spectrum {
 }
 
 impl Spectrum {
+    /// Creates a new `Spectrum` with validation.
+    ///
+    /// Returns `SpectrumError::ArrayLengthMismatch` if `mz_array` and
+    /// `intensity_array` have different lengths.
+    pub fn new(
+        scan_number: u32,
+        ms_level: MsLevel,
+        retention_time_sec: f64,
+        precursor: Option<PrecursorInfo>,
+        mz_array: Vec<f64>,
+        intensity_array: Vec<f64>,
+    ) -> Result<Self, SpectrumError> {
+        let spectrum = Self {
+            scan_number,
+            ms_level,
+            retention_time_sec,
+            precursor,
+            mz_array,
+            intensity_array,
+        };
+        spectrum.validate()?;
+        Ok(spectrum)
+    }
+
+    /// Validates internal invariants.
+    ///
+    /// Call this after deserialization to ensure data consistency.
+    pub fn validate(&self) -> Result<(), SpectrumError> {
+        if self.mz_array.len() != self.intensity_array.len() {
+            return Err(SpectrumError::ArrayLengthMismatch {
+                mz_len: self.mz_array.len(),
+                intensity_len: self.intensity_array.len(),
+            });
+        }
+        Ok(())
+    }
+
     /// Returns the number of peaks in this spectrum.
     pub fn num_peaks(&self) -> usize {
         self.mz_array.len()
@@ -165,14 +220,15 @@ mod tests {
     }
 
     fn sample_ms2_spectrum() -> Spectrum {
-        Spectrum {
-            scan_number: 42,
-            ms_level: MsLevel::MS2,
-            retention_time_sec: 120.5,
-            precursor: Some(sample_precursor()),
-            mz_array: vec![100.0, 200.0, 300.0, 400.0],
-            intensity_array: vec![1000.0, 2000.0, 500.0, 750.0],
-        }
+        Spectrum::new(
+            42,
+            MsLevel::MS2,
+            120.5,
+            Some(sample_precursor()),
+            vec![100.0, 200.0, 300.0, 400.0],
+            vec![1000.0, 2000.0, 500.0, 750.0],
+        )
+        .expect("test data should be valid")
     }
 
     fn sample_summary() -> SpectrumSummary {
@@ -249,14 +305,15 @@ mod tests {
 
     #[test]
     fn spectrum_ms1_no_precursor() {
-        let spectrum = Spectrum {
-            scan_number: 1,
-            ms_level: MsLevel::MS1,
-            retention_time_sec: 60.0,
-            precursor: None,
-            mz_array: vec![200.0, 400.0],
-            intensity_array: vec![1e5, 2e5],
-        };
+        let spectrum = Spectrum::new(
+            1,
+            MsLevel::MS1,
+            60.0,
+            None,
+            vec![200.0, 400.0],
+            vec![1e5, 2e5],
+        )
+        .unwrap();
         let json = serde_json::to_string(&spectrum).unwrap();
         let back: Spectrum = serde_json::from_str(&json).unwrap();
         assert!(back.precursor.is_none());
@@ -342,5 +399,57 @@ mod tests {
         let json = serde_json::to_string(&summary).unwrap();
         let back: SpectrumSummary = serde_json::from_str(&json).unwrap();
         assert!(back.precursor_charge_distribution.is_empty());
+    }
+
+    // -- Validation -----------------------------------------------------
+
+    #[test]
+    fn spectrum_new_rejects_mismatched_arrays() {
+        let result = Spectrum::new(
+            1,
+            MsLevel::MS2,
+            10.0,
+            None,
+            vec![100.0, 200.0, 300.0],
+            vec![1000.0, 2000.0], // one fewer
+        );
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.to_string().contains("3"),
+            "error should mention mz_len=3"
+        );
+        assert!(
+            err.to_string().contains("2"),
+            "error should mention intensity_len=2"
+        );
+    }
+
+    #[test]
+    fn spectrum_validate_catches_deserialized_bad_data() {
+        // Simulate bad data arriving via JSON deserialization (bypasses new())
+        let bad_json = r#"{
+            "scan_number": 1,
+            "ms_level": "MS2",
+            "retention_time_sec": 10.0,
+            "precursor": null,
+            "mz_array": [100.0, 200.0],
+            "intensity_array": [1000.0]
+        }"#;
+        let spectrum: Spectrum = serde_json::from_str(bad_json).unwrap();
+        assert!(spectrum.validate().is_err());
+    }
+
+    #[test]
+    fn spectrum_validate_passes_for_valid_data() {
+        let s = sample_ms2_spectrum();
+        assert!(s.validate().is_ok());
+    }
+
+    #[test]
+    fn spectrum_new_accepts_empty_arrays() {
+        let result = Spectrum::new(1, MsLevel::MS1, 0.0, None, vec![], vec![]);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().num_peaks(), 0);
     }
 }
