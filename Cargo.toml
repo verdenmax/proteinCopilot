@@ -12,7 +12,7 @@ license = "MIT"
 # Serialization
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-schemars = { version = "0.8", features = ["uuid1"] }
+schemars = { version = "0.8", features = ["uuid1", "chrono"] }
 
 # Error handling
 thiserror = "1"
