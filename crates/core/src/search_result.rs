@@ -18,6 +18,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
 
+use crate::engine::EngineInfo;
 use crate::search_params::Modification;
 
 // ---------------------------------------------------------------------------
@@ -414,10 +415,8 @@ impl SearchResultSummary {
 pub struct SearchResult {
     /// Unique identifier for this analysis run.
     pub run_id: Uuid,
-    /// Name and version of the search engine that produced this result.
-    pub engine_name: String,
-    /// Version of the search engine.
-    pub engine_version: String,
+    /// Search engine metadata (name, version, supported features).
+    pub engine_info: EngineInfo,
     /// All PSMs returned by the search.
     pub psms: Vec<Psm>,
     /// Peptide-level aggregation.
@@ -435,18 +434,18 @@ impl SearchResult {
     /// respective `validate()` methods directly.
     ///
     /// Checks:
-    /// - `engine_name` is not empty
-    /// - `engine_version` is not empty
+    /// - `engine_info.name` is not empty
+    /// - `engine_info.version` is not empty
     /// - `summary` passes validation
     pub fn validate(&self) -> Result<(), SearchResultError> {
-        if self.engine_name.trim().is_empty() {
+        if self.engine_info.name.trim().is_empty() {
             return Err(SearchResultError::EmptyField {
-                field: "engine_name",
+                field: "engine_info.name",
             });
         }
-        if self.engine_version.trim().is_empty() {
+        if self.engine_info.version.trim().is_empty() {
             return Err(SearchResultError::EmptyField {
-                field: "engine_version",
+                field: "engine_info.version",
             });
         }
         self.summary.validate()
@@ -460,6 +459,7 @@ impl SearchResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::engine::EngineInfo;
     use crate::search_params::{ModPosition, Modification};
 
     fn sample_psm() -> Psm {
@@ -546,8 +546,11 @@ mod tests {
     fn sample_search_result() -> SearchResult {
         SearchResult {
             run_id: Uuid::nil(),
-            engine_name: "pFind".to_string(),
-            engine_version: "3.1.0".to_string(),
+            engine_info: EngineInfo {
+                name: "pFind".to_string(),
+                version: "3.1.0".to_string(),
+                supported_features: vec![],
+            },
             psms: vec![sample_psm(), sample_psm_with_mod()],
             peptides: vec![sample_peptide_result()],
             proteins: vec![sample_protein_result()],
@@ -636,7 +639,8 @@ mod tests {
         let json = serde_json::to_string_pretty(&result).unwrap();
         let back: SearchResult = serde_json::from_str(&json).unwrap();
         assert_eq!(result.run_id, back.run_id);
-        assert_eq!(result.engine_name, back.engine_name);
+        assert_eq!(result.engine_info.name, back.engine_info.name);
+        assert_eq!(result.engine_info.version, back.engine_info.version);
         assert_eq!(result.psms.len(), back.psms.len());
         assert_eq!(result.peptides.len(), back.peptides.len());
         assert_eq!(result.proteins.len(), back.proteins.len());
@@ -650,8 +654,11 @@ mod tests {
     fn search_result_empty_collections() {
         let result = SearchResult {
             run_id: Uuid::nil(),
-            engine_name: "test".to_string(),
-            engine_version: "1.0".to_string(),
+            engine_info: EngineInfo {
+                name: "test".to_string(),
+                version: "1.0".to_string(),
+                supported_features: vec![],
+            },
             psms: vec![],
             peptides: vec![],
             proteins: vec![],
@@ -934,17 +941,17 @@ mod tests {
     #[test]
     fn search_result_validate_rejects_empty_engine_name() {
         let mut r = sample_search_result();
-        r.engine_name = "".to_string();
+        r.engine_info.name = "".to_string();
         let err = r.validate().unwrap_err();
-        assert!(err.to_string().contains("engine_name"));
+        assert!(err.to_string().contains("engine_info.name"));
     }
 
     #[test]
     fn search_result_validate_rejects_empty_engine_version() {
         let mut r = sample_search_result();
-        r.engine_version = "  ".to_string();
+        r.engine_info.version = "  ".to_string();
         let err = r.validate().unwrap_err();
-        assert!(err.to_string().contains("engine_version"));
+        assert!(err.to_string().contains("engine_info.version"));
     }
 
     #[test]

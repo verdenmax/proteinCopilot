@@ -91,6 +91,17 @@ pub enum CoreError {
         /// What went wrong.
         detail: String,
     },
+
+    /// Generic validation error from any module.
+    #[error("validation error ({context}): {detail}")]
+    ValidationError {
+        /// Which module or context the validation failed in.
+        context: String,
+        /// What went wrong.
+        detail: String,
+        /// Suggested corrective action.
+        suggestion: String,
+    },
 }
 
 impl CoreError {
@@ -114,6 +125,7 @@ impl CoreError {
             CoreError::ResultParseError { .. } => {
                 "Check the search engine output for corruption or version incompatibility"
             }
+            CoreError::ValidationError { suggestion, .. } => suggestion,
         }
     }
 }
@@ -146,11 +158,66 @@ impl From<&CoreError> for ErrorReport {
             CoreError::UnsupportedFormat { .. } => "UnsupportedFormat",
             CoreError::SshConnectionError { .. } => "SshConnectionError",
             CoreError::ResultParseError { .. } => "ResultParseError",
+            CoreError::ValidationError { .. } => "ValidationError",
         };
         ErrorReport {
             category: category.to_string(),
             message: err.to_string(),
             suggestion: err.suggestion().to_string(),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// From impls: module errors → CoreError
+// ---------------------------------------------------------------------------
+
+impl From<crate::spectrum::SpectrumError> for CoreError {
+    fn from(err: crate::spectrum::SpectrumError) -> Self {
+        CoreError::SpectrumParseError {
+            format: "spectrum".to_string(),
+            detail: err.to_string(),
+            suggestion: "Check spectrum data integrity and re-validate".to_string(),
+        }
+    }
+}
+
+impl From<crate::search_params::SearchParamsError> for CoreError {
+    fn from(err: crate::search_params::SearchParamsError) -> Self {
+        CoreError::InvalidSearchParams {
+            field: "search_params".to_string(),
+            reason: err.to_string(),
+            suggestion: "Review and correct the search parameters".to_string(),
+        }
+    }
+}
+
+impl From<crate::search_result::SearchResultError> for CoreError {
+    fn from(err: crate::search_result::SearchResultError) -> Self {
+        CoreError::ValidationError {
+            context: "search_result".to_string(),
+            detail: err.to_string(),
+            suggestion: "Check search result data integrity".to_string(),
+        }
+    }
+}
+
+impl From<crate::ai_decision::AiDecisionError> for CoreError {
+    fn from(err: crate::ai_decision::AiDecisionError) -> Self {
+        CoreError::ValidationError {
+            context: "ai_decision".to_string(),
+            detail: err.to_string(),
+            suggestion: "Check AI decision output formatting".to_string(),
+        }
+    }
+}
+
+impl From<crate::run_metadata::RunMetadataError> for CoreError {
+    fn from(err: crate::run_metadata::RunMetadataError) -> Self {
+        CoreError::ValidationError {
+            context: "run_metadata".to_string(),
+            detail: err.to_string(),
+            suggestion: "Check run metadata fields".to_string(),
         }
     }
 }
@@ -252,5 +319,63 @@ mod tests {
         assert_eq!(report.category, back.category);
         assert_eq!(report.message, back.message);
         assert_eq!(report.suggestion, back.suggestion);
+    }
+
+    #[test]
+    fn validation_error_display_and_suggestion() {
+        let err = CoreError::ValidationError {
+            context: "search_result".to_string(),
+            detail: "q_value out of range".to_string(),
+            suggestion: "Check search result data".to_string(),
+        };
+        assert!(err.to_string().contains("search_result"));
+        assert!(err.to_string().contains("q_value"));
+        assert!(err.suggestion().contains("Check search result"));
+    }
+
+    #[test]
+    fn from_spectrum_error() {
+        use crate::spectrum::SpectrumError;
+        let module_err = SpectrumError::MzArrayNotSorted;
+        let core_err: CoreError = module_err.into();
+        assert!(core_err.to_string().contains("not sorted"));
+        assert!(!core_err.suggestion().is_empty());
+    }
+
+    #[test]
+    fn from_search_params_error() {
+        use crate::search_params::SearchParamsError;
+        let module_err = SearchParamsError::EmptyDatabasePath;
+        let core_err: CoreError = module_err.into();
+        assert!(core_err.to_string().contains("database"));
+        assert!(!core_err.suggestion().is_empty());
+    }
+
+    #[test]
+    fn from_search_result_error() {
+        use crate::search_result::SearchResultError;
+        let module_err = SearchResultError::ZeroCharge;
+        let core_err: CoreError = module_err.into();
+        assert!(core_err.to_string().contains("charge"));
+        let report = ErrorReport::from(&core_err);
+        assert_eq!(report.category, "ValidationError");
+    }
+
+    #[test]
+    fn from_ai_decision_error() {
+        use crate::ai_decision::AiDecisionError;
+        let module_err = AiDecisionError::InvalidConfidence { value: 1.5 };
+        let core_err: CoreError = module_err.into();
+        assert!(core_err.to_string().contains("confidence"));
+        let report = ErrorReport::from(&core_err);
+        assert_eq!(report.category, "ValidationError");
+    }
+
+    #[test]
+    fn from_run_metadata_error() {
+        use crate::run_metadata::RunMetadataError;
+        let module_err = RunMetadataError::NegativeDuration { value: -1.0 };
+        let core_err: CoreError = module_err.into();
+        assert!(core_err.to_string().contains("duration_sec"));
     }
 }

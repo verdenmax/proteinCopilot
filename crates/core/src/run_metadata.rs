@@ -13,10 +13,37 @@ use std::path::PathBuf;
 use chrono::{DateTime, Utc};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 use uuid::Uuid;
 
 use crate::engine::EngineInfo;
 use crate::search_params::SearchParams;
+
+// ---------------------------------------------------------------------------
+// Errors
+// ---------------------------------------------------------------------------
+
+/// Errors related to run metadata validation.
+#[derive(Debug, Error)]
+pub enum RunMetadataError {
+    /// `duration_sec` contains NaN or Infinity.
+    #[error("duration_sec contains non-finite value")]
+    NonFiniteDuration,
+
+    /// `duration_sec` is negative.
+    #[error("duration_sec must be non-negative, got {value}")]
+    NegativeDuration {
+        /// The actual value.
+        value: f64,
+    },
+
+    /// A required field is empty.
+    #[error("{field} must not be empty")]
+    EmptyField {
+        /// Name of the field.
+        field: &'static str,
+    },
+}
 
 // ---------------------------------------------------------------------------
 // RunStatus
@@ -89,6 +116,39 @@ impl RunMetadata {
             duration_sec: None,
             status: RunStatus::Pending,
         }
+    }
+
+    /// Validates run metadata fields.
+    ///
+    /// Checks:
+    /// - `duration_sec`, if present, is finite and non-negative
+    /// - `input_files` is not empty
+    /// - `engine_info.name` and `engine_info.version` are not empty
+    pub fn validate(&self) -> Result<(), RunMetadataError> {
+        if let Some(d) = self.duration_sec {
+            if !d.is_finite() {
+                return Err(RunMetadataError::NonFiniteDuration);
+            }
+            if d < 0.0 {
+                return Err(RunMetadataError::NegativeDuration { value: d });
+            }
+        }
+        if self.input_files.is_empty() {
+            return Err(RunMetadataError::EmptyField {
+                field: "input_files",
+            });
+        }
+        if self.engine_info.name.trim().is_empty() {
+            return Err(RunMetadataError::EmptyField {
+                field: "engine_info.name",
+            });
+        }
+        if self.engine_info.version.trim().is_empty() {
+            return Err(RunMetadataError::EmptyField {
+                field: "engine_info.version",
+            });
+        }
+        Ok(())
     }
 }
 
@@ -226,5 +286,60 @@ mod tests {
         } else {
             panic!("expected Failed status");
         }
+    }
+
+    // -- Validation -----------------------------------------------------
+
+    #[test]
+    fn validate_passes_for_valid_data() {
+        assert!(sample_run_metadata().validate().is_ok());
+    }
+
+    #[test]
+    fn validate_passes_with_valid_duration() {
+        let mut r = sample_run_metadata();
+        r.duration_sec = Some(245.5);
+        assert!(r.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_nan_duration() {
+        let mut r = sample_run_metadata();
+        r.duration_sec = Some(f64::NAN);
+        let err = r.validate().unwrap_err();
+        assert!(err.to_string().contains("duration_sec"));
+    }
+
+    #[test]
+    fn validate_rejects_infinity_duration() {
+        let mut r = sample_run_metadata();
+        r.duration_sec = Some(f64::INFINITY);
+        let err = r.validate().unwrap_err();
+        assert!(err.to_string().contains("duration_sec"));
+    }
+
+    #[test]
+    fn validate_rejects_negative_duration() {
+        let mut r = sample_run_metadata();
+        r.duration_sec = Some(-1.0);
+        let err = r.validate().unwrap_err();
+        assert!(err.to_string().contains("duration_sec"));
+        assert!(err.to_string().contains("-1"));
+    }
+
+    #[test]
+    fn validate_rejects_empty_input_files() {
+        let mut r = sample_run_metadata();
+        r.input_files = vec![];
+        let err = r.validate().unwrap_err();
+        assert!(err.to_string().contains("input_files"));
+    }
+
+    #[test]
+    fn validate_rejects_empty_engine_name() {
+        let mut r = sample_run_metadata();
+        r.engine_info.name = "".to_string();
+        let err = r.validate().unwrap_err();
+        assert!(err.to_string().contains("engine_info.name"));
     }
 }
