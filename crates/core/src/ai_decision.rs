@@ -190,7 +190,7 @@ mod tests {
     }
 
     #[test]
-    fn json_output_has_required_fields() {
+    fn json_output_has_required_fields_string() {
         // Verify compliance with copilot-instructions.md §2.4
         let d = sample_string_decision();
         let json = serde_json::to_string(&d).unwrap();
@@ -201,6 +201,27 @@ mod tests {
         assert!(v.get("input_summary").is_some());
         assert!(v.get("alternatives").is_some());
         assert!(v.get("evidence").is_some());
+    }
+
+    #[test]
+    fn json_output_has_required_fields_search_params() {
+        // Sub-task 1.1.5.2: AiDecision<SearchParams> JSON format per §2.4
+        let d = sample_params_decision();
+        let json = serde_json::to_string(&d).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(v.get("decision").is_some());
+        assert!(
+            v["decision"].is_object(),
+            "decision should be a SearchParams object"
+        );
+        assert!(v.get("confidence").is_some());
+        assert!(v["confidence"].is_f64());
+        assert!(v.get("explanation").is_some());
+        assert!(v.get("input_summary").is_some());
+        assert!(v.get("alternatives").is_some());
+        assert!(v["alternatives"].is_array());
+        assert!(v.get("evidence").is_some());
+        assert!(v["evidence"].is_array());
     }
 
     // -- Validation -----------------------------------------------------
