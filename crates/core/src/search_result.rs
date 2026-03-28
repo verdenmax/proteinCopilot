@@ -97,6 +97,17 @@ pub enum SearchResultError {
         /// Name of the field.
         field: &'static str,
     },
+
+    /// A field is inconsistent between top-level and metadata.
+    #[error("{field} is inconsistent between top-level and metadata")]
+    InconsistentMetadata {
+        /// Description of the inconsistency.
+        field: &'static str,
+    },
+
+    /// Delegated metadata validation failed.
+    #[error("metadata validation failed: {0}")]
+    MetadataError(String),
 }
 
 // ---------------------------------------------------------------------------
@@ -433,7 +444,8 @@ pub struct SearchResult {
 }
 
 impl SearchResult {
-    /// Validates top-level fields and delegates to `summary.validate()`.
+    /// Validates top-level fields, cross-field consistency, and delegates
+    /// to `summary.validate()` and `metadata.validate()`.
     ///
     /// For validating individual PSMs, peptides, or proteins, call their
     /// respective `validate()` methods directly.
@@ -441,7 +453,11 @@ impl SearchResult {
     /// Checks:
     /// - `engine_info.name` is not empty
     /// - `engine_info.version` is not empty
+    /// - `run_id` matches `metadata.run_id`
+    /// - `engine_info` matches `metadata.engine_info`
+    /// - `params_used` matches `metadata.params_used`
     /// - `summary` passes validation
+    /// - `metadata` passes validation
     pub fn validate(&self) -> Result<(), SearchResultError> {
         if self.engine_info.name.trim().is_empty() {
             return Err(SearchResultError::EmptyField {
@@ -453,7 +469,24 @@ impl SearchResult {
                 field: "engine_info.version",
             });
         }
-        self.summary.validate()
+        // Cross-field consistency with metadata
+        if self.run_id != self.metadata.run_id {
+            return Err(SearchResultError::InconsistentMetadata { field: "run_id" });
+        }
+        if self.engine_info != self.metadata.engine_info {
+            return Err(SearchResultError::InconsistentMetadata {
+                field: "engine_info",
+            });
+        }
+        if self.params_used != self.metadata.params_used {
+            return Err(SearchResultError::InconsistentMetadata {
+                field: "params_used",
+            });
+        }
+        self.summary.validate()?;
+        self.metadata
+            .validate()
+            .map_err(|e| SearchResultError::MetadataError(e.to_string()))
     }
 }
 
@@ -587,15 +620,16 @@ mod tests {
     }
 
     fn sample_search_result() -> SearchResult {
+        let meta = sample_metadata();
         SearchResult {
-            run_id: Uuid::nil(),
-            engine_info: sample_engine_info(),
-            params_used: sample_params(),
+            run_id: meta.run_id,
+            engine_info: meta.engine_info.clone(),
+            params_used: meta.params_used.clone(),
             psms: vec![sample_psm(), sample_psm_with_mod()],
             peptides: vec![sample_peptide_result()],
             proteins: vec![sample_protein_result()],
             summary: sample_summary(),
-            metadata: sample_metadata(),
+            metadata: meta,
         }
     }
 
@@ -698,14 +732,19 @@ mod tests {
 
     #[test]
     fn search_result_empty_collections() {
-        let result = SearchResult {
-            run_id: Uuid::nil(),
-            engine_info: EngineInfo {
+        let meta = RunMetadata::new(
+            sample_params(),
+            EngineInfo {
                 name: "test".to_string(),
                 version: "1.0".to_string(),
                 supported_features: vec![],
             },
-            params_used: sample_params(),
+            vec![PathBuf::from("/data/empty.mzML")],
+        );
+        let result = SearchResult {
+            run_id: meta.run_id,
+            engine_info: meta.engine_info.clone(),
+            params_used: meta.params_used.clone(),
             psms: vec![],
             peptides: vec![],
             proteins: vec![],
@@ -722,7 +761,7 @@ mod tests {
                 charge_distribution: HashMap::new(),
                 search_duration_sec: 0.0,
             },
-            metadata: sample_metadata(),
+            metadata: meta,
         };
         let json = serde_json::to_string(&result).unwrap();
         let back: SearchResult = serde_json::from_str(&json).unwrap();
@@ -1007,5 +1046,37 @@ mod tests {
         let mut r = sample_search_result();
         r.summary.search_duration_sec = -1.0;
         assert!(r.validate().is_err());
+    }
+
+    #[test]
+    fn search_result_validate_delegates_to_metadata() {
+        let mut r = sample_search_result();
+        r.metadata.duration_sec = Some(-1.0);
+        assert!(r.validate().is_err());
+    }
+
+    #[test]
+    fn search_result_validate_rejects_inconsistent_run_id() {
+        let mut r = sample_search_result();
+        r.run_id = Uuid::nil(); // differs from metadata.run_id
+        let err = r.validate().unwrap_err();
+        assert!(err.to_string().contains("run_id"));
+        assert!(err.to_string().contains("inconsistent"));
+    }
+
+    #[test]
+    fn search_result_validate_rejects_inconsistent_engine_info() {
+        let mut r = sample_search_result();
+        r.engine_info.version = "9.9.9".to_string();
+        let err = r.validate().unwrap_err();
+        assert!(err.to_string().contains("engine_info"));
+    }
+
+    #[test]
+    fn search_result_validate_rejects_inconsistent_params() {
+        let mut r = sample_search_result();
+        r.params_used.missed_cleavages = 99;
+        let err = r.validate().unwrap_err();
+        assert!(err.to_string().contains("params_used"));
     }
 }

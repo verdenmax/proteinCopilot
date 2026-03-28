@@ -200,7 +200,7 @@ const MAX_MISSED_CLEAVAGES: u32 = 5;
 ///
 /// Use [`SearchParams::validate()`] after construction or deserialization
 /// to ensure all values are within acceptable ranges.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct SearchParams {
     /// Digestion enzyme.
     pub enzyme: Enzyme,
