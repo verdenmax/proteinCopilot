@@ -19,7 +19,8 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use crate::engine::EngineInfo;
-use crate::search_params::Modification;
+use crate::run_metadata::RunMetadata;
+use crate::search_params::{Modification, SearchParams};
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -417,6 +418,8 @@ pub struct SearchResult {
     pub run_id: Uuid,
     /// Search engine metadata (name, version, supported features).
     pub engine_info: EngineInfo,
+    /// Search parameters used for this run.
+    pub params_used: SearchParams,
     /// All PSMs returned by the search.
     pub psms: Vec<Psm>,
     /// Peptide-level aggregation.
@@ -425,6 +428,8 @@ pub struct SearchResult {
     pub proteins: Vec<ProteinResult>,
     /// Statistical summary.
     pub summary: SearchResultSummary,
+    /// Full run metadata for provenance tracking.
+    pub metadata: RunMetadata,
 }
 
 impl SearchResult {
@@ -460,7 +465,10 @@ impl SearchResult {
 mod tests {
     use super::*;
     use crate::engine::EngineInfo;
-    use crate::search_params::{ModPosition, Modification};
+    use crate::search_params::{
+        DecoyStrategy, Enzyme, MassTolerance, ModPosition, Modification, ToleranceUnit,
+    };
+    use std::path::PathBuf;
 
     fn sample_psm() -> Psm {
         Psm {
@@ -543,18 +551,51 @@ mod tests {
         }
     }
 
+    fn sample_engine_info() -> EngineInfo {
+        EngineInfo {
+            name: "pFind".to_string(),
+            version: "3.1.0".to_string(),
+            supported_features: vec![],
+        }
+    }
+
+    fn sample_params() -> SearchParams {
+        SearchParams {
+            database_path: "/data/human.fasta".to_string(),
+            enzyme: Enzyme::Trypsin,
+            missed_cleavages: 2,
+            fixed_modifications: vec![],
+            variable_modifications: vec![],
+            precursor_tolerance: MassTolerance {
+                value: 20.0,
+                unit: ToleranceUnit::Ppm,
+            },
+            fragment_tolerance: MassTolerance {
+                value: 0.02,
+                unit: ToleranceUnit::Da,
+            },
+            decoy_strategy: DecoyStrategy::Reverse,
+        }
+    }
+
+    fn sample_metadata() -> RunMetadata {
+        RunMetadata::new(
+            sample_params(),
+            sample_engine_info(),
+            vec![PathBuf::from("/data/sample.mzML")],
+        )
+    }
+
     fn sample_search_result() -> SearchResult {
         SearchResult {
             run_id: Uuid::nil(),
-            engine_info: EngineInfo {
-                name: "pFind".to_string(),
-                version: "3.1.0".to_string(),
-                supported_features: vec![],
-            },
+            engine_info: sample_engine_info(),
+            params_used: sample_params(),
             psms: vec![sample_psm(), sample_psm_with_mod()],
             peptides: vec![sample_peptide_result()],
             proteins: vec![sample_protein_result()],
             summary: sample_summary(),
+            metadata: sample_metadata(),
         }
     }
 
@@ -641,6 +682,10 @@ mod tests {
         assert_eq!(result.run_id, back.run_id);
         assert_eq!(result.engine_info.name, back.engine_info.name);
         assert_eq!(result.engine_info.version, back.engine_info.version);
+        assert_eq!(
+            result.params_used.database_path,
+            back.params_used.database_path
+        );
         assert_eq!(result.psms.len(), back.psms.len());
         assert_eq!(result.peptides.len(), back.peptides.len());
         assert_eq!(result.proteins.len(), back.proteins.len());
@@ -648,6 +693,7 @@ mod tests {
             result.summary.total_spectra_searched,
             back.summary.total_spectra_searched
         );
+        assert_eq!(result.metadata.run_id, back.metadata.run_id);
     }
 
     #[test]
@@ -659,6 +705,7 @@ mod tests {
                 version: "1.0".to_string(),
                 supported_features: vec![],
             },
+            params_used: sample_params(),
             psms: vec![],
             peptides: vec![],
             proteins: vec![],
@@ -675,6 +722,7 @@ mod tests {
                 charge_distribution: HashMap::new(),
                 search_duration_sec: 0.0,
             },
+            metadata: sample_metadata(),
         };
         let json = serde_json::to_string(&result).unwrap();
         let back: SearchResult = serde_json::from_str(&json).unwrap();

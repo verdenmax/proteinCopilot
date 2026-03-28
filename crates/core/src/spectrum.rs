@@ -65,6 +65,10 @@ pub enum SpectrumError {
         /// Name of the field with the invalid value.
         field: &'static str,
     },
+
+    /// Scan number is zero, violating 1-based indexing convention.
+    #[error("scan_number must be ≥ 1 (1-based indexing)")]
+    ZeroScanNumber,
 }
 
 // ---------------------------------------------------------------------------
@@ -188,11 +192,15 @@ impl Spectrum {
     ///
     /// Call this after deserialization to ensure data consistency.
     /// Checks:
+    /// - `scan_number` ≥ 1 (1-based indexing per mass spectrometry convention)
     /// - `mz_array` and `intensity_array` have the same length
     /// - All numeric fields are finite (no NaN or Infinity)
     /// - All precursor fields are finite; isolation window offsets ≥ 0
     /// - `mz_array` is sorted in ascending order
     pub fn validate(&self) -> Result<(), SpectrumError> {
+        if self.scan_number == 0 {
+            return Err(SpectrumError::ZeroScanNumber);
+        }
         if self.mz_array.len() != self.intensity_array.len() {
             return Err(SpectrumError::ArrayLengthMismatch {
                 mz_len: self.mz_array.len(),
@@ -688,6 +696,13 @@ mod tests {
         let result = Spectrum::new(1, MsLevel::MS1, 0.0, vec![], vec![], vec![]);
         assert!(result.is_ok());
         assert_eq!(result.unwrap().num_peaks(), 0);
+    }
+
+    #[test]
+    fn validate_rejects_zero_scan_number() {
+        let result = Spectrum::new(0, MsLevel::MS2, 10.0, vec![], vec![100.0], vec![1000.0]);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("scan_number"));
     }
 
     // -- NaN/Infinity validation ----------------------------------------
