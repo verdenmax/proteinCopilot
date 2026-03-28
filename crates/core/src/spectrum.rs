@@ -51,6 +51,20 @@ pub enum SpectrumError {
         /// The max value.
         max: f64,
     },
+
+    /// A field that must be strictly positive contains a zero or negative value.
+    #[error("{field} contains non-positive value (must be > 0)")]
+    NonPositiveValue {
+        /// Name of the field with the invalid value.
+        field: &'static str,
+    },
+
+    /// A field that must be non-negative contains a negative value.
+    #[error("{field} contains negative value (must be ≥ 0)")]
+    NegativeValue {
+        /// Name of the field with the invalid value.
+        field: &'static str,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -196,8 +210,16 @@ impl Spectrum {
         if self.mz_array.iter().any(|v| !v.is_finite()) {
             return Err(SpectrumError::NonFiniteValue { field: "mz_array" });
         }
+        if self.mz_array.iter().any(|v| *v <= 0.0) {
+            return Err(SpectrumError::NonPositiveValue { field: "mz_array" });
+        }
         if self.intensity_array.iter().any(|v| !v.is_finite()) {
             return Err(SpectrumError::NonFiniteValue {
+                field: "intensity_array",
+            });
+        }
+        if self.intensity_array.iter().any(|v| *v < 0.0) {
+            return Err(SpectrumError::NegativeValue {
                 field: "intensity_array",
             });
         }
@@ -208,23 +230,32 @@ impl Spectrum {
     }
 
     fn validate_precursor(&self, idx: usize, p: &PrecursorInfo) -> Result<(), SpectrumError> {
+        let mz_field = if idx == 0 {
+            "precursors[0].mz"
+        } else {
+            "precursors[n].mz"
+        };
+        let intensity_field = if idx == 0 {
+            "precursors[0].intensity"
+        } else {
+            "precursors[n].intensity"
+        };
+
         if !p.mz.is_finite() {
-            return Err(SpectrumError::NonFiniteValue {
-                field: if idx == 0 {
-                    "precursors[0].mz"
-                } else {
-                    "precursors[n].mz"
-                },
-            });
+            return Err(SpectrumError::NonFiniteValue { field: mz_field });
+        }
+        if p.mz <= 0.0 {
+            return Err(SpectrumError::NonPositiveValue { field: mz_field });
         }
         if let Some(intensity) = p.intensity {
             if !intensity.is_finite() {
                 return Err(SpectrumError::NonFiniteValue {
-                    field: if idx == 0 {
-                        "precursors[0].intensity"
-                    } else {
-                        "precursors[n].intensity"
-                    },
+                    field: intensity_field,
+                });
+            }
+            if intensity < 0.0 {
+                return Err(SpectrumError::NegativeValue {
+                    field: intensity_field,
                 });
             }
         }
@@ -235,6 +266,11 @@ impl Spectrum {
             {
                 return Err(SpectrumError::NonFiniteValue {
                     field: "isolation_window",
+                });
+            }
+            if w.target_mz <= 0.0 {
+                return Err(SpectrumError::NonPositiveValue {
+                    field: "isolation_window.target_mz",
                 });
             }
             if w.lower_offset < 0.0 || w.upper_offset < 0.0 {
@@ -858,6 +894,123 @@ mod tests {
         );
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("isolation_window"));
+    }
+
+    #[test]
+    fn validate_rejects_zero_mz_in_array() {
+        let result = Spectrum::new(
+            1,
+            MsLevel::MS2,
+            10.0,
+            vec![],
+            vec![0.0, 200.0],
+            vec![1000.0, 2000.0],
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("non-positive"));
+    }
+
+    #[test]
+    fn validate_rejects_negative_mz_in_array() {
+        let result = Spectrum::new(
+            1,
+            MsLevel::MS2,
+            10.0,
+            vec![],
+            vec![-100.0, 200.0],
+            vec![1000.0, 2000.0],
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("non-positive"));
+    }
+
+    #[test]
+    fn validate_rejects_negative_intensity_in_array() {
+        let result = Spectrum::new(
+            1,
+            MsLevel::MS2,
+            10.0,
+            vec![],
+            vec![100.0, 200.0],
+            vec![1000.0, -500.0],
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("negative"));
+    }
+
+    #[test]
+    fn validate_accepts_zero_intensity() {
+        // Zero intensity is valid (no signal detected at that m/z)
+        let result = Spectrum::new(
+            1,
+            MsLevel::MS2,
+            10.0,
+            vec![],
+            vec![100.0, 200.0],
+            vec![0.0, 2000.0],
+        );
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_zero_precursor_mz() {
+        let result = Spectrum::new(
+            1,
+            MsLevel::MS2,
+            10.0,
+            vec![PrecursorInfo {
+                mz: 0.0,
+                charge: Some(2),
+                intensity: None,
+                isolation_window: None,
+            }],
+            vec![100.0],
+            vec![1000.0],
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("non-positive"));
+    }
+
+    #[test]
+    fn validate_rejects_negative_precursor_intensity() {
+        let result = Spectrum::new(
+            1,
+            MsLevel::MS2,
+            10.0,
+            vec![PrecursorInfo {
+                mz: 500.0,
+                charge: Some(2),
+                intensity: Some(-1.0),
+                isolation_window: None,
+            }],
+            vec![100.0],
+            vec![1000.0],
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("negative"));
+    }
+
+    #[test]
+    fn validate_rejects_zero_isolation_window_target_mz() {
+        let result = Spectrum::new(
+            1,
+            MsLevel::MS2,
+            10.0,
+            vec![PrecursorInfo {
+                mz: 500.0,
+                charge: None,
+                intensity: None,
+                isolation_window: Some(IsolationWindow {
+                    target_mz: 0.0,
+                    lower_offset: 12.5,
+                    upper_offset: 12.5,
+                }),
+            }],
+            vec![100.0],
+            vec![1000.0],
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("non-positive"));
     }
 
     #[test]

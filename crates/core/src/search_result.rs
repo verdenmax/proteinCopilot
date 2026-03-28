@@ -15,9 +15,87 @@ use std::collections::HashMap;
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 use uuid::Uuid;
 
 use crate::search_params::Modification;
+
+// ---------------------------------------------------------------------------
+// Errors
+// ---------------------------------------------------------------------------
+
+/// Errors related to search result validation.
+#[derive(Debug, Error)]
+pub enum SearchResultError {
+    /// A numeric field contains NaN or Infinity.
+    #[error("{field} contains non-finite value")]
+    NonFiniteValue {
+        /// Name of the field with the invalid value.
+        field: &'static str,
+    },
+
+    /// A value that should be in [0.0, 1.0] is out of range.
+    #[error("{field} must be in [0.0, 1.0], got {value}")]
+    OutOfUnitRange {
+        /// Name of the field.
+        field: &'static str,
+        /// The actual value.
+        value: f64,
+    },
+
+    /// A required string field is empty or whitespace-only.
+    #[error("{field} must not be empty")]
+    EmptyField {
+        /// Name of the field.
+        field: &'static str,
+    },
+
+    /// Charge state is zero, which is physically impossible.
+    #[error("charge must be non-zero")]
+    ZeroCharge,
+
+    /// Scan number is zero, violating 1-based indexing convention.
+    #[error("spectrum_scan must be ≥ 1 (1-based indexing)")]
+    ZeroScan,
+
+    /// A count field exceeds a logical upper bound.
+    #[error("{field} ({value}) exceeds {limit_field} ({limit})")]
+    CountExceedsLimit {
+        /// Name of the field that is too large.
+        field: &'static str,
+        /// The actual value.
+        value: u64,
+        /// Name of the bounding field.
+        limit_field: &'static str,
+        /// The bounding value.
+        limit: u64,
+    },
+
+    /// A non-negative field contains a negative value.
+    #[error("{field} must be non-negative, got {value}")]
+    NegativeValue {
+        /// Name of the field.
+        field: &'static str,
+        /// The actual value.
+        value: f64,
+    },
+
+    /// A field that must be strictly positive is zero or negative.
+    #[error("{field} must be positive, got {value}")]
+    NonPositiveValue {
+        /// Name of the field.
+        field: &'static str,
+        /// The actual value.
+        value: f64,
+    },
+
+    /// A required Vec field is empty.
+    #[error("{field} must not be empty")]
+    EmptyCollection {
+        /// Name of the field.
+        field: &'static str,
+    },
+}
 
 // ---------------------------------------------------------------------------
 // PSM (Peptide-Spectrum Match)
@@ -53,6 +131,76 @@ pub struct Psm {
     pub is_decoy: bool,
 }
 
+impl Psm {
+    /// Validates all fields for physical and logical correctness.
+    ///
+    /// Checks:
+    /// - `spectrum_scan` ≥ 1 (1-based indexing)
+    /// - `peptide_sequence` is not empty
+    /// - `charge` is non-zero
+    /// - `precursor_mz` and `calculated_mz` are finite and positive
+    /// - `delta_mass_ppm` and `score` are finite
+    /// - `q_value`, if present, is in \[0.0, 1.0\]
+    /// - `protein_accessions` is not empty
+    pub fn validate(&self) -> Result<(), SearchResultError> {
+        if self.spectrum_scan == 0 {
+            return Err(SearchResultError::ZeroScan);
+        }
+        if self.peptide_sequence.trim().is_empty() {
+            return Err(SearchResultError::EmptyField {
+                field: "peptide_sequence",
+            });
+        }
+        if self.charge == 0 {
+            return Err(SearchResultError::ZeroCharge);
+        }
+        if !self.precursor_mz.is_finite() {
+            return Err(SearchResultError::NonFiniteValue {
+                field: "precursor_mz",
+            });
+        }
+        if self.precursor_mz <= 0.0 {
+            return Err(SearchResultError::NonPositiveValue {
+                field: "precursor_mz",
+                value: self.precursor_mz,
+            });
+        }
+        if !self.calculated_mz.is_finite() {
+            return Err(SearchResultError::NonFiniteValue {
+                field: "calculated_mz",
+            });
+        }
+        if self.calculated_mz <= 0.0 {
+            return Err(SearchResultError::NonPositiveValue {
+                field: "calculated_mz",
+                value: self.calculated_mz,
+            });
+        }
+        if !self.delta_mass_ppm.is_finite() {
+            return Err(SearchResultError::NonFiniteValue {
+                field: "delta_mass_ppm",
+            });
+        }
+        if !self.score.is_finite() {
+            return Err(SearchResultError::NonFiniteValue { field: "score" });
+        }
+        if let Some(q) = self.q_value {
+            if !q.is_finite() || !(0.0..=1.0).contains(&q) {
+                return Err(SearchResultError::OutOfUnitRange {
+                    field: "q_value",
+                    value: q,
+                });
+            }
+        }
+        if self.protein_accessions.is_empty() {
+            return Err(SearchResultError::EmptyCollection {
+                field: "protein_accessions",
+            });
+        }
+        Ok(())
+    }
+}
+
 // ---------------------------------------------------------------------------
 // PeptideResult
 // ---------------------------------------------------------------------------
@@ -72,6 +220,40 @@ pub struct PeptideResult {
     pub psm_count: u64,
 }
 
+impl PeptideResult {
+    /// Validates all fields for correctness.
+    ///
+    /// Checks:
+    /// - `sequence` is not empty
+    /// - `protein_accessions` is not empty
+    /// - `best_score` is finite
+    /// - `q_value`, if present, is in \[0.0, 1.0\]
+    pub fn validate(&self) -> Result<(), SearchResultError> {
+        if self.sequence.trim().is_empty() {
+            return Err(SearchResultError::EmptyField { field: "sequence" });
+        }
+        if self.protein_accessions.is_empty() {
+            return Err(SearchResultError::EmptyCollection {
+                field: "protein_accessions",
+            });
+        }
+        if !self.best_score.is_finite() {
+            return Err(SearchResultError::NonFiniteValue {
+                field: "best_score",
+            });
+        }
+        if let Some(q) = self.q_value {
+            if !q.is_finite() || !(0.0..=1.0).contains(&q) {
+                return Err(SearchResultError::OutOfUnitRange {
+                    field: "q_value",
+                    value: q,
+                });
+            }
+        }
+        Ok(())
+    }
+}
+
 // ---------------------------------------------------------------------------
 // ProteinResult
 // ---------------------------------------------------------------------------
@@ -89,6 +271,38 @@ pub struct ProteinResult {
     pub peptide_count: u64,
     /// Number of unique (non-shared) peptides.
     pub unique_peptide_count: u64,
+}
+
+impl ProteinResult {
+    /// Validates all fields for correctness.
+    ///
+    /// Checks:
+    /// - `accession` is not empty
+    /// - `coverage` is finite and in \[0.0, 1.0\]
+    /// - `unique_peptide_count` ≤ `peptide_count`
+    pub fn validate(&self) -> Result<(), SearchResultError> {
+        if self.accession.trim().is_empty() {
+            return Err(SearchResultError::EmptyField { field: "accession" });
+        }
+        if !self.coverage.is_finite() {
+            return Err(SearchResultError::NonFiniteValue { field: "coverage" });
+        }
+        if self.coverage < 0.0 || self.coverage > 1.0 {
+            return Err(SearchResultError::OutOfUnitRange {
+                field: "coverage",
+                value: self.coverage,
+            });
+        }
+        if self.unique_peptide_count > self.peptide_count {
+            return Err(SearchResultError::CountExceedsLimit {
+                field: "unique_peptide_count",
+                value: self.unique_peptide_count,
+                limit_field: "peptide_count",
+                limit: self.peptide_count,
+            });
+        }
+        Ok(())
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -125,6 +339,68 @@ pub struct SearchResultSummary {
     pub search_duration_sec: f64,
 }
 
+impl SearchResultSummary {
+    /// Validates all fields for physical and logical correctness.
+    ///
+    /// Checks:
+    /// - All f64 fields are finite
+    /// - `identification_rate` is in \[0.0, 1.0\]
+    /// - `search_duration_sec` ≥ 0
+    /// - `psms_at_1pct_fdr` ≤ `total_psms`
+    /// - `unique_peptides_at_1pct_fdr` ≤ `psms_at_1pct_fdr`
+    pub fn validate(&self) -> Result<(), SearchResultError> {
+        if !self.median_score.is_finite() {
+            return Err(SearchResultError::NonFiniteValue {
+                field: "median_score",
+            });
+        }
+        if !self.median_delta_mass_ppm.is_finite() {
+            return Err(SearchResultError::NonFiniteValue {
+                field: "median_delta_mass_ppm",
+            });
+        }
+        if !self.identification_rate.is_finite() {
+            return Err(SearchResultError::NonFiniteValue {
+                field: "identification_rate",
+            });
+        }
+        if self.identification_rate < 0.0 || self.identification_rate > 1.0 {
+            return Err(SearchResultError::OutOfUnitRange {
+                field: "identification_rate",
+                value: self.identification_rate,
+            });
+        }
+        if !self.search_duration_sec.is_finite() {
+            return Err(SearchResultError::NonFiniteValue {
+                field: "search_duration_sec",
+            });
+        }
+        if self.search_duration_sec < 0.0 {
+            return Err(SearchResultError::NegativeValue {
+                field: "search_duration_sec",
+                value: self.search_duration_sec,
+            });
+        }
+        if self.psms_at_1pct_fdr > self.total_psms {
+            return Err(SearchResultError::CountExceedsLimit {
+                field: "psms_at_1pct_fdr",
+                value: self.psms_at_1pct_fdr,
+                limit_field: "total_psms",
+                limit: self.total_psms,
+            });
+        }
+        if self.unique_peptides_at_1pct_fdr > self.psms_at_1pct_fdr {
+            return Err(SearchResultError::CountExceedsLimit {
+                field: "unique_peptides_at_1pct_fdr",
+                value: self.unique_peptides_at_1pct_fdr,
+                limit_field: "psms_at_1pct_fdr",
+                limit: self.psms_at_1pct_fdr,
+            });
+        }
+        Ok(())
+    }
+}
+
 // ---------------------------------------------------------------------------
 // SearchResult
 // ---------------------------------------------------------------------------
@@ -150,6 +426,31 @@ pub struct SearchResult {
     pub proteins: Vec<ProteinResult>,
     /// Statistical summary.
     pub summary: SearchResultSummary,
+}
+
+impl SearchResult {
+    /// Validates top-level fields and delegates to `summary.validate()`.
+    ///
+    /// For validating individual PSMs, peptides, or proteins, call their
+    /// respective `validate()` methods directly.
+    ///
+    /// Checks:
+    /// - `engine_name` is not empty
+    /// - `engine_version` is not empty
+    /// - `summary` passes validation
+    pub fn validate(&self) -> Result<(), SearchResultError> {
+        if self.engine_name.trim().is_empty() {
+            return Err(SearchResultError::EmptyField {
+                field: "engine_name",
+            });
+        }
+        if self.engine_version.trim().is_empty() {
+            return Err(SearchResultError::EmptyField {
+                field: "engine_version",
+            });
+        }
+        self.summary.validate()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -373,5 +674,283 @@ mod tests {
         assert!(back.psms.is_empty());
         assert!(back.peptides.is_empty());
         assert!(back.proteins.is_empty());
+    }
+
+    // -- PSM validation -------------------------------------------------
+
+    #[test]
+    fn psm_validate_passes_for_valid_data() {
+        assert!(sample_psm().validate().is_ok());
+        assert!(sample_psm_with_mod().validate().is_ok());
+    }
+
+    #[test]
+    fn psm_validate_rejects_zero_scan() {
+        let mut psm = sample_psm();
+        psm.spectrum_scan = 0;
+        let err = psm.validate().unwrap_err();
+        assert!(err.to_string().contains("spectrum_scan"));
+    }
+
+    #[test]
+    fn psm_validate_rejects_empty_sequence() {
+        let mut psm = sample_psm();
+        psm.peptide_sequence = "".to_string();
+        let err = psm.validate().unwrap_err();
+        assert!(err.to_string().contains("peptide_sequence"));
+    }
+
+    #[test]
+    fn psm_validate_rejects_whitespace_only_sequence() {
+        let mut psm = sample_psm();
+        psm.peptide_sequence = "   ".to_string();
+        let err = psm.validate().unwrap_err();
+        assert!(err.to_string().contains("peptide_sequence"));
+    }
+
+    #[test]
+    fn psm_validate_rejects_zero_charge() {
+        let mut psm = sample_psm();
+        psm.charge = 0;
+        let err = psm.validate().unwrap_err();
+        assert!(err.to_string().contains("charge"));
+    }
+
+    #[test]
+    fn psm_validate_accepts_negative_charge() {
+        // Negative-ion mode uses negative charge states
+        let mut psm = sample_psm();
+        psm.charge = -2;
+        assert!(psm.validate().is_ok());
+    }
+
+    #[test]
+    fn psm_validate_rejects_nan_precursor_mz() {
+        let mut psm = sample_psm();
+        psm.precursor_mz = f64::NAN;
+        let err = psm.validate().unwrap_err();
+        assert!(err.to_string().contains("precursor_mz"));
+    }
+
+    #[test]
+    fn psm_validate_rejects_nonpositive_precursor_mz() {
+        let mut psm = sample_psm();
+        psm.precursor_mz = 0.0;
+        let err = psm.validate().unwrap_err();
+        assert!(err.to_string().contains("precursor_mz"));
+    }
+
+    #[test]
+    fn psm_validate_rejects_nonpositive_calculated_mz() {
+        let mut psm = sample_psm();
+        psm.calculated_mz = -1.0;
+        let err = psm.validate().unwrap_err();
+        assert!(err.to_string().contains("calculated_mz"));
+    }
+
+    #[test]
+    fn psm_validate_rejects_nan_score() {
+        let mut psm = sample_psm();
+        psm.score = f64::NAN;
+        let err = psm.validate().unwrap_err();
+        assert!(err.to_string().contains("score"));
+    }
+
+    #[test]
+    fn psm_validate_rejects_qvalue_above_one() {
+        let mut psm = sample_psm();
+        psm.q_value = Some(1.5);
+        let err = psm.validate().unwrap_err();
+        assert!(err.to_string().contains("q_value"));
+    }
+
+    #[test]
+    fn psm_validate_rejects_negative_qvalue() {
+        let mut psm = sample_psm();
+        psm.q_value = Some(-0.01);
+        let err = psm.validate().unwrap_err();
+        assert!(err.to_string().contains("q_value"));
+    }
+
+    #[test]
+    fn psm_validate_accepts_none_qvalue() {
+        let mut psm = sample_psm();
+        psm.q_value = None;
+        assert!(psm.validate().is_ok());
+    }
+
+    #[test]
+    fn psm_validate_rejects_empty_protein_accessions() {
+        let mut psm = sample_psm();
+        psm.protein_accessions = vec![];
+        let err = psm.validate().unwrap_err();
+        assert!(err.to_string().contains("protein_accessions"));
+    }
+
+    // -- PeptideResult validation ---------------------------------------
+
+    #[test]
+    fn peptide_validate_passes_for_valid_data() {
+        assert!(sample_peptide_result().validate().is_ok());
+    }
+
+    #[test]
+    fn peptide_validate_rejects_empty_sequence() {
+        let mut p = sample_peptide_result();
+        p.sequence = "".to_string();
+        let err = p.validate().unwrap_err();
+        assert!(err.to_string().contains("sequence"));
+    }
+
+    #[test]
+    fn peptide_validate_rejects_empty_protein_accessions() {
+        let mut p = sample_peptide_result();
+        p.protein_accessions = vec![];
+        let err = p.validate().unwrap_err();
+        assert!(err.to_string().contains("protein_accessions"));
+    }
+
+    #[test]
+    fn peptide_validate_rejects_nan_best_score() {
+        let mut p = sample_peptide_result();
+        p.best_score = f64::INFINITY;
+        let err = p.validate().unwrap_err();
+        assert!(err.to_string().contains("best_score"));
+    }
+
+    #[test]
+    fn peptide_validate_rejects_out_of_range_qvalue() {
+        let mut p = sample_peptide_result();
+        p.q_value = Some(2.0);
+        let err = p.validate().unwrap_err();
+        assert!(err.to_string().contains("q_value"));
+    }
+
+    // -- ProteinResult validation ---------------------------------------
+
+    #[test]
+    fn protein_validate_passes_for_valid_data() {
+        assert!(sample_protein_result().validate().is_ok());
+    }
+
+    #[test]
+    fn protein_validate_rejects_empty_accession() {
+        let mut p = sample_protein_result();
+        p.accession = "".to_string();
+        let err = p.validate().unwrap_err();
+        assert!(err.to_string().contains("accession"));
+    }
+
+    #[test]
+    fn protein_validate_rejects_coverage_above_one() {
+        let mut p = sample_protein_result();
+        p.coverage = 1.5;
+        let err = p.validate().unwrap_err();
+        assert!(err.to_string().contains("coverage"));
+    }
+
+    #[test]
+    fn protein_validate_rejects_negative_coverage() {
+        let mut p = sample_protein_result();
+        p.coverage = -0.1;
+        let err = p.validate().unwrap_err();
+        assert!(err.to_string().contains("coverage"));
+    }
+
+    #[test]
+    fn protein_validate_rejects_unique_exceeds_total() {
+        let mut p = sample_protein_result();
+        p.unique_peptide_count = 20;
+        p.peptide_count = 10;
+        let err = p.validate().unwrap_err();
+        assert!(err.to_string().contains("unique_peptide_count"));
+        assert!(err.to_string().contains("peptide_count"));
+    }
+
+    // -- SearchResultSummary validation ---------------------------------
+
+    #[test]
+    fn summary_validate_passes_for_valid_data() {
+        assert!(sample_summary().validate().is_ok());
+    }
+
+    #[test]
+    fn summary_validate_rejects_nan_median_score() {
+        let mut s = sample_summary();
+        s.median_score = f64::NAN;
+        let err = s.validate().unwrap_err();
+        assert!(err.to_string().contains("median_score"));
+    }
+
+    #[test]
+    fn summary_validate_rejects_identification_rate_above_one() {
+        let mut s = sample_summary();
+        s.identification_rate = 1.5;
+        let err = s.validate().unwrap_err();
+        assert!(err.to_string().contains("identification_rate"));
+    }
+
+    #[test]
+    fn summary_validate_rejects_negative_identification_rate() {
+        let mut s = sample_summary();
+        s.identification_rate = -0.1;
+        let err = s.validate().unwrap_err();
+        assert!(err.to_string().contains("identification_rate"));
+    }
+
+    #[test]
+    fn summary_validate_rejects_negative_duration() {
+        let mut s = sample_summary();
+        s.search_duration_sec = -1.0;
+        let err = s.validate().unwrap_err();
+        assert!(err.to_string().contains("search_duration_sec"));
+    }
+
+    #[test]
+    fn summary_validate_rejects_psms_exceeds_total() {
+        let mut s = sample_summary();
+        s.psms_at_1pct_fdr = 40000;
+        s.total_psms = 35000;
+        let err = s.validate().unwrap_err();
+        assert!(err.to_string().contains("psms_at_1pct_fdr"));
+    }
+
+    #[test]
+    fn summary_validate_rejects_peptides_exceeds_psms() {
+        let mut s = sample_summary();
+        s.unique_peptides_at_1pct_fdr = 30000;
+        s.psms_at_1pct_fdr = 28000;
+        let err = s.validate().unwrap_err();
+        assert!(err.to_string().contains("unique_peptides_at_1pct_fdr"));
+    }
+
+    // -- SearchResult validation ----------------------------------------
+
+    #[test]
+    fn search_result_validate_passes_for_valid_data() {
+        assert!(sample_search_result().validate().is_ok());
+    }
+
+    #[test]
+    fn search_result_validate_rejects_empty_engine_name() {
+        let mut r = sample_search_result();
+        r.engine_name = "".to_string();
+        let err = r.validate().unwrap_err();
+        assert!(err.to_string().contains("engine_name"));
+    }
+
+    #[test]
+    fn search_result_validate_rejects_empty_engine_version() {
+        let mut r = sample_search_result();
+        r.engine_version = "  ".to_string();
+        let err = r.validate().unwrap_err();
+        assert!(err.to_string().contains("engine_version"));
+    }
+
+    #[test]
+    fn search_result_validate_delegates_to_summary() {
+        let mut r = sample_search_result();
+        r.summary.search_duration_sec = -1.0;
+        assert!(r.validate().is_err());
     }
 }
