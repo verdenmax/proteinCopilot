@@ -344,6 +344,7 @@ dependencies = [
  "chrono",
  "protein-copilot-core",
  "protein-copilot-param-recommend",
+ "protein-copilot-report",
  "protein-copilot-spectrum-io",
  "schemars",
  "serde",

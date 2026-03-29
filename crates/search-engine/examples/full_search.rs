@@ -1,16 +1,17 @@
-//! Full pipeline demo: spectrum file → recommend params → search → results
+//! Full pipeline demo: spectrum file → recommend params → search → report
 //!
 //! Usage:
-//!   cargo run -p protein-copilot-search-engine --example full_search -- <spectrum.mgf|mzML> <database.fasta>
+//!   cargo run -p protein-copilot-search-engine --example full_search -- <spectrum.mgf|mzML> <database.fasta> [output_dir]
 //!
 //! Example:
-//!   cargo run -p protein-copilot-search-engine --example full_search -- data/sample.mgf data/human.fasta
+//!   cargo run -p protein-copilot-search-engine --example full_search -- data/sample.mgf data/human.fasta ./output
 
 use std::env;
 use std::path::Path;
 
 use protein_copilot_core::engine::SearchEngineAdapter;
 use protein_copilot_param_recommend::ParamRecommender;
+use protein_copilot_report::ReportGenerator;
 use protein_copilot_search_engine::SimpleSearchEngine;
 use protein_copilot_spectrum_io::{create_reader, detect_format};
 
@@ -202,5 +203,50 @@ async fn main() {
         }
     }
 
-    println!("\n✓ Pipeline complete!");
+    // ──────────────────────────────────────────────────────
+    // Step 5: Generate report & export
+    // ──────────────────────────────────────────────────────
+    let output_dir = if args.len() >= 4 {
+        Path::new(&args[3]).to_path_buf()
+    } else {
+        Path::new("./output").to_path_buf()
+    };
+
+    println!("\n▶ Step 5: Generating report...");
+    println!("  Output dir:  {}", output_dir.display());
+
+    // Re-generate summary with proper FDR filtering
+    let summary = ReportGenerator::generate_summary(&result);
+    println!(
+        "  Summary:     {} PSMs at 1% FDR, {:.1}% identification rate",
+        summary.psms_at_1pct_fdr,
+        summary.identification_rate * 100.0
+    );
+
+    // Export TSV files
+    match ReportGenerator::export_tsv(&result, &output_dir) {
+        Ok(()) => {
+            println!("  ✓ Exported:  psm.tsv, peptide.tsv, protein.tsv");
+        }
+        Err(e) => eprintln!("  ✗ TSV export error: {e}"),
+    }
+
+    // Export JSON
+    let json_path = output_dir.join("result.json");
+    match ReportGenerator::export_json(&result, &json_path) {
+        Ok(()) => println!("  ✓ Exported:  result.json"),
+        Err(e) => eprintln!("  ✗ JSON export error: {e}"),
+    }
+
+    // Export metadata
+    let meta_path = output_dir.join("run_metadata.json");
+    match ReportGenerator::export_metadata(&result.metadata, &meta_path) {
+        Ok(()) => println!("  ✓ Exported:  run_metadata.json"),
+        Err(e) => eprintln!("  ✗ Metadata export error: {e}"),
+    }
+
+    println!(
+        "\n✓ Pipeline complete! Results in: {}",
+        output_dir.display()
+    );
 }
