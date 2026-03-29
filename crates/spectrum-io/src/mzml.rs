@@ -23,7 +23,6 @@
 //! | MS:1000828 | isolation window lower offset |
 //! | MS:1000829 | isolation window upper offset |
 
-use std::collections::HashMap;
 use std::io::BufRead;
 use std::path::Path;
 
@@ -98,19 +97,9 @@ impl SpectrumBuilder {
         }
 
         // Sort m/z + intensity arrays together by m/z ascending.
-        // Some mzML files may have unsorted peaks.
         let mut mz_array = self.mz_array;
         let mut intensity_array = self.intensity_array;
-        if !mz_array.windows(2).all(|w| w[0] <= w[1]) {
-            let mut indices: Vec<usize> = (0..mz_array.len()).collect();
-            indices.sort_by(|&a, &b| {
-                mz_array[a]
-                    .partial_cmp(&mz_array[b])
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            });
-            mz_array = indices.iter().map(|&i| mz_array[i]).collect();
-            intensity_array = indices.iter().map(|&i| intensity_array[i]).collect();
-        }
+        crate::util::sort_peaks_by_mz(&mut mz_array, &mut intensity_array);
 
         Spectrum::new(
             scan,
@@ -171,9 +160,14 @@ fn decode_binary_array(
                 ),
             });
         }
+        // Safety: chunks_exact(8) guarantees exactly 8 bytes per chunk,
+        // so try_into::<[u8; 8]> always succeeds after the length check above.
         Ok(bytes
             .chunks_exact(8)
-            .map(|c| f64::from_le_bytes(c.try_into().unwrap()))
+            .map(|c| {
+                let arr: [u8; 8] = c.try_into().expect("chunks_exact(8) guarantees 8 bytes");
+                f64::from_le_bytes(arr)
+            })
             .collect())
     } else {
         // 32-bit float
@@ -186,9 +180,13 @@ fn decode_binary_array(
                 ),
             });
         }
+        // Safety: chunks_exact(4) guarantees exactly 4 bytes per chunk.
         Ok(bytes
             .chunks_exact(4)
-            .map(|c| f32::from_le_bytes(c.try_into().unwrap()) as f64)
+            .map(|c| {
+                let arr: [u8; 4] = c.try_into().expect("chunks_exact(4) guarantees 4 bytes");
+                f32::from_le_bytes(arr) as f64
+            })
             .collect())
     }
 }
@@ -423,23 +421,19 @@ where
 // SpectrumReader implementation
 // ---------------------------------------------------------------------------
 
+/// Opens a mzML file and creates a configured XML reader.
+fn open_xml_reader(
+    path: &Path,
+) -> Result<Reader<std::io::BufReader<std::fs::File>>, SpectrumIoError> {
+    let buf_reader = crate::util::open_buffered(path)?;
+    let mut xml_reader = Reader::from_reader(buf_reader);
+    xml_reader.config_mut().trim_text(true);
+    Ok(xml_reader)
+}
+
 impl SpectrumReader for MzMLReader {
     fn read_all(&self, path: &Path) -> Result<Vec<Spectrum>, SpectrumIoError> {
-        let file = std::fs::File::open(path).map_err(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                SpectrumIoError::FileNotFound {
-                    path: path.to_path_buf(),
-                }
-            } else {
-                SpectrumIoError::IoError {
-                    path: path.to_path_buf(),
-                    source: e,
-                }
-            }
-        })?;
-        let buf_reader = std::io::BufReader::new(file);
-        let mut xml_reader = Reader::from_reader(buf_reader);
-        xml_reader.config_mut().trim_text(true);
+        let mut xml_reader = open_xml_reader(path)?;
 
         let mut spectra = Vec::new();
         parse_mzml_streaming(&mut xml_reader, path, |s| {
@@ -450,114 +444,18 @@ impl SpectrumReader for MzMLReader {
     }
 
     fn read_summary(&self, path: &Path) -> Result<SpectrumSummary, SpectrumIoError> {
-        let file = std::fs::File::open(path).map_err(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                SpectrumIoError::FileNotFound {
-                    path: path.to_path_buf(),
-                }
-            } else {
-                SpectrumIoError::IoError {
-                    path: path.to_path_buf(),
-                    source: e,
-                }
-            }
-        })?;
-        let buf_reader = std::io::BufReader::new(file);
-        let mut xml_reader = Reader::from_reader(buf_reader);
-        xml_reader.config_mut().trim_text(true);
+        let mut xml_reader = open_xml_reader(path)?;
 
-        let mut total: u64 = 0;
-        let mut ms1_count: u64 = 0;
-        let mut ms2_count: u64 = 0;
-        let mut mz_min = f64::MAX;
-        let mut mz_max = f64::MIN;
-        let mut rt_min = f64::MAX;
-        let mut rt_max = f64::MIN;
-        let mut charge_dist: HashMap<i32, u64> = HashMap::new();
-        let mut peak_counts: Vec<u32> = Vec::new();
-
+        let mut acc = crate::util::SummaryAccumulator::new();
         parse_mzml_streaming(&mut xml_reader, path, |s| {
-            total += 1;
-            match s.ms_level {
-                MsLevel::MS1 => ms1_count += 1,
-                MsLevel::MS2 => ms2_count += 1,
-                MsLevel::Other(_) => {}
-            }
-
-            if let Some(first) = s.mz_array.first() {
-                if *first < mz_min {
-                    mz_min = *first;
-                }
-            }
-            if let Some(last) = s.mz_array.last() {
-                if *last > mz_max {
-                    mz_max = *last;
-                }
-            }
-            if s.retention_time_sec < rt_min {
-                rt_min = s.retention_time_sec;
-            }
-            if s.retention_time_sec > rt_max {
-                rt_max = s.retention_time_sec;
-            }
-            for p in &s.precursors {
-                if let Some(c) = p.charge {
-                    *charge_dist.entry(c).or_insert(0) += 1;
-                }
-            }
-            peak_counts.push(s.num_peaks() as u32);
+            acc.observe(&s);
             Ok(true)
         })?;
-
-        if total == 0 {
-            mz_min = 0.0;
-            mz_max = 0.0;
-            rt_min = 0.0;
-            rt_max = 0.0;
-        }
-
-        peak_counts.sort_unstable();
-        let median_peaks = if peak_counts.is_empty() {
-            0
-        } else {
-            peak_counts[peak_counts.len() / 2]
-        };
-
-        let summary = SpectrumSummary {
-            file_path: path.to_string_lossy().to_string(),
-            format: SpectrumFormat::MzML,
-            total_spectra: total,
-            ms1_count,
-            ms2_count,
-            mz_range: (mz_min, mz_max),
-            rt_range_sec: (rt_min, rt_max),
-            precursor_charge_distribution: charge_dist,
-            median_peaks_per_spectrum: median_peaks,
-        };
-        summary
-            .validate()
-            .map_err(|e| SpectrumIoError::ValidationError {
-                scan: 0,
-                detail: format!("summary: {e}"),
-            })?;
-        Ok(summary)
+        acc.into_summary(path, SpectrumFormat::MzML)
     }
 
     fn read_spectrum(&self, path: &Path, scan: u32) -> Result<Spectrum, SpectrumIoError> {
-        let file = std::fs::File::open(path).map_err(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                SpectrumIoError::FileNotFound {
-                    path: path.to_path_buf(),
-                }
-            } else {
-                SpectrumIoError::IoError {
-                    path: path.to_path_buf(),
-                    source: e,
-                }
-            }
-        })?;
-        let buf_reader = std::io::BufReader::new(file);
-        let mut xml_reader = Reader::from_reader(buf_reader);
+        let mut xml_reader = open_xml_reader(path)?;
         xml_reader.config_mut().trim_text(true);
 
         let mut found: Option<Spectrum> = None;

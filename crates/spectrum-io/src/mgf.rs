@@ -11,9 +11,7 @@
 //! - `SCANS=<scan_number>`
 //! - `TITLE=<text>` (parsed but not stored in Spectrum)
 
-use std::collections::HashMap;
-use std::fs::File;
-use std::io::{BufRead, BufReader};
+use std::io::BufRead;
 use std::path::Path;
 
 use protein_copilot_core::spectrum::{
@@ -61,19 +59,9 @@ impl MgfBlock {
         }];
 
         // Sort m/z + intensity arrays together by m/z ascending.
-        // Real-world MGF files often have unsorted peaks.
         let mut mz_values = self.mz_values;
         let mut intensity_values = self.intensity_values;
-        if !mz_values.windows(2).all(|w| w[0] <= w[1]) {
-            let mut indices: Vec<usize> = (0..mz_values.len()).collect();
-            indices.sort_by(|&a, &b| {
-                mz_values[a]
-                    .partial_cmp(&mz_values[b])
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            });
-            mz_values = indices.iter().map(|&i| mz_values[i]).collect();
-            intensity_values = indices.iter().map(|&i| intensity_values[i]).collect();
-        }
+        crate::util::sort_peaks_by_mz(&mut mz_values, &mut intensity_values);
 
         Spectrum::new(
             scan,
@@ -113,25 +101,6 @@ fn parse_pepmass(s: &str) -> (Option<f64>, Option<f64>) {
     (mz, intensity)
 }
 
-/// Opens a buffered reader for the given path.
-fn open_file(path: &Path) -> Result<BufReader<File>, SpectrumIoError> {
-    let file = File::open(path).map_err(|e| {
-        if e.kind() == std::io::ErrorKind::NotFound {
-            SpectrumIoError::FileNotFound {
-                path: path.to_path_buf(),
-            }
-        } else {
-            SpectrumIoError::IoError {
-                path: path.to_path_buf(),
-                source: e,
-            }
-        }
-    })?;
-    Ok(BufReader::new(file))
-}
-
-/// Streaming parser that calls `handler` for each parsed spectrum.
-/// Returns the total number of spectra processed.
 /// Streaming parser that calls `handler` for each parsed spectrum.
 /// Handler returns `true` to continue parsing or `false` to stop early.
 /// Returns the total number of spectra processed.
@@ -139,7 +108,7 @@ fn parse_mgf_streaming<F>(path: &Path, mut handler: F) -> Result<u32, SpectrumIo
 where
     F: FnMut(Spectrum) -> Result<bool, SpectrumIoError>,
 {
-    let reader = open_file(path)?;
+    let reader = crate::util::open_buffered(path)?;
     let mut block: Option<MgfBlock> = None;
     let mut block_start_line: usize = 0;
     let mut fallback_scan: u32 = 0;
@@ -222,79 +191,12 @@ impl SpectrumReader for MgfReader {
     }
 
     fn read_summary(&self, path: &Path) -> Result<SpectrumSummary, SpectrumIoError> {
-        let mut total: u64 = 0;
-        let mut mz_min = f64::MAX;
-        let mut mz_max = f64::MIN;
-        let mut rt_min = f64::MAX;
-        let mut rt_max = f64::MIN;
-        let mut charge_dist: HashMap<i32, u64> = HashMap::new();
-        let mut peak_counts: Vec<u32> = Vec::new();
-
+        let mut acc = crate::util::SummaryAccumulator::new();
         parse_mgf_streaming(path, |s| {
-            total += 1;
-
-            if let Some(first) = s.mz_array.first() {
-                if *first < mz_min {
-                    mz_min = *first;
-                }
-            }
-            if let Some(last) = s.mz_array.last() {
-                if *last > mz_max {
-                    mz_max = *last;
-                }
-            }
-
-            if s.retention_time_sec < rt_min {
-                rt_min = s.retention_time_sec;
-            }
-            if s.retention_time_sec > rt_max {
-                rt_max = s.retention_time_sec;
-            }
-
-            for p in &s.precursors {
-                if let Some(c) = p.charge {
-                    *charge_dist.entry(c).or_insert(0) += 1;
-                }
-            }
-
-            peak_counts.push(s.num_peaks() as u32);
+            acc.observe(&s);
             Ok(true)
         })?;
-
-        // Handle empty file
-        if total == 0 {
-            mz_min = 0.0;
-            mz_max = 0.0;
-            rt_min = 0.0;
-            rt_max = 0.0;
-        }
-
-        // Compute median peak count
-        peak_counts.sort_unstable();
-        let median_peaks = if peak_counts.is_empty() {
-            0
-        } else {
-            peak_counts[peak_counts.len() / 2]
-        };
-
-        let summary = SpectrumSummary {
-            file_path: path.to_string_lossy().to_string(),
-            format: SpectrumFormat::Mgf,
-            total_spectra: total,
-            ms1_count: 0, // MGF only contains MS2
-            ms2_count: total,
-            mz_range: (mz_min, mz_max),
-            rt_range_sec: (rt_min, rt_max),
-            precursor_charge_distribution: charge_dist,
-            median_peaks_per_spectrum: median_peaks,
-        };
-        summary
-            .validate()
-            .map_err(|e| SpectrumIoError::ValidationError {
-                scan: 0,
-                detail: format!("summary: {e}"),
-            })?;
-        Ok(summary)
+        acc.into_summary(path, SpectrumFormat::Mgf)
     }
 
     fn read_spectrum(&self, path: &Path, scan: u32) -> Result<Spectrum, SpectrumIoError> {
