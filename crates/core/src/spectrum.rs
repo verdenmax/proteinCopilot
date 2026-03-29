@@ -363,6 +363,15 @@ pub struct SpectrumSummary {
 }
 
 impl SpectrumSummary {
+    /// Returns `true` if the summary represents an empty file (no spectra).
+    ///
+    /// When `is_empty()` is true, `mz_range` and `rt_range_sec` are set to
+    /// `(0.0, 0.0)` as sentinel values and should not be interpreted as
+    /// real data ranges.
+    pub fn is_empty(&self) -> bool {
+        self.total_spectra == 0
+    }
+
     /// Validates that all numeric fields are finite and ranges are consistent.
     ///
     /// Checks:
@@ -644,6 +653,15 @@ mod tests {
         s.mz_range = (500.0, 500.0); // min == max is OK (single value)
         s.rt_range_sec = (100.0, 100.0);
         assert!(s.validate().is_ok());
+    }
+
+    #[test]
+    fn spectrum_summary_is_empty() {
+        let mut s = sample_summary();
+        assert!(!s.is_empty());
+
+        s.total_spectra = 0;
+        assert!(s.is_empty());
     }
 
     // -- Validation -----------------------------------------------------

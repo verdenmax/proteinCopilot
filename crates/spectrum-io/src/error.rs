@@ -87,14 +87,8 @@ pub enum SpectrumIoError {
     },
 }
 
-impl From<std::io::Error> for SpectrumIoError {
-    fn from(err: std::io::Error) -> Self {
-        SpectrumIoError::IoError {
-            path: PathBuf::from("<unknown>"),
-            source: err,
-        }
-    }
-}
+// Note: No blanket From<std::io::Error> — all I/O errors are mapped
+// with explicit path context at the callsite via map_err.
 
 impl From<SpectrumIoError> for protein_copilot_core::error::CoreError {
     fn from(err: SpectrumIoError) -> Self {
