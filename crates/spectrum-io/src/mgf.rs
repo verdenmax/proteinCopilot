@@ -60,13 +60,24 @@ impl MgfBlock {
             isolation_window: None, // mgf does not carry isolation window
         }];
 
+        // Sort m/z + intensity arrays together by m/z ascending.
+        // Real-world MGF files often have unsorted peaks.
+        let mut mz_values = self.mz_values;
+        let mut intensity_values = self.intensity_values;
+        if !mz_values.windows(2).all(|w| w[0] <= w[1]) {
+            let mut indices: Vec<usize> = (0..mz_values.len()).collect();
+            indices.sort_by(|&a, &b| mz_values[a].partial_cmp(&mz_values[b]).unwrap());
+            mz_values = indices.iter().map(|&i| mz_values[i]).collect();
+            intensity_values = indices.iter().map(|&i| intensity_values[i]).collect();
+        }
+
         Spectrum::new(
             scan,
             MsLevel::MS2, // MGF spectra are always MS2
             self.rt_sec.unwrap_or(0.0),
             precursors,
-            self.mz_values,
-            self.intensity_values,
+            mz_values,
+            intensity_values,
         )
         .map_err(|e| SpectrumIoError::ValidationError {
             scan,

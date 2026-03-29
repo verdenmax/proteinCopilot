@@ -97,13 +97,24 @@ impl SpectrumBuilder {
             });
         }
 
+        // Sort m/z + intensity arrays together by m/z ascending.
+        // Some mzML files may have unsorted peaks.
+        let mut mz_array = self.mz_array;
+        let mut intensity_array = self.intensity_array;
+        if !mz_array.windows(2).all(|w| w[0] <= w[1]) {
+            let mut indices: Vec<usize> = (0..mz_array.len()).collect();
+            indices.sort_by(|&a, &b| mz_array[a].partial_cmp(&mz_array[b]).unwrap());
+            mz_array = indices.iter().map(|&i| mz_array[i]).collect();
+            intensity_array = indices.iter().map(|&i| intensity_array[i]).collect();
+        }
+
         Spectrum::new(
             scan,
             ms_level,
             self.rt_sec.unwrap_or(0.0),
             precursors,
-            self.mz_array,
-            self.intensity_array,
+            mz_array,
+            intensity_array,
         )
         .map_err(|e| SpectrumIoError::ValidationError {
             scan,
