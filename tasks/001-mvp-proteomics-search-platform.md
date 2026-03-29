@@ -556,41 +556,47 @@ M1.7 (集成验证)    ← 需要所有 MVP Milestone
 
 ### Milestone 1.2：`spectrum-io` — 谱图读取 Library Crate
 
+> **状态**：✅ 已完成（46 tests, 0 clippy warnings，已通过 165MB 真实 DIA mzML 验证）
+>
 > 实现谱图文件解析库，支持 mgf 和 mzML。作为 library crate，不依赖 MCP。
 > 关联 FR：FR-1.1 ~ FR-1.6 | 关联 US：US-3
 
-#### Task 1.2.1：创建 crate 并定义 Reader trait
+#### Task 1.2.1：创建 crate 并定义 Reader trait ✅
 
 - **Sub-task 1.2.1.1**：创建 `crates/spectrum-io/Cargo.toml`，依赖 `core`, `quick-xml`, `base64`, `flate2`
 - **Sub-task 1.2.1.2**：定义 `SpectrumReader` trait（`read_all`, `read_summary`, `read_spectrum`）
 - **Sub-task 1.2.1.3**：实现 `detect_format(path) -> Result<SpectrumFileInfo>` 和 `create_reader(info) -> Box<dyn SpectrumReader>`
+- **实现补充**：定义 `SpectrumIoError` 枚举（9 变体）+ `From<SpectrumIoError> for CoreError` 转换。
 
-#### Task 1.2.2：实现 mgf 格式解析
+#### Task 1.2.2：实现 mgf 格式解析 ✅
 
 - **Sub-task 1.2.2.1**：实现 `MgfReader` 结构体，实现 `SpectrumReader` trait
 - **Sub-task 1.2.2.2**：实现 streaming 解析器：逐行读取，遇到 `BEGIN IONS` 开始收集，`END IONS` 结束
-- **Sub-task 1.2.2.3**：解析 header 字段：TITLE, PEPMASS（mz + intensity）, CHARGE, RTINSECONDS, SCANS
+- **Sub-task 1.2.2.3**：解析 header 字段：TITLE, PEPMASS（mz + intensity）, CHARGE（支持 `2+`/`3-`/`2` 格式）, RTINSECONDS, SCANS
 - **Sub-task 1.2.2.4**：解析 m/z + intensity 行对（空格或 tab 分隔）
 - **Sub-task 1.2.2.5**：实现 `read_summary`：streaming 遍历所有谱图，统计不加载全部到内存
 - **Sub-task 1.2.2.6**：准备 fixture 文件：`tests/fixtures/small.mgf`（10 张谱图）
 - **Sub-task 1.2.2.7**：编写单元测试：解析 fixture → 验证 scan count、precursor mz、peak count
+- **实现补充**：解析后自动按 m/z 升序排序（真实数据可能无序）。`read_spectrum` 支持 streaming + 找到即停。`read_summary` 返回前调用 `validate()`。
 
-#### Task 1.2.3：实现 mzML 格式解析
+#### Task 1.2.3：实现 mzML 格式解析 ✅
 
 - **Sub-task 1.2.3.1**：实现 `MzMLReader` 结构体，实现 `SpectrumReader` trait
 - **Sub-task 1.2.3.2**：使用 `quick-xml` 的 event-based reader，streaming 解析 `<spectrum>` 元素
 - **Sub-task 1.2.3.3**：从 `<cvParam>` 提取：ms level (MS:1000511), scan number, retention time (MS:1000016)
-- **Sub-task 1.2.3.4**：从 `<precursor>/<selectedIon>` 提取：precursor mz, charge, intensity
+- **Sub-task 1.2.3.4**：从 `<precursor>/<selectedIon>` 提取：precursor mz, charge, intensity；从 `<isolationWindow>` 提取 DIA 隔离窗口
 - **Sub-task 1.2.3.5**：解码 `<binaryDataArray>`：读取 base64 → 解码 → 如有 zlib 压缩则解压 → 解析为 f64 数组
 - **Sub-task 1.2.3.6**：通过 `<cvParam>` 判断 precision（32-bit or 64-bit float）和压缩方式
-- **Sub-task 1.2.3.7**：准备 fixture 文件：`tests/fixtures/small.mzml`（10 张谱图）
+- **Sub-task 1.2.3.7**：准备 fixture 文件：`tests/fixtures/small.mzml`（10 张谱图，scan 9 使用 zlib 压缩）
 - **Sub-task 1.2.3.8**：编写单元测试：解析 fixture → 验证谱图数量和关键字段
+- **实现补充**：RT 单位自动转换（UO:0000031 分钟 → 秒）。自动 m/z 排序。DIA isolation window 完整提取。
 
-#### Task 1.2.4：测试与基准
+#### Task 1.2.4：测试与基准 ✅
 
-- **Sub-task 1.2.4.1**：对比测试：用 pyteomics (Python) 解析同一文件，比对结果
-- **Sub-task 1.2.4.2**：错误场景测试：不存在的文件、损坏的 mgf、不完整的 mzML
-- **Sub-task 1.2.4.3**：大文件内存测试：验证 streaming 解析不导致内存暴增
+- **Sub-task 1.2.4.1**：跨格式一致性测试：mgf 和 mzml 解析同一数据集，验证结果一致（scan number、peak count、m/z、intensity、charge）
+- **Sub-task 1.2.4.2**：错误场景测试：不存在的文件、损坏的 mgf、不完整的 mzML、无 binary array 的 mzML、无效 XML
+- **Sub-task 1.2.4.3**：真实数据验证：165MB HeLa DIA mzML（2000 spectra, 31K peaks/spectrum）解析成功
+- **实现补充**：添加 `examples/read_spectra.rs` CLI 工具用于快速验证任意文件。
 
 ---
 

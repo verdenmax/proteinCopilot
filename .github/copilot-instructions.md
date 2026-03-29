@@ -13,15 +13,13 @@
               ├── .github/agents/*.agent.md    ← 领域 Agent 定义（LLM 读取）
               ├── .github/prompts/*.prompt.md  ← 可复用 Skill / Prompt
               │
-              └── MCP Servers (Rust crates)    ← 确定性计算能力
-                    ├── mcp-spectrum-io         ← 谱图读取与解析
-                    ├── mcp-qc                  ← 质控与数据诊断
-                    ├── mcp-param-recommend     ← 搜索参数推荐
-                    ├── mcp-search-engine       ← 搜索引擎调度（adapter 层）
-                    ├── mcp-fdr                 ← FDR 控制与重评分
-                    ├── mcp-protein-inference   ← 蛋白推断
-                    ├── mcp-report              ← 报告生成
-                    └── core                    ← 共享数据结构与领域模型
+              └── MCP Server + Library Crates (Rust)  ← 确定性计算能力
+                    ├── spectrum-io             ← 谱图读取与解析（lib crate）
+                    ├── param-recommend         ← 搜索参数推荐（lib crate）
+                    ├── search-engine           ← 搜索引擎调度（lib crate）
+                    ├── report                  ← 报告生成（lib crate）
+                    ├── core                    ← 共享数据结构与领域模型
+                    └── mcp-server              ← MCP Server 组装（bin crate）
 ```
 
 ### 职责分层
@@ -90,11 +88,12 @@
 /// 所有搜索引擎必须实现此 trait
 pub trait SearchEngineAdapter: Send + Sync {
     /// 执行搜索，返回标准化结果
-    async fn search(&self, params: SearchParams) -> Result<SearchResult>;
+    async fn search(&self, params: &SearchParams, input_files: &[PathBuf])
+        -> Result<SearchResult, CoreError>;
     /// 返回引擎名称和版本
     fn engine_info(&self) -> EngineInfo;
     /// 检查引擎是否可用
-    async fn health_check(&self) -> Result<HealthStatus>;
+    async fn health_check(&self) -> Result<HealthStatus, CoreError>;
 }
 ```
 
@@ -122,8 +121,12 @@ pub trait SearchEngineAdapter: Send + Sync {
 ### 3.1 数据格式
 
 - MVP 优先支持 **mzML** 和 **mgf** 格式。
+- 同时支持 **DDA** 和 **DIA** 数据采集模式。
+- DIA 谱图通过 `IsolationWindow`（target_mz + lower/upper offset）表示宽隔离窗口。
 - 谱图数据结构必须在 `crates/core` 中统一定义。
 - 所有质量值使用 `f64` 类型，单位为 Da（道尔顿）。
+- 保留时间统一使用秒（`retention_time_sec`），mzML 中分钟单位（UO:0000031）自动转换。
+- 强度值单位为 detector counts。
 - 谱图索引从 1 开始（与质谱学惯例一致）。
 
 ### 3.2 搜索参数
@@ -211,20 +214,27 @@ proteinCopilot/
 │   │   │   ├── search_params.rs      ← 搜索参数
 │   │   │   ├── search_result.rs      ← 标准化搜索结果
 │   │   │   ├── ai_decision.rs        ← AI 决策输出结构
-│   │   │   └── error.rs              ← 领域错误类型
+│   │   │   ├── error.rs              ← 领域错误类型
+│   │   │   ├── engine.rs             ← 搜索引擎 Adapter trait
+│   │   │   └── run_metadata.rs       ← 运行元数据
 │   │   └── Cargo.toml
-│   ├── mcp-spectrum-io/              ← 谱图读取 MCP Server
-│   ├── mcp-qc/                       ← 质控 MCP Server
-│   ├── mcp-param-recommend/          ← 参数推荐 MCP Server
-│   ├── mcp-search-engine/            ← 搜索引擎调度 MCP Server
+│   ├── spectrum-io/                  ← 谱图读取（lib crate，非 MCP）
+│   │   ├── src/
+│   │   │   ├── lib.rs                ← detect_format + create_reader
+│   │   │   ├── reader.rs             ← SpectrumReader trait
+│   │   │   ├── mgf.rs               ← MGF 解析器
+│   │   │   ├── mzml.rs              ← mzML 解析器
+│   │   │   └── error.rs             ← SpectrumIoError
+│   │   └── Cargo.toml
+│   ├── param-recommend/              ← 参数推荐（lib crate）
+│   ├── search-engine/                ← 搜索引擎调度（lib crate）
 │   │   └── src/adapters/
 │   │       ├── mod.rs
 │   │       ├── pfind.rs              ← pFind adapter
 │   │       ├── msfragger.rs          ← MSFragger adapter（预留）
 │   │       └── comet.rs              ← Comet adapter（预留）
-│   ├── mcp-fdr/                      ← FDR 控制 MCP Server
-│   ├── mcp-protein-inference/        ← 蛋白推断 MCP Server
-│   └── mcp-report/                   ← 报告生成 MCP Server
+│   ├── report/                       ← 报告生成（lib crate）
+│   └── mcp-server/                   ← MCP Server 组装（bin crate）
 ├── .github/
 │   ├── agents/                       ← 领域 Agent 定义
 │   ├── prompts/                      ← Skill / Prompt 模板
@@ -237,8 +247,8 @@ proteinCopilot/
 
 ### 5.4 命名规范
 
-- Crate 名称：`mcp-` 前缀 + 功能名（如 `mcp-spectrum-io`）。
-- Struct 名称：使用蛋白质组学领域术语（`Spectrum`、`PSM`、`Peptide`、`Protein`）。
+- Crate 名称：功能名（如 `spectrum-io`、`param-recommend`、`search-engine`）。Library crate 无 `mcp-` 前缀；MCP Server 组装 crate 为 `mcp-server`。
+- Struct 名称：使用蛋白质组学领域术语（`Spectrum`、`Psm`、`Peptide`、`Protein`）。
 - MCP Tool 名称：`动词_名词` 格式（如 `read_spectra`、`run_search`、`calculate_fdr`）。
 - 错误变体名称：`XxxError` 格式，包含上下文（如 `SpectrumParseError`、`SearchEngineNotFound`）。
 
@@ -261,11 +271,11 @@ proteinCopilot/
 
 ### 7.1 必须实现
 
-1. **`core` crate**：谱图、搜索参数、搜索结果、AI 决策等共享数据结构。
-2. **`mcp-spectrum-io`**：读取 mzML / mgf 文件，返回谱图摘要。
-3. **`mcp-param-recommend`**：基于谱图特征生成默认参数建议（确定性规则）。
-4. **`mcp-search-engine`**：通过 pFind adapter 执行搜索。
-5. **`mcp-report`**：生成结构化搜索结果摘要（供 LLM 解释）。
+1. **`core` crate**：谱图、搜索参数、搜索结果、AI 决策等共享数据结构。✅
+2. **`spectrum-io`**：读取 mzML / mgf 文件，返回谱图摘要。支持 DDA/DIA。✅
+3. **`param-recommend`**：基于谱图特征生成默认参数建议（确定性规则）。
+4. **`search-engine`**：通过 pFind adapter 执行搜索。
+5. **`report`**：生成结构化搜索结果摘要（供 LLM 解释）。
 6. **Agent 定义**：蛋白质搜索助手 Agent（`.github/agents/`）。
 7. **Skill 定义**：基础搜索流程 Prompt（`.github/prompts/`）。
 

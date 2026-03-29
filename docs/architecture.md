@@ -153,7 +153,6 @@ core::
 **设计原则**：
 - 所有 struct derive `Serialize`, `Deserialize`, `Debug`, `Clone`, `JsonSchema`
 - `JsonSchema`（schemars）使得 MCP Tool 的 inputSchema 可从 Rust 类型自动生成
-- 值对象优先使用 newtype pattern（如 `ScanNumber(u32)`）
 
 ---
 
@@ -164,15 +163,15 @@ core::
 **对外暴露**：
 ```rust
 pub trait SpectrumReader: Send + Sync {
-    fn read_all(&self, path: &Path) -> Result<Vec<Spectrum>>;
-    fn read_summary(&self, path: &Path) -> Result<SpectrumSummary>;
-    fn read_spectrum(&self, path: &Path, scan: ScanNumber) -> Result<Spectrum>;
+    fn read_all(&self, path: &Path) -> Result<Vec<Spectrum>, SpectrumIoError>;
+    fn read_summary(&self, path: &Path) -> Result<SpectrumSummary, SpectrumIoError>;
+    fn read_spectrum(&self, path: &Path, scan: u32) -> Result<Spectrum, SpectrumIoError>;
 }
 
 pub struct MgfReader;   // impl SpectrumReader
 pub struct MzMLReader;  // impl SpectrumReader
 
-pub fn detect_format(path: &Path) -> Result<SpectrumFileInfo>;
+pub fn detect_format(path: &Path) -> Result<SpectrumFileInfo, SpectrumIoError>;
 pub fn create_reader(info: &SpectrumFileInfo) -> Box<dyn SpectrumReader>;
 ```
 
@@ -181,7 +180,10 @@ pub fn create_reader(info: &SpectrumFileInfo) -> Box<dyn SpectrumReader>;
 **设计原则**：
 - Reader trait 使得未来增加新格式（mzXML, .raw）只需新增实现
 - 大文件使用 streaming 解析（逐条读取，不一次性加载全部谱图到内存）
-- 格式检测通过扩展名 + magic bytes 双重验证
+- 格式检测通过文件扩展名（大小写不敏感）
+- 解析后自动按 m/z 升序排序（真实数据可能无序）
+- mzML 保留时间自动单位转换（分钟→秒）
+- 支持 DIA 隔离窗口（从 mzML `<isolationWindow>` 提取）
 
 ---
 
