@@ -117,9 +117,12 @@ fn open_file(path: &Path) -> Result<BufReader<File>, SpectrumIoError> {
 
 /// Streaming parser that calls `handler` for each parsed spectrum.
 /// Returns the total number of spectra processed.
+/// Streaming parser that calls `handler` for each parsed spectrum.
+/// Handler returns `true` to continue parsing or `false` to stop early.
+/// Returns the total number of spectra processed.
 fn parse_mgf_streaming<F>(path: &Path, mut handler: F) -> Result<u32, SpectrumIoError>
 where
-    F: FnMut(Spectrum) -> Result<(), SpectrumIoError>,
+    F: FnMut(Spectrum) -> Result<bool, SpectrumIoError>,
 {
     let reader = open_file(path)?;
     let mut block: Option<MgfBlock> = None;
@@ -148,8 +151,11 @@ where
         if trimmed == "END IONS" {
             if let Some(b) = block.take() {
                 let spectrum = b.into_spectrum(fallback_scan, path, block_start_line)?;
-                handler(spectrum)?;
+                let keep_going = handler(spectrum)?;
                 count += 1;
+                if !keep_going {
+                    return Ok(count);
+                }
             }
             continue;
         }
@@ -195,7 +201,7 @@ impl SpectrumReader for MgfReader {
         let mut spectra = Vec::new();
         parse_mgf_streaming(path, |s| {
             spectra.push(s);
-            Ok(())
+            Ok(true)
         })?;
         Ok(spectra)
     }
@@ -237,7 +243,7 @@ impl SpectrumReader for MgfReader {
             }
 
             peak_counts.push(s.num_peaks() as u32);
-            Ok(())
+            Ok(true)
         })?;
 
         // Handle empty file
@@ -274,8 +280,10 @@ impl SpectrumReader for MgfReader {
         parse_mgf_streaming(path, |s| {
             if s.scan_number == scan {
                 found = Some(s);
+                Ok(false) // stop early
+            } else {
+                Ok(true)
             }
-            Ok(())
         })?;
         found.ok_or_else(|| SpectrumIoError::ScanNotFound {
             path: path.to_path_buf(),

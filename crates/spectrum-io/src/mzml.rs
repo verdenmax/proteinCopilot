@@ -201,13 +201,14 @@ fn parse_scan_from_id(id: &str) -> Option<u32> {
 // Core streaming parser
 // ---------------------------------------------------------------------------
 
+/// Streaming mzML parser. Handler returns `true` to continue, `false` to stop.
 fn parse_mzml_streaming<R: BufRead, F>(
     xml_reader: &mut Reader<R>,
     path: &Path,
     mut handler: F,
 ) -> Result<u32, SpectrumIoError>
 where
-    F: FnMut(Spectrum) -> Result<(), SpectrumIoError>,
+    F: FnMut(Spectrum) -> Result<bool, SpectrumIoError>,
 {
     let mut buf = Vec::new();
     let mut count: u32 = 0;
@@ -332,8 +333,11 @@ where
                     b"spectrum" => {
                         in_spectrum = false;
                         let spectrum = builder.build(path)?;
-                        handler(spectrum)?;
+                        let keep_going = handler(spectrum)?;
                         count += 1;
+                        if !keep_going {
+                            return Ok(count);
+                        }
                         builder = SpectrumBuilder::default();
                     }
                     b"scan" => {
@@ -416,7 +420,7 @@ impl SpectrumReader for MzMLReader {
         let mut spectra = Vec::new();
         parse_mzml_streaming(&mut xml_reader, path, |s| {
             spectra.push(s);
-            Ok(())
+            Ok(true)
         })?;
         Ok(spectra)
     }
@@ -478,7 +482,7 @@ impl SpectrumReader for MzMLReader {
                 }
             }
             peak_counts.push(s.num_peaks() as u32);
-            Ok(())
+            Ok(true)
         })?;
 
         if total == 0 {
@@ -509,14 +513,35 @@ impl SpectrumReader for MzMLReader {
     }
 
     fn read_spectrum(&self, path: &Path, scan: u32) -> Result<Spectrum, SpectrumIoError> {
-        let spectra = self.read_all(path)?;
-        spectra
-            .into_iter()
-            .find(|s| s.scan_number == scan)
-            .ok_or_else(|| SpectrumIoError::ScanNotFound {
-                path: path.to_path_buf(),
-                scan,
-            })
+        let file = std::fs::File::open(path).map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                SpectrumIoError::FileNotFound {
+                    path: path.to_path_buf(),
+                }
+            } else {
+                SpectrumIoError::IoError {
+                    path: path.to_path_buf(),
+                    source: e,
+                }
+            }
+        })?;
+        let buf_reader = std::io::BufReader::new(file);
+        let mut xml_reader = Reader::from_reader(buf_reader);
+        xml_reader.config_mut().trim_text(true);
+
+        let mut found: Option<Spectrum> = None;
+        parse_mzml_streaming(&mut xml_reader, path, |s| {
+            if s.scan_number == scan {
+                found = Some(s);
+                Ok(false) // stop early
+            } else {
+                Ok(true)
+            }
+        })?;
+        found.ok_or_else(|| SpectrumIoError::ScanNotFound {
+            path: path.to_path_buf(),
+            scan,
+        })
     }
 }
 
