@@ -38,3 +38,5 @@ flate2 = "1"
 # Internal crates
 protein-copilot-core = { path = "crates/core" }
 protein-copilot-spectrum-io = { path = "crates/spectrum-io" }
+protein-copilot-param-recommend = { path = "crates/param-recommend" }
+protein-copilot-search-engine = { path = "crates/search-engine" }

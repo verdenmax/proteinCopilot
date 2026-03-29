@@ -70,6 +70,16 @@ impl SimpleSearchEngine {
             all_peptides.extend(peptides);
         }
 
+        if all_peptides.is_empty() {
+            return Err(SearchEngineError::ExecutionError {
+                detail: format!(
+                    "no candidate peptides generated from {} proteins \
+                     (all peptides may be shorter than 6 or longer than 50 residues)",
+                    proteins.len()
+                ),
+            });
+        }
+
         // Step 3: Read all spectra from input files
         let mut all_spectra: Vec<Spectrum> = Vec::new();
         for file_path in input_files {
@@ -495,5 +505,29 @@ mod tests {
         assert_eq!(registry.len(), 1);
         assert!(registry.get("SimpleSearch").is_some());
         assert_eq!(registry.list_available()[0].name, "SimpleSearch");
+    }
+
+    #[test]
+    fn search_with_short_proteins_errors() {
+        // All proteins too short to produce peptides (< 6 aa after digestion)
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        write!(f, ">tiny\nACK\n>tiny2\nGR\n").unwrap();
+
+        let params = test_params(&f.path().to_string_lossy());
+        let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .join("spectrum-io")
+            .join("tests")
+            .join("fixtures")
+            .join("small.mgf");
+
+        let engine = SimpleSearchEngine::new();
+        let result = engine.run_search(&params, &[fixture]);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("no candidate peptides"));
     }
 }
