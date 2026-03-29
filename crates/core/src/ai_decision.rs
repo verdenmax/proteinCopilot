@@ -157,7 +157,7 @@ mod tests {
             },
             confidence: 0.85,
             explanation: "Based on HeLa cell line data characteristics".to_string(),
-            input_summary: "12,345 MS2 spectra, median precursor m/z 650 Da".to_string(),
+            input_summary: "12,345 MS2 spectra, median precursor m/z 650".to_string(),
             alternatives: vec!["Open search with wider tolerance".to_string()],
             evidence: vec![
                 "Precursor mass distribution analysis".to_string(),

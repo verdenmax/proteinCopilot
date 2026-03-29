@@ -107,11 +107,11 @@ impl std::fmt::Display for MsLevel {
 /// Aligns with the mzML `<isolationWindow>` element.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct IsolationWindow {
-    /// Center m/z of the isolation window (Da).
+    /// Center m/z of the isolation window.
     pub target_mz: f64,
-    /// Offset below `target_mz` (Da, ≥ 0).
+    /// Offset below `target_mz` (m/z units, ≥ 0).
     pub lower_offset: f64,
-    /// Offset above `target_mz` (Da, ≥ 0).
+    /// Offset above `target_mz` (m/z units, ≥ 0).
     pub upper_offset: f64,
 }
 
@@ -126,7 +126,7 @@ pub struct IsolationWindow {
 /// center and charge may be unknown.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct PrecursorInfo {
-    /// Precursor m/z value (Da).
+    /// Precursor m/z value (mass-to-charge ratio).
     pub mz: f64,
     /// Charge state (`None` if undetermined, common in DIA).
     pub charge: Option<i32>,
@@ -158,7 +158,7 @@ pub struct Spectrum {
     /// Precursor information. DDA: typically 1 entry. DIA: 0 or 1 with wide
     /// isolation window. MS1: empty.
     pub precursors: Vec<PrecursorInfo>,
-    /// Array of m/z values (Da), sorted ascending.
+    /// Array of m/z values (mass-to-charge ratio), sorted ascending.
     pub mz_array: Vec<f64>,
     /// Array of intensity values (detector counts), same length as `mz_array`.
     pub intensity_array: Vec<f64>,
@@ -352,7 +352,7 @@ pub struct SpectrumSummary {
     pub ms1_count: u64,
     /// Number of MS2 spectra.
     pub ms2_count: u64,
-    /// m/z range as (min, max) in Da.
+    /// m/z range as (min, max).
     pub mz_range: (f64, f64),
     /// Retention time range as (min, max) in seconds.
     pub rt_range_sec: (f64, f64),

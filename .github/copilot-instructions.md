@@ -124,7 +124,7 @@ pub trait SearchEngineAdapter: Send + Sync {
 - 同时支持 **DDA** 和 **DIA** 数据采集模式。
 - DIA 谱图通过 `IsolationWindow`（target_mz + lower/upper offset）表示宽隔离窗口。
 - 谱图数据结构必须在 `crates/core` 中统一定义。
-- 所有质量值使用 `f64` 类型，单位为 Da（道尔顿）。
+- 质量值（mass_delta、tolerance）使用 `f64` 类型，单位为 Da（道尔顿）。m/z 值为质荷比，无量纲。
 - 保留时间统一使用秒（`retention_time_sec`），mzML 中分钟单位（UO:0000031）自动转换。
 - 强度值单位为 detector counts。
 - 谱图索引从 1 开始（与质谱学惯例一致）。

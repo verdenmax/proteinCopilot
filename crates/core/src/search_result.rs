@@ -128,9 +128,9 @@ pub struct Psm {
     pub modifications: Vec<Modification>,
     /// Precursor charge state.
     pub charge: i32,
-    /// Observed precursor m/z (Da).
+    /// Observed precursor m/z (mass-to-charge ratio).
     pub precursor_mz: f64,
-    /// Theoretical precursor m/z calculated from the peptide (Da).
+    /// Theoretical precursor m/z calculated from the peptide.
     pub calculated_mz: f64,
     /// Mass deviation between observed and calculated (ppm).
     /// Formula: `(precursor_mz - calculated_mz) / calculated_mz × 1e6`

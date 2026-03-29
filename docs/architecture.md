@@ -222,7 +222,7 @@ pub struct SearchPreset {
 **设计原则**：
 - 推荐逻辑是纯函数：相同输入 → 相同输出
 - `AiDecision<SearchParams>` 的 `explanation` 字段由规则引擎生成模板化文字
-  （如「根据质量范围 [400-2000 Da]，推荐 precursor tolerance 10 ppm」）
+  （如「根据 m/z 范围 [400-2000]，推荐 precursor tolerance 10 ppm」）
 - LLM 可以对这些模板化解释做进一步润色和扩展
 - `UserHints` 是 LLM 将用户自然语言意图转译后传入的结构化提示
 
@@ -369,8 +369,8 @@ pub enum MsLevel { MS1, MS2, Other(u8) }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct IsolationWindow {
     pub target_mz: f64,
-    pub lower_offset: f64,  // Da
-    pub upper_offset: f64,  // Da
+    pub lower_offset: f64,  // m/z units
+    pub upper_offset: f64,  // m/z units
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]

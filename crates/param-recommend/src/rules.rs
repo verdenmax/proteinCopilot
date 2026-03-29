@@ -61,7 +61,7 @@ pub(crate) fn recommend(
 
     // Step 6: Build input_summary
     let input_summary = format!(
-        "{} spectra, m/z range [{:.0}-{:.0}] Da, median {} peaks/spectrum, RT [{:.0}-{:.0}] sec",
+        "{} spectra, m/z range [{:.0}-{:.0}], median {} peaks/spectrum, RT [{:.0}-{:.0}] sec",
         summary.total_spectra,
         summary.mz_range.0,
         summary.mz_range.1,
@@ -217,7 +217,7 @@ fn build_explanation(
     };
 
     format!(
-        "Based on m/z range [{:.0}-{:.0} Da] and median {:.0} peaks/spectrum, \
+        "Based on m/z range [{:.0}-{:.0}] and median {:.0} peaks/spectrum, \
          inferred {instrument_desc}. Recommending {tolerance_desc}. \
          Experiment type: \"{experiment_type}\", using Trypsin digestion with \
          appropriate modification set.",
@@ -228,7 +228,7 @@ fn build_explanation(
 fn build_evidence(summary: &SpectrumSummary, instrument: &InstrumentClass) -> Vec<String> {
     let mut evidence = vec![
         format!(
-            "m/z range: {:.0}-{:.0} Da",
+            "m/z range: {:.0}-{:.0}",
             summary.mz_range.0, summary.mz_range.1
         ),
         format!(
