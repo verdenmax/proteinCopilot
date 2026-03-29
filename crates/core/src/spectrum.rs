@@ -130,7 +130,7 @@ pub struct PrecursorInfo {
     pub mz: f64,
     /// Charge state (`None` if undetermined, common in DIA).
     pub charge: Option<i32>,
-    /// Intensity (`None` if not available).
+    /// Intensity in detector counts (`None` if not available).
     pub intensity: Option<f64>,
     /// Isolation window (`None` if not recorded).
     pub isolation_window: Option<IsolationWindow>,
@@ -160,7 +160,7 @@ pub struct Spectrum {
     pub precursors: Vec<PrecursorInfo>,
     /// Array of m/z values (Da), sorted ascending.
     pub mz_array: Vec<f64>,
-    /// Array of intensity values, same length as `mz_array`.
+    /// Array of intensity values (detector counts), same length as `mz_array`.
     pub intensity_array: Vec<f64>,
 }
 

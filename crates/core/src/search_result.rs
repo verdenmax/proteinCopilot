@@ -133,6 +133,8 @@ pub struct Psm {
     /// Theoretical precursor m/z calculated from the peptide (Da).
     pub calculated_mz: f64,
     /// Mass deviation between observed and calculated (ppm).
+    /// Formula: `(precursor_mz - calculated_mz) / calculated_mz × 1e6`
+    /// Provided by the search engine adapter.
     pub delta_mass_ppm: f64,
     /// Search engine score (higher = better match, engine-dependent).
     pub score: f64,
