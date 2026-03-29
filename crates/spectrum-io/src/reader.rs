@@ -14,7 +14,7 @@ use crate::error::SpectrumIoError;
 pub trait SpectrumReader: Send + Sync {
     /// Reads all spectra from the file.
     ///
-    /// For large files, consider using [`read_summary`] first to check
+    /// For large files, consider using [`Self::read_summary`] first to check
     /// data characteristics without loading all peak data into memory.
     fn read_all(&self, path: &Path) -> Result<Vec<Spectrum>, SpectrumIoError>;
 
