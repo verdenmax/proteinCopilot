@@ -326,7 +326,7 @@ mod tests {
         let b = generate_b_ions("PEPTIDER");
         let y = generate_y_ions("PEPTIDER");
         let mut peaks: Vec<f64> = b.iter().chain(y.iter()).copied().collect();
-        peaks.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        peaks.sort_by(|a, b| a.total_cmp(b));
 
         let spectrum = make_spectrum(mz_z2, Some(2), peaks);
         let result = match_spectrum(
@@ -381,7 +381,7 @@ mod tests {
 
         let b = generate_b_ions("PEPTIDER");
         let mut peaks: Vec<f64> = b;
-        peaks.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        peaks.sort_by(|a, b| a.total_cmp(b));
 
         // No charge specified — should try 2, 3, 1, 4
         let spectrum = make_spectrum(mz_z3, None, peaks);
@@ -407,7 +407,7 @@ mod tests {
         let b = generate_b_ions("PEPTIDER");
         let y = generate_y_ions("PEPTIDER");
         let mut peaks: Vec<f64> = b.iter().chain(y.iter()).copied().collect();
-        peaks.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        peaks.sort_by(|a, b| a.total_cmp(b));
 
         let spectrum = make_spectrum(mz_z2, Some(2), peaks);
         let result = match_spectrum(
