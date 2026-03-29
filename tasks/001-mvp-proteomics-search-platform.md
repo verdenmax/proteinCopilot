@@ -623,6 +623,7 @@ M1.7 (集成验证)    ← 需要所有 MVP Milestone
 #### Task 1.3.3：实现推荐规则引擎
 
 - **Sub-task 1.3.3.1**：实现 `ParamRecommender::recommend(summary, hints) -> AiDecision<SearchParams>`
+  - 输入 `SpectrumSummary` 为空时（`is_empty()` 返回 true），返回明确错误或默认参数 + 低 confidence 说明
 - **Sub-task 1.3.3.2**：仪器类型推断规则：
   - mz_range 上限 > 1500 + median_peaks > 200 → Orbitrap/高分辨 → 10ppm / 0.02Da
   - mz_range 上限 < 1500 + median_peaks < 100 → TOF/低分辨 → 20ppm / 0.1Da
@@ -632,6 +633,7 @@ M1.7 (集成验证)    ← 需要所有 MVP Milestone
 - **Sub-task 1.3.3.5**：生成 explanation 模板文字，例如：「根据质量范围 [350-2000 Da] 和中位峰数 [256 peaks/spectrum]，推断为高分辨 Orbitrap 仪器，推荐 precursor tolerance 10 ppm」
 - **Sub-task 1.3.3.6**：生成 alternatives 列表和 evidence 列表
 - **Sub-task 1.3.3.7**：confidence 计算：有 user_hints 命中 → 0.90+，纯自动推断 → 0.70-0.85
+- **Sub-task 1.3.3.8**：SearchParams 语义冲突校验：检测参数组合矛盾（如 NonSpecific 酶 + missed_cleavages > 0、开放搜索 + 窄 fragment tolerance 等），在 explanation 中给出警告
 
 #### Task 1.3.4：实现 list_presets
 
