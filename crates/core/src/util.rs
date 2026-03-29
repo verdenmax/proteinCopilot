@@ -21,11 +21,14 @@ pub fn compute_median(sorted: &[f64]) -> f64 {
 /// Computes the median of a sorted u32 slice.
 ///
 /// Same semantics as [`compute_median`] but for integer arrays.
-/// Returns the lower-middle value for even-length slices (integer division).
+/// For even-length slices, returns the lower-middle value (integer
+/// averaging would lose precision).
 pub fn compute_median_u32(sorted: &[u32]) -> u32 {
     let len = sorted.len();
     if len == 0 {
         0
+    } else if len % 2 == 0 {
+        sorted[len / 2 - 1]
     } else {
         sorted[len / 2]
     }
@@ -64,5 +67,11 @@ mod tests {
     #[test]
     fn median_u32_odd() {
         assert_eq!(compute_median_u32(&[1, 3, 5]), 3);
+    }
+
+    #[test]
+    fn median_u32_even() {
+        assert_eq!(compute_median_u32(&[1, 3]), 1);
+        assert_eq!(compute_median_u32(&[1, 3, 5, 7]), 3);
     }
 }
