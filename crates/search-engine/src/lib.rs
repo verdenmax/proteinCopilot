@@ -24,6 +24,7 @@
 pub mod digest;
 pub mod error;
 pub mod fasta;
+pub mod matching;
 pub mod progress;
 pub mod registry;
 
