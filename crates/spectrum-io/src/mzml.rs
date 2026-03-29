@@ -294,7 +294,16 @@ where
                             builder.ms_level = value.parse().ok();
                         }
                         "MS:1000016" if in_scan => {
-                            builder.rt_sec = value.parse().ok();
+                            // Scan start time — check unit
+                            // UO:0000010 = second, UO:0000031 = minute
+                            if let Ok(rt_val) = value.parse::<f64>() {
+                                let unit_acc = get_attr(e, b"unitAccession").unwrap_or_default();
+                                builder.rt_sec = Some(if unit_acc == "UO:0000031" {
+                                    rt_val * 60.0 // minutes → seconds
+                                } else {
+                                    rt_val // assume seconds
+                                });
+                            }
                         }
                         "MS:1000827" if in_isolation_window => {
                             builder.isolation_target_mz = value.parse().ok();

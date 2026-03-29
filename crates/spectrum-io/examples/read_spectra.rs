@@ -81,6 +81,13 @@ fn main() {
                 );
                 if let Some(p) = sp.precursors.first() {
                     print!(", precursor m/z={:.4}, charge={:?}", p.mz, p.charge);
+                    if let Some(ref iw) = p.isolation_window {
+                        print!(
+                            ", window=[{:.1}-{:.1}]",
+                            iw.target_mz - iw.lower_offset,
+                            iw.target_mz + iw.upper_offset
+                        );
+                    }
                 }
                 println!();
             }
