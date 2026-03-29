@@ -19,6 +19,18 @@ pub struct SearchPreset {
     pub applicable_scenarios: Vec<String>,
 }
 
+impl SearchPreset {
+    /// Returns a copy of this preset with the database path set.
+    ///
+    /// Presets use a placeholder `"<database_path>"` by default.
+    /// Call this method to produce a usable `SearchParams`.
+    pub fn with_database(&self, database_path: &str) -> SearchParams {
+        let mut params = self.params.clone();
+        params.database_path = database_path.to_string();
+        params
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Common modifications (reused across presets)
 // ---------------------------------------------------------------------------

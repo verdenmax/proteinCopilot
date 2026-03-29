@@ -18,3 +18,13 @@ pub enum ParamRecommendError {
         detail: String,
     },
 }
+
+impl From<ParamRecommendError> for protein_copilot_core::error::CoreError {
+    fn from(err: ParamRecommendError) -> Self {
+        protein_copilot_core::error::CoreError::ValidationError {
+            context: "param_recommend".to_string(),
+            detail: err.to_string(),
+            suggestion: "Check spectrum summary or user hints".to_string(),
+        }
+    }
+}

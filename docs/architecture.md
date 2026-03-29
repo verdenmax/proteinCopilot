@@ -197,13 +197,14 @@ pub struct ParamRecommender;
 
 impl ParamRecommender {
     pub fn recommend(&self, summary: &SpectrumSummary, hints: Option<&UserHints>)
-        -> AiDecision<SearchParams>;
+        -> Result<AiDecision<SearchParams>, ParamRecommendError>;
     pub fn list_presets() -> Vec<SearchPreset>;
 }
 
 pub struct UserHints {
     pub experiment_type: Option<String>,   // "phosphorylation", "TMT"
     pub instrument_type: Option<String>,   // "Orbitrap", "TOF"
+    pub enzyme: Option<Enzyme>,            // override default enzyme
     pub custom_notes: Option<String>,
 }
 

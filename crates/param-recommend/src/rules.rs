@@ -34,23 +34,32 @@ pub(crate) fn recommend(
 
     // Step 2: Adjust tolerance based on instrument inference
     let instrument = infer_instrument(summary, hints);
-    apply_tolerance(&mut base, &instrument);
+    // Don't override tolerance for open search (uses Da-based tolerance)
+    let is_open_search = experiment_type.to_lowercase().contains("open");
+    if !is_open_search {
+        apply_tolerance(&mut base, &instrument);
+    }
 
-    // Step 3: Build explanation, evidence, alternatives
+    // Step 3: Apply enzyme hint override
+    if let Some(enzyme) = hints.and_then(|h| h.enzyme.clone()) {
+        base.enzyme = enzyme;
+    }
+
+    // Step 4: Build explanation, evidence, alternatives
     let explanation = build_explanation(summary, &instrument, experiment_type);
     let evidence = build_evidence(summary, &instrument);
     let alternatives = build_alternatives(experiment_type);
     let confidence = compute_confidence(hints, &instrument);
 
-    // Step 4: Detect semantic conflicts and append warnings
-    let warnings = detect_conflicts(&base);
+    // Step 5: Detect semantic conflicts and append warnings
+    let warnings = detect_conflicts(&base, is_open_search);
     let final_explanation = if warnings.is_empty() {
         explanation
     } else {
         format!("{explanation}\n\n⚠ Warnings:\n{}", warnings.join("\n"))
     };
 
-    // Step 5: Build input_summary
+    // Step 6: Build input_summary
     let input_summary = format!(
         "{} spectra, m/z range [{:.0}-{:.0}] Da, median {} peaks/spectrum, RT [{:.0}-{:.0}] sec",
         summary.total_spectra,
@@ -94,13 +103,31 @@ fn infer_instrument(summary: &SpectrumSummary, hints: Option<&UserHints>) -> Ins
         }
     }
 
-    // Auto-inference from data characteristics
+    // Scoring-based inference from data characteristics
     let mz_upper = summary.mz_range.1;
     let median_peaks = summary.median_peaks_per_spectrum;
+    let mut hi_score: i32 = 0;
+    let mut lo_score: i32 = 0;
 
-    if mz_upper > 1500.0 && median_peaks > 200 {
+    if mz_upper > 1800.0 {
+        hi_score += 2;
+    } else if mz_upper > 1500.0 {
+        hi_score += 1;
+    } else if mz_upper < 1200.0 {
+        lo_score += 1;
+    }
+
+    if median_peaks > 300 {
+        hi_score += 2;
+    } else if median_peaks > 200 {
+        hi_score += 1;
+    } else if median_peaks < 100 {
+        lo_score += 1;
+    }
+
+    if hi_score >= 2 {
         InstrumentClass::HighResolution
-    } else if mz_upper < 1500.0 && median_peaks < 100 {
+    } else if lo_score >= 2 {
         InstrumentClass::LowResolution
     } else {
         InstrumentClass::General
@@ -256,10 +283,13 @@ fn compute_confidence(hints: Option<&UserHints>, instrument: &InstrumentClass) -
 
     if let Some(h) = hints {
         if h.experiment_type.is_some() {
-            confidence += 0.08;
+            confidence += 0.10;
         }
         if h.instrument_type.is_some() {
-            confidence += 0.07;
+            confidence += 0.10;
+        }
+        if h.enzyme.is_some() {
+            confidence += 0.05;
         }
     }
 
@@ -270,7 +300,7 @@ fn compute_confidence(hints: Option<&UserHints>, instrument: &InstrumentClass) -
 // Semantic conflict detection
 // ---------------------------------------------------------------------------
 
-fn detect_conflicts(params: &SearchParams) -> Vec<String> {
+fn detect_conflicts(params: &SearchParams, is_open_search: bool) -> Vec<String> {
     use protein_copilot_core::search_params::Enzyme;
 
     let mut warnings = Vec::new();
@@ -284,13 +314,25 @@ fn detect_conflicts(params: &SearchParams) -> Vec<String> {
         ));
     }
 
-    // Open search (precursor tolerance > 100 Da) + narrow fragment tolerance
-    if params.precursor_tolerance.value > 100.0 && params.fragment_tolerance.value < 0.05 {
+    // Open search + narrow fragment tolerance (skip if using open preset intentionally)
+    if !is_open_search
+        && params.precursor_tolerance.value > 100.0
+        && params.fragment_tolerance.value < 0.05
+    {
         warnings.push(
-            "- Open search with very narrow fragment tolerance (< 0.05 Da) \
+            "- Wide precursor tolerance with very narrow fragment tolerance (< 0.05 Da) \
              may produce few matches; consider widening fragment tolerance"
                 .to_string(),
         );
+    }
+
+    // Open search + high missed cleavages → huge search space
+    if params.precursor_tolerance.value > 100.0 && params.missed_cleavages > 3 {
+        warnings.push(format!(
+            "- Open search with missed_cleavages={} will dramatically increase search \
+             space and runtime; consider reducing to ≤ 2",
+            params.missed_cleavages
+        ));
     }
 
     warnings
@@ -330,7 +372,7 @@ mod tests {
             total_spectra: 5000,
             ms1_count: 0,
             ms2_count: 5000,
-            mz_range: (100.0, 1200.0),
+            mz_range: (100.0, 1100.0),
             rt_range_sec: (0.0, 1800.0),
             precursor_charge_distribution: charge_dist,
             median_peaks_per_spectrum: 50,
@@ -498,9 +540,82 @@ mod tests {
         let mut params = preset::standard_preset().params;
         params.enzyme = Enzyme::NonSpecific;
         params.missed_cleavages = 2;
-        let warnings = detect_conflicts(&params);
+        let warnings = detect_conflicts(&params, false);
         assert!(!warnings.is_empty());
         assert!(warnings[0].contains("NonSpecific"));
+    }
+
+    #[test]
+    fn open_search_preset_no_self_conflict() {
+        let result = recommend(
+            &high_res_summary(),
+            Some(&UserHints {
+                experiment_type: Some("open".to_string()),
+                ..Default::default()
+            }),
+        )
+        .unwrap();
+        // Open search preset should NOT warn about its own narrow fragment tolerance
+        assert!(
+            !result.explanation.contains("⚠ Warnings"),
+            "Open search preset should not trigger self-conflict"
+        );
+    }
+
+    // -- Enzyme override ------------------------------------------------
+
+    #[test]
+    fn enzyme_hint_overrides_default() {
+        use protein_copilot_core::search_params::Enzyme;
+        let hints = UserHints {
+            enzyme: Some(Enzyme::LysC),
+            ..Default::default()
+        };
+        let result = recommend(&high_res_summary(), Some(&hints)).unwrap();
+        assert_eq!(result.decision.enzyme, Enzyme::LysC);
+    }
+
+    // -- Middle resolution (General) ------------------------------------
+
+    #[test]
+    fn mid_res_data_gets_15ppm() {
+        let mut summary = high_res_summary();
+        summary.mz_range = (100.0, 1600.0); // borderline
+        summary.median_peaks_per_spectrum = 150; // between thresholds
+        let result = recommend(&summary, None).unwrap();
+        assert_eq!(result.decision.precursor_tolerance.value, 15.0);
+        assert_eq!(result.decision.fragment_tolerance.value, 0.05);
+    }
+
+    // -- Open search selection ------------------------------------------
+
+    #[test]
+    fn open_hint_selects_open_preset() {
+        let hints = UserHints {
+            experiment_type: Some("open".to_string()),
+            ..Default::default()
+        };
+        let result = recommend(&high_res_summary(), Some(&hints)).unwrap();
+        assert_eq!(
+            result.decision.precursor_tolerance.value, 500.0,
+            "Open search should keep 500 Da tolerance"
+        );
+    }
+
+    // -- Confidence meets spec ------------------------------------------
+
+    #[test]
+    fn single_hint_reaches_090() {
+        let hints = UserHints {
+            experiment_type: Some("standard".to_string()),
+            ..Default::default()
+        };
+        let result = recommend(&high_res_summary(), Some(&hints)).unwrap();
+        assert!(
+            result.confidence >= 0.90,
+            "Single hint should reach 0.90+, got {}",
+            result.confidence
+        );
     }
 
     // -- Validation passthrough ----------------------------------------
@@ -508,9 +623,16 @@ mod tests {
     #[test]
     fn recommended_params_validate() {
         let result = recommend(&high_res_summary(), None).unwrap();
-        // database_path is placeholder, so we set a real one for validation
         let mut params = result.decision;
         params.database_path = "/data/test.fasta".to_string();
+        assert!(params.validate().is_ok());
+    }
+
+    // -- with_database helper ------------------------------------------
+
+    #[test]
+    fn preset_with_database_validates() {
+        let params = preset::standard_preset().with_database("/data/human.fasta");
         assert!(params.validate().is_ok());
     }
 }
