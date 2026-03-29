@@ -21,7 +21,9 @@
 //!        └── Build SearchResult
 //! ```
 
+pub mod digest;
 pub mod error;
+pub mod fasta;
 pub mod progress;
 pub mod registry;
 
