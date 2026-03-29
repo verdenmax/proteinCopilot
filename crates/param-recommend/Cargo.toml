@@ -1,0 +1,16 @@
+[package]
+name = "protein-copilot-param-recommend"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Deterministic parameter recommendation engine for ProteinCopilot"
+
+[dependencies]
+protein-copilot-core = { workspace = true }
+serde = { workspace = true }
+schemars = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
