@@ -313,8 +313,12 @@ fn build_summary(psms: &[Psm], total_spectra: u64, duration: f64) -> SearchResul
         delta_ppms.push(psm.delta_mass_ppm);
     }
 
-    scores.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    delta_ppms.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    // Filter out non-finite values before sorting (defensive)
+    scores.retain(|v| v.is_finite());
+    delta_ppms.retain(|v| v.is_finite());
+
+    scores.sort_by(|a, b| a.total_cmp(b));
+    delta_ppms.sort_by(|a, b| a.total_cmp(b));
 
     let median_score = if scores.is_empty() {
         0.0

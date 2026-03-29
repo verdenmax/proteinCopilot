@@ -105,12 +105,9 @@ fn count_matched_ions(
     let mut matched = 0u32;
 
     for &theo in theoretical_ions {
-        // Binary search for closest peak in sorted experimental array
-        let idx = experimental_mz.binary_search_by(|probe| {
-            probe
-                .partial_cmp(&theo)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
+        // Binary search for closest peak in sorted experimental array.
+        // total_cmp handles NaN deterministically (NaN sorts after all values).
+        let idx = experimental_mz.binary_search_by(|probe| probe.total_cmp(&theo));
 
         let candidates = match idx {
             Ok(i) => vec![i],
@@ -207,6 +204,12 @@ pub fn match_spectrum(
 
                 let score = matched as f64 / total_theoretical as f64;
                 let delta_ppm = calc_delta_ppm(observed_mz, theoretical_mz);
+
+                // Guard: skip if score or delta_ppm is NaN (should not happen
+                // with validated inputs, but prevents downstream corruption)
+                if !score.is_finite() || !delta_ppm.is_finite() {
+                    continue;
+                }
 
                 let is_better = match &best_match {
                     None => true,

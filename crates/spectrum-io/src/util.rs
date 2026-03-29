@@ -47,11 +47,9 @@ pub(crate) fn sort_peaks_by_mz(mz: &mut Vec<f64>, intensity: &mut Vec<f64>) {
         return; // already sorted
     }
     let mut indices: Vec<usize> = (0..mz.len()).collect();
-    indices.sort_by(|&a, &b| {
-        mz[a]
-            .partial_cmp(&mz[b])
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
+    // total_cmp handles NaN deterministically (sorts after all finite values).
+    // NaN values will be caught by Spectrum::new() validation after sorting.
+    indices.sort_by(|&a, &b| mz[a].total_cmp(&mz[b]));
     *mz = indices.iter().map(|&i| mz[i]).collect();
     *intensity = indices.iter().map(|&i| intensity[i]).collect();
 }
