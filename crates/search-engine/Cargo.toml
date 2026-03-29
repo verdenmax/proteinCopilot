@@ -24,4 +24,5 @@ chrono = { workspace = true }
 serde_json = { workspace = true }
 protein-copilot-spectrum-io = { workspace = true }
 protein-copilot-param-recommend = { workspace = true }
+tokio = { workspace = true }
 tempfile = "3"
