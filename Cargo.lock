@@ -324,6 +324,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "protein-copilot-report"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "protein-copilot-core",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "uuid",
+]
+
+[[package]]
 name = "protein-copilot-search-engine"
 version = "0.1.0"
 dependencies = [
