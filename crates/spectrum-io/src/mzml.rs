@@ -103,7 +103,11 @@ impl SpectrumBuilder {
         let mut intensity_array = self.intensity_array;
         if !mz_array.windows(2).all(|w| w[0] <= w[1]) {
             let mut indices: Vec<usize> = (0..mz_array.len()).collect();
-            indices.sort_by(|&a, &b| mz_array[a].partial_cmp(&mz_array[b]).unwrap());
+            indices.sort_by(|&a, &b| {
+                mz_array[a]
+                    .partial_cmp(&mz_array[b])
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
             mz_array = indices.iter().map(|&i| mz_array[i]).collect();
             intensity_array = indices.iter().map(|&i| intensity_array[i]).collect();
         }

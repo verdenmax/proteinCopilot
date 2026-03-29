@@ -66,7 +66,11 @@ impl MgfBlock {
         let mut intensity_values = self.intensity_values;
         if !mz_values.windows(2).all(|w| w[0] <= w[1]) {
             let mut indices: Vec<usize> = (0..mz_values.len()).collect();
-            indices.sort_by(|&a, &b| mz_values[a].partial_cmp(&mz_values[b]).unwrap());
+            indices.sort_by(|&a, &b| {
+                mz_values[a]
+                    .partial_cmp(&mz_values[b])
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
             mz_values = indices.iter().map(|&i| mz_values[i]).collect();
             intensity_values = indices.iter().map(|&i| intensity_values[i]).collect();
         }

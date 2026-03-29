@@ -497,7 +497,7 @@ pub struct SearchResultSummary {
 
 /// 所有 AI 辅助决策的标准包装器
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct AiDecision<T: Serialize> {
+pub struct AiDecision<T> {
     pub decision: T,
     pub confidence: f64,             // 0.0 ~ 1.0
     pub explanation: String,         // 确定性规则引擎生成的解释模板
