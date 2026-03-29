@@ -22,6 +22,7 @@
 //! ```
 
 pub mod adapters;
+pub mod chemistry;
 pub mod digest;
 pub mod error;
 pub mod fasta;

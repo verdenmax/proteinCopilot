@@ -14,6 +14,7 @@
 use protein_copilot_core::search_params::{MassTolerance, Modification, ToleranceUnit};
 use protein_copilot_core::spectrum::Spectrum;
 
+use crate::chemistry::{residue_mass, PROTON_MASS, WATER_MASS};
 use crate::digest::{peptide_mz, DigestedPeptide};
 
 /// A candidate match between a spectrum and a peptide.
@@ -60,36 +61,6 @@ fn calc_delta_ppm(observed: f64, theoretical: f64) -> f64 {
 // ---------------------------------------------------------------------------
 // Fragment ion generation (b/y ions)
 // ---------------------------------------------------------------------------
-
-/// Monoisotopic residue mass (same table as digest.rs, kept local to avoid coupling).
-fn residue_mass(aa: char) -> f64 {
-    match aa {
-        'G' => 57.021464,
-        'A' => 71.037114,
-        'V' => 99.068414,
-        'L' => 113.084064,
-        'I' => 113.084064,
-        'P' => 97.052764,
-        'F' => 147.068414,
-        'W' => 186.079313,
-        'M' => 131.040485,
-        'S' => 87.032028,
-        'T' => 101.047679,
-        'C' => 103.009185,
-        'Y' => 163.063329,
-        'H' => 137.058912,
-        'D' => 115.026943,
-        'E' => 129.042593,
-        'N' => 114.042927,
-        'Q' => 128.058578,
-        'K' => 128.094963,
-        'R' => 156.101111,
-        _ => 0.0,
-    }
-}
-
-const PROTON_MASS: f64 = 1.007276;
-const WATER_MASS: f64 = 18.010565;
 
 /// Generates theoretical singly-charged b-ion m/z values for a peptide.
 fn generate_b_ions(sequence: &str) -> Vec<f64> {

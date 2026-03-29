@@ -250,14 +250,30 @@ fn aggregate_proteins(psms: &[Psm], proteins: &[crate::fasta::FastaEntry]) -> Ve
                 .map(|p| p.description.clone())
                 .unwrap_or_default();
 
-            // Simple coverage estimate: sum peptide lengths / protein length
-            let protein_len = proteins
+            // Coverage: track which positions are covered by identified peptides
+            let protein_seq = proteins
                 .iter()
                 .find(|p| p.accession == acc)
-                .map(|p| p.sequence.len())
-                .unwrap_or(1);
-            let covered_aa: usize = peptides.iter().map(|p| p.len()).sum();
-            let coverage = (covered_aa as f64 / protein_len as f64).min(1.0);
+                .map(|p| p.sequence.as_str())
+                .unwrap_or("");
+            let protein_len = protein_seq.len().max(1);
+
+            let mut covered = vec![false; protein_len];
+            for pep in &peptides {
+                // Find all occurrences of this peptide in the protein
+                let mut start = 0;
+                while let Some(pos) = protein_seq[start..].find(pep.as_str()) {
+                    let abs_pos = start + pos;
+                    for i in abs_pos..abs_pos + pep.len() {
+                        if i < covered.len() {
+                            covered[i] = true;
+                        }
+                    }
+                    start = abs_pos + 1;
+                }
+            }
+            let covered_count = covered.iter().filter(|&&c| c).count();
+            let coverage = covered_count as f64 / protein_len as f64;
 
             let peptide_count = peptides.len() as u64;
 
