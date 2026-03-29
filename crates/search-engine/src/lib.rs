@@ -21,6 +21,7 @@
 //!        └── Build SearchResult
 //! ```
 
+pub mod adapters;
 pub mod digest;
 pub mod error;
 pub mod fasta;
