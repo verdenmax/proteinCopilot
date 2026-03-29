@@ -1,0 +1,18 @@
+[package]
+name = "protein-copilot-spectrum-io"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Spectrum file parsing (mgf/mzML) for ProteinCopilot"
+
+[dependencies]
+protein-copilot-core = { workspace = true }
+thiserror = { workspace = true }
+quick-xml = { workspace = true }
+base64 = { workspace = true }
+flate2 = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+tempfile = "3"

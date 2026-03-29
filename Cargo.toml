@@ -29,5 +29,10 @@ tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
+# XML / binary parsing
+quick-xml = "0.37"
+base64 = "0.22"
+flate2 = "1"
+
 # Internal crates
 protein-copilot-core = { path = "crates/core" }
