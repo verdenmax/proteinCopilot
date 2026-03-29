@@ -72,7 +72,7 @@ pub enum HealthStatus {
 /// - `PFindAdapter` — pFind 3.x via SSH (MVP)
 /// - `MSFraggerAdapter` — planned
 /// - `CometAdapter` — planned
-#[allow(async_fn_in_trait)]
+#[async_trait::async_trait]
 pub trait SearchEngineAdapter: Send + Sync {
     /// Execute a search with the given parameters against input spectrum files.
     ///

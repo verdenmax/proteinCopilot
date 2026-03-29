@@ -24,6 +24,7 @@ chrono = { version = "0.4", features = ["serde"] }
 
 # Async
 tokio = { version = "1", features = ["full"] }
+async-trait = "0.1"
 
 # Observability
 tracing = "0.1"
