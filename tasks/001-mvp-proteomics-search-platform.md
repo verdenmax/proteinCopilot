@@ -647,6 +647,21 @@ M1.7 (集成验证)    ← 需要所有 MVP Milestone
 - **Sub-task 1.3.5.4**：测试 confidence 范围合理性
 - **Sub-task 1.3.5.5**：验证相同输入 → 完全相同输出（确定性）
 
+#### M1.3 已知局限性（MVP 阶段有意简化，供后续迭代参考）
+
+1. **仅基于统计特征推断**：只使用 m/z 范围和中位 peak 数两个特征推断仪器类型，未利用 charge 分布、RT 分布等其他维度
+2. **无碎裂模式分析**：无法从 b/y 离子分布推断消化酶或碎裂方式（HCD/CID/ETD），酶推荐依赖用户 hints 或默认 Trypsin
+3. **无 DDA/DIA 自动区分**：不分析 isolation window 宽度来判断采集模式，DIA 数据（如宽窗口 25 Da）与 DDA 数据使用相同推荐逻辑
+4. **硬编码阈值规则**：仪器推断使用固定评分阈值，非机器学习模型，边界情况可能误分类
+5. **database_path 占位符**：推荐结果中 FASTA 数据库路径为占位值，需调用方（MCP tool 层或 LLM）填充
+6. **无跨搜索引擎参数适配**：当前参数格式通用，未针对 pFind/MSFragger/Comet 的特有参数做差异化推荐
+
+**后续改进方向**：
+- 利用 charge 分布判断标记类型（SILAC 数据 charge 分布偏向高电荷态）
+- 从 isolation window 宽度推断 DDA vs DIA，DIA 可推荐更宽容差
+- 引入简单统计模型替代硬编码阈值
+- LLM 层可在规则引擎输出基础上做进一步润色和用户交互
+
 ---
 
 ### Milestone 1.4：`search-engine` — 搜索引擎调度 Library Crate
