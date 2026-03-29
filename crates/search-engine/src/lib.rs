@@ -27,10 +27,12 @@ pub mod fasta;
 pub mod matching;
 pub mod progress;
 pub mod registry;
+pub mod simple_engine;
 
 pub use error::SearchEngineError;
 pub use progress::SearchProgress;
 pub use registry::EngineRegistry;
+pub use simple_engine::SimpleSearchEngine;
 
 #[cfg(test)]
 mod tests {
