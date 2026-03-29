@@ -1,25 +1,27 @@
 //! MCP Tool definitions — thin wrappers around library crate functions.
+//!
+//! Each tool is a `Result<Json<T>, ErrorData>` returning function that:
+//! 1. Parses parameters
+//! 2. Delegates to a library crate
+//! 3. Returns structured JSON or a proper MCP error
 
 use std::path::{Path, PathBuf};
 
 use rmcp::handler::server::tool::ToolRouter;
 use rmcp::handler::server::wrapper::{Json, Parameters};
-use rmcp::model::ServerInfo;
+use rmcp::model::{ErrorCode, ServerInfo};
 use rmcp::schemars;
-use rmcp::tool;
-use rmcp::tool_router;
-use rmcp::ServerHandler;
-use serde::Deserialize;
+use rmcp::{ErrorData, ServerHandler};
+use serde::{Deserialize, Serialize};
 
 use protein_copilot_core::ai_decision::AiDecision;
 use protein_copilot_core::engine::{HealthStatus, SearchEngineAdapter};
 use protein_copilot_core::search_params::SearchParams;
 use protein_copilot_core::search_result::{SearchResult, SearchResultSummary};
-use protein_copilot_core::spectrum::SpectrumSummary;
-use protein_copilot_param_recommend::{ParamRecommender, UserHints};
+use protein_copilot_core::spectrum::{Spectrum, SpectrumSummary};
+use protein_copilot_param_recommend::{ParamRecommender, SearchPreset, UserHints};
 use protein_copilot_report::ReportGenerator;
 use protein_copilot_search_engine::SimpleSearchEngine;
-use protein_copilot_spectrum_io::{create_reader, detect_format};
 
 // ---------------------------------------------------------------------------
 // Tool input types
@@ -29,6 +31,14 @@ use protein_copilot_spectrum_io::{create_reader, detect_format};
 struct ReadSpectraInput {
     /// Path to the spectrum file (.mgf or .mzML)
     file_path: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct GetSpectrumInput {
+    /// Path to the spectrum file (.mgf or .mzML)
+    file_path: String,
+    /// Scan number to retrieve (1-based)
+    scan_number: u32,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -59,6 +69,18 @@ struct ExportResultsInput {
     result: SearchResult,
     /// Output directory path
     output_dir: String,
+}
+
+/// Engine status response
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct EngineStatus {
+    engine: protein_copilot_core::engine::EngineInfo,
+    status: HealthStatus,
+}
+
+/// Helper to create MCP error from any Display error
+fn mcp_err(code: ErrorCode, err: impl std::fmt::Display) -> ErrorData {
+    ErrorData::new(code, err.to_string(), None)
 }
 
 // ---------------------------------------------------------------------------
@@ -96,93 +118,95 @@ impl ServerHandler for ProteinCopilotServer {
 // Tool implementations
 // ---------------------------------------------------------------------------
 
-#[tool_router]
+#[rmcp::tool_router]
 impl ProteinCopilotServer {
     /// Read a mass spectrometry file and return a statistical summary.
-    /// Use this as the first step to understand the input data characteristics.
-    /// Supports .mgf and .mzML formats (DDA and DIA).
-    #[tool(
+    #[rmcp::tool(
         name = "read_spectra",
-        description = "Read a mass spectrometry file (mgf/mzML) and return a statistical summary including spectrum count, m/z range, RT range, charge distribution, and median peaks per spectrum."
+        description = "Read a mass spectrometry file (mgf/mzML) and return a statistical summary including spectrum count, m/z range, RT range, charge distribution, and median peaks per spectrum. Use this as the first step to understand input data."
     )]
     fn read_spectra(
         &self,
         Parameters(input): Parameters<ReadSpectraInput>,
-    ) -> Json<SpectrumSummary> {
+    ) -> Result<Json<SpectrumSummary>, ErrorData> {
         let path = Path::new(&input.file_path);
-        let info = detect_format(path)
-            .map_err(|e| {
-                rmcp::ErrorData::new(rmcp::model::ErrorCode::INVALID_PARAMS, e.to_string(), None)
-            })
-            .unwrap();
-        let reader = create_reader(&info);
+        let info = protein_copilot_spectrum_io::detect_format(path)
+            .map_err(|e| mcp_err(ErrorCode::INVALID_PARAMS, e))?;
+        let reader = protein_copilot_spectrum_io::create_reader(&info);
         let summary = reader
             .read_summary(path)
-            .map_err(|e| {
-                rmcp::ErrorData::new(rmcp::model::ErrorCode::INTERNAL_ERROR, e.to_string(), None)
-            })
-            .unwrap();
-        Json(summary)
+            .map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, e))?;
+        Ok(Json(summary))
+    }
+
+    /// Read a single spectrum by scan number.
+    #[rmcp::tool(
+        name = "get_spectrum",
+        description = "Read a single spectrum from a file by scan number (1-based). Returns the spectrum with m/z array, intensity array, precursor info, and MS level."
+    )]
+    fn get_spectrum(
+        &self,
+        Parameters(input): Parameters<GetSpectrumInput>,
+    ) -> Result<Json<Spectrum>, ErrorData> {
+        let path = Path::new(&input.file_path);
+        let info = protein_copilot_spectrum_io::detect_format(path)
+            .map_err(|e| mcp_err(ErrorCode::INVALID_PARAMS, e))?;
+        let reader = protein_copilot_spectrum_io::create_reader(&info);
+        let spectrum = reader
+            .read_spectrum(path, input.scan_number)
+            .map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, e))?;
+        Ok(Json(spectrum))
     }
 
     /// Recommend search parameters based on spectrum characteristics.
-    /// Call read_spectra first to obtain the SpectrumSummary, then pass it here.
-    #[tool(
+    #[rmcp::tool(
         name = "recommend_params",
-        description = "Recommend search parameters based on spectrum file characteristics. Input: SpectrumSummary from read_spectra + optional UserHints. Output: recommended SearchParams with confidence score and explanation."
+        description = "Recommend search parameters based on spectrum file characteristics. Input: SpectrumSummary from read_spectra + optional UserHints (experiment_type, instrument_type, enzyme). Output: recommended SearchParams with confidence score and explanation."
     )]
     fn recommend_params(
         &self,
         Parameters(input): Parameters<RecommendParamsInput>,
-    ) -> Json<AiDecision<SearchParams>> {
+    ) -> Result<Json<AiDecision<SearchParams>>, ErrorData> {
         let recommender = ParamRecommender;
         let result = recommender
             .recommend(&input.summary, input.hints.as_ref())
-            .map_err(|e| {
-                rmcp::ErrorData::new(rmcp::model::ErrorCode::INTERNAL_ERROR, e.to_string(), None)
-            })
-            .unwrap();
-        Json(result)
+            .map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, e))?;
+        Ok(Json(result))
     }
 
     /// List all available search parameter presets.
-    #[tool(
+    #[rmcp::tool(
         name = "list_presets",
-        description = "List all built-in search parameter presets (standard, phospho, TMT, SILAC, open search)."
+        description = "List all built-in search parameter presets (standard, phospho, TMT, SILAC, open search). Each preset includes name, description, parameters, and applicable scenarios."
     )]
-    fn list_presets(&self) -> String {
-        let presets = ParamRecommender::list_presets();
-        serde_json::to_string_pretty(&presets).unwrap_or_else(|e| format!("Error: {e}"))
+    fn list_presets(&self) -> Json<Vec<SearchPreset>> {
+        Json(ParamRecommender::list_presets())
     }
 
     /// Execute a database search against spectrum files.
-    /// Requires SearchParams (from recommend_params or manual) and spectrum file paths.
-    #[tool(
+    #[rmcp::tool(
         name = "run_search",
-        description = "Run a proteomics database search. Input: SearchParams + spectrum file paths. Output: SearchResult with PSMs, peptides, proteins, and summary statistics."
+        description = "Run a proteomics database search. Input: SearchParams (from recommend_params or manual) + spectrum file paths. Output: SearchResult with PSMs, peptides, proteins, and summary statistics. Note: set database_path in params to the FASTA file path."
     )]
     async fn run_search(
         &self,
         Parameters(input): Parameters<RunSearchInput>,
-    ) -> Json<SearchResult> {
+    ) -> Result<Json<SearchResult>, ErrorData> {
         let engine = SimpleSearchEngine::new();
         let files: Vec<PathBuf> = input.input_files.iter().map(PathBuf::from).collect();
         let result = engine
             .search(&input.params, &files)
             .await
-            .map_err(|e| {
-                rmcp::ErrorData::new(rmcp::model::ErrorCode::INTERNAL_ERROR, e.to_string(), None)
-            })
-            .unwrap();
-        Json(result)
+            .map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, e))?;
+        Ok(Json(result))
     }
 
     /// Check available search engines and their health status.
-    #[tool(
+    #[rmcp::tool(
         name = "check_engine",
-        description = "Check available search engines and their health status. Returns engine name, version, and availability."
+        description = "Check available search engines and their health status. Returns engine name, version, supported features, and availability."
     )]
-    async fn check_engine(&self) -> String {
+    async fn check_engine(&self) -> Json<EngineStatus> {
         let engine = SimpleSearchEngine::new();
         let info = engine.engine_info();
         let status = engine
@@ -191,58 +215,48 @@ impl ProteinCopilotServer {
             .unwrap_or(HealthStatus::Unavailable {
                 reason: "health check failed".to_string(),
             });
-        serde_json::to_string_pretty(&serde_json::json!({
-            "engine": info,
-            "status": status,
-        }))
-        .unwrap_or_else(|e| format!("Error: {e}"))
+        Json(EngineStatus {
+            engine: info,
+            status,
+        })
     }
 
-    /// Generate a statistical summary of search results with FDR filtering.
-    #[tool(
+    /// Generate a statistical summary with FDR filtering.
+    #[rmcp::tool(
         name = "generate_summary",
-        description = "Generate a statistical summary from search results with 1% FDR filtering. Includes identification rate, median score, modification/charge distributions."
+        description = "Generate a statistical summary from search results with 1% FDR filtering. Includes identification rate, median score, median delta ppm, modification and charge distributions. Use this after run_search to interpret results."
     )]
     fn generate_summary(
         &self,
         Parameters(input): Parameters<GenerateSummaryInput>,
     ) -> Json<SearchResultSummary> {
-        let summary = ReportGenerator::generate_summary(&input.result);
-        Json(summary)
+        Json(ReportGenerator::generate_summary(&input.result))
     }
 
     /// Export search results as TSV and JSON files.
-    #[tool(
+    #[rmcp::tool(
         name = "export_results",
         description = "Export search results to files. Creates psm.tsv, peptide.tsv, protein.tsv, result.json, and run_metadata.json in the specified output directory."
     )]
-    fn export_results(&self, Parameters(input): Parameters<ExportResultsInput>) -> String {
+    fn export_results(
+        &self,
+        Parameters(input): Parameters<ExportResultsInput>,
+    ) -> Result<String, ErrorData> {
         let output_dir = Path::new(&input.output_dir);
-        let mut exported = Vec::new();
 
-        if let Err(e) = ReportGenerator::export_tsv(&input.result, output_dir) {
-            return format!("TSV export error: {e}");
-        }
-        exported.push("psm.tsv, peptide.tsv, protein.tsv");
-
-        if let Err(e) = ReportGenerator::export_json(&input.result, &output_dir.join("result.json"))
-        {
-            return format!("JSON export error: {e}");
-        }
-        exported.push("result.json");
-
-        if let Err(e) = ReportGenerator::export_metadata(
+        ReportGenerator::export_tsv(&input.result, output_dir)
+            .map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, e))?;
+        ReportGenerator::export_json(&input.result, &output_dir.join("result.json"))
+            .map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, e))?;
+        ReportGenerator::export_metadata(
             &input.result.metadata,
             &output_dir.join("run_metadata.json"),
-        ) {
-            return format!("Metadata export error: {e}");
-        }
-        exported.push("run_metadata.json");
-
-        format!(
-            "Exported to {}: {}",
-            output_dir.display(),
-            exported.join(", ")
         )
+        .map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, e))?;
+
+        Ok(format!(
+            "Exported to {}: psm.tsv, peptide.tsv, protein.tsv, result.json, run_metadata.json",
+            output_dir.display()
+        ))
     }
 }
