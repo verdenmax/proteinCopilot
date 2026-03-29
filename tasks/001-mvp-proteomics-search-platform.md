@@ -3,7 +3,7 @@
 > **文件名**：`prd-mvp-proteomics-search.md`
 > **版本**：1.0
 > **创建日期**：2026-03-27
-> **状态**：In Progress — M1.1 core crate ✅ 完成（160 tests, 0 warnings）
+> **状态**：In Progress — M1.1 ✅ M1.2 ✅ M1.3 ✅ M1.4 ✅（278 tests, 0 warnings）
 
 ---
 
@@ -666,64 +666,60 @@ M1.7 (集成验证)    ← 需要所有 MVP Milestone
 
 ### Milestone 1.4：`search-engine` — 搜索引擎调度 Library Crate
 
-> 通过 Adapter 模式封装 pFind，管理远程搜索执行和结果解析。
+> **状态**：✅ 已完成（37 tests, 0 warnings）— 采用 SimpleSearchEngine + pFind 预留结构
+>
+> 实现方案调整：先实现简化内置搜索引擎验证端到端数据流，pFind adapter 保留桩待后续对接。
 > 关联 FR：FR-3.1 ~ FR-3.8 | 关联 US：US-2, US-5
 
-#### Task 1.4.1：创建 crate 并定义模块结构
+#### Task 1.4.1：创建 crate 并定义模块结构 ✅
 
-- **Sub-task 1.4.1.1**：创建 `crates/search-engine/Cargo.toml`，依赖 `core`, `tokio`, `tracing`
-- **Sub-task 1.4.1.2**：创建模块结构：`src/lib.rs`, `src/registry.rs`, `src/progress.rs`, `src/adapters/mod.rs`, `src/adapters/pfind.rs`, `src/adapters/pfind_config.rs`, `src/adapters/pfind_parser.rs`
+- **Sub-task 1.4.1.1**：创建 `crates/search-engine/Cargo.toml`，依赖 `core`, `spectrum-io`, `tokio`, `async-trait`
+- **Sub-task 1.4.1.2**：EngineRegistry（register/get/list_available/health_check_all）
+- **Sub-task 1.4.1.3**：SearchProgress 结构体（run_id, status, progress_pct, elapsed_sec）
+- **Sub-task 1.4.1.4**：SearchEngineError（6 变体）+ From for CoreError
+- **实现补充**：将 core 的 SearchEngineAdapter trait 从 `async fn in trait` 改为 `#[async_trait]` 以支持 dyn 兼容
 
-#### Task 1.4.2：实现 EngineRegistry
+#### Task 1.4.2：FASTA 解析 + 酶切消化 ✅
 
-- **Sub-task 1.4.2.1**：实现 `EngineRegistry` 结构体：`register(adapter)`, `get(name)`, `list_available()`
-- **Sub-task 1.4.2.2**：支持按引擎名称查找 adapter，默认返回第一个 healthy 引擎
+- **Sub-task 1.4.2.1**：`fasta.rs`：解析标准 FASTA 文件（>header + 多行 sequence）
+- **Sub-task 1.4.2.2**：`digest.rs`：支持全部 7 种 Enzyme 变体的酶切消化规则
+  - Trypsin（K/R 后切，P 除外）、TrypsinP、LysC、GluC、AspN、Chymotrypsin、NonSpecific
+- **Sub-task 1.4.2.3**：missed cleavages 支持（0-N）、肽段长度过滤（6-50 aa）
+- **Sub-task 1.4.2.4**：`chemistry.rs`：20 种标准氨基酸单同位素质量表 + peptide_mass() + peptide_mz()
 
-#### Task 1.4.3：实现 pFind Adapter — 配置生成
+#### Task 1.4.3：谱图匹配 + 打分 ✅
 
-- **Sub-task 1.4.3.1**：实现 `PFindConfig` 结构体，映射 pFind .cfg 文件的所有必要字段
-- **Sub-task 1.4.3.2**：实现 `SearchParams → PFindConfig` 转换逻辑：
-  - Enzyme → pFind enzyme 编号
-  - Modification → pFind modification 格式
-  - MassTolerance → pFind tolerance 字段
-  - database_path → pFind fasta 字段
-- **Sub-task 1.4.3.3**：实现 `PFindConfig::write_cfg(path)` → 写入 .cfg 文件
-- **Sub-task 1.4.3.4**：编写单元测试：标准参数 → 验证生成的 .cfg 内容正确
+- **Sub-task 1.4.3.1**：`matching.rs`：precursor m/z 匹配（ppm/Da 容差）
+- **Sub-task 1.4.3.2**：理论 b/y 离子生成（单电荷）
+- **Sub-task 1.4.3.3**：碎片离子匹配（binary search 在排序 peak list 中）
+- **Sub-task 1.4.3.4**：打分 = matched_ions / total_ions
+- **Sub-task 1.4.3.5**：固定修饰质量调整、多电荷态尝试（未知 charge 时试 2→3→1→4）
 
-#### Task 1.4.4：实现 pFind Adapter — SSH 远程执行
+#### Task 1.4.4：SimpleSearchEngine 组装 ✅
 
-- **Sub-task 1.4.4.1**：定义 `SshConfig` 结构体（host, port, user, key_path, pfind_executable_path, work_dir）
-- **Sub-task 1.4.4.2**：实现 `PFindAdapter::search()` async 方法：
-  1. `validate()` 参数
-  2. 生成 .cfg 文件
-  3. 通过 SSH 上传 .cfg 到远程 work_dir
-  4. 通过 SSH 执行 `pfind <cfg_path>` 命令
-  5. 等待完成 / 轮询进度
-  6. 通过 SSH 下载结果文件
-  7. 解析结果 → `SearchResult`
-- **Sub-task 1.4.4.3**：实现 `PFindAdapter::health_check()`：SSH 连接远程 → 执行 `pfind --version` → 返回 HealthStatus
-- **Sub-task 1.4.4.4**：所有 SSH 操作使用 `tokio::process::Command::new("ssh")` 封装
+- **Sub-task 1.4.4.1**：`simple_engine.rs` 实现 SearchEngineAdapter trait
+- **Sub-task 1.4.4.2**：完整流程：validate → read FASTA → digest → read spectra → match → score → aggregate → SearchResult
+- **Sub-task 1.4.4.3**：肽段级聚合（best score, PSM count）、蛋白级聚合（位置追踪 coverage）
+- **Sub-task 1.4.4.4**：SearchResultSummary 统计（中位 score、delta ppm、charge/mod 分布、鉴定率）
+- **Sub-task 1.4.4.5**：RunMetadata 自动追踪（run_id、duration、Completed 状态）
 
-#### Task 1.4.5：实现 pFind Adapter — 结果解析
+#### Task 1.4.5：pFind adapter 预留 ✅
 
-- **Sub-task 1.4.5.1**：分析 pFind 输出文件格式（.spectra 文件、summary 文件等）
-- **Sub-task 1.4.5.2**：实现 `PFindParser::parse_results(output_dir) -> Result<SearchResult>`
-- **Sub-task 1.4.5.3**：解析 PSM 级别结果：peptide, score, q-value, modifications, protein accessions
-- **Sub-task 1.4.5.4**：从 PSM 结果聚合 PeptideResult 和 ProteinResult
-- **Sub-task 1.4.5.5**：计算 SearchResultSummary（统计聚合）
-- **Sub-task 1.4.5.6**：编写单元测试：使用 pFind 输出 fixture 文件
+- **Sub-task 1.4.5.1**：`adapters/pfind.rs`：PFindAdapter + SshConfig 结构体
+- **Sub-task 1.4.5.2**：search() 返回 "not yet implemented" 错误，health_check() 返回 Unavailable
+- **Sub-task 1.4.5.3**：实现路线图文档化在模块 doc 中
 
-#### Task 1.4.6：实现搜索进度跟踪
+#### M1.4 已知局限性
 
-- **Sub-task 1.4.6.1**：定义 `SearchProgress` 结构体（run_id, status, progress_pct, elapsed_sec, estimated_remaining_sec）
-- **Sub-task 1.4.6.2**：实现进度轮询：SSH 读取 pFind 的日志/进度文件，解析完成百分比
+1. **SimpleSearchEngine 是验证引擎**：搜索质量不如 pFind/MSFragger，仅用于验证架构和数据流
+2. **O(N×M) 全量匹配**：无索引优化，大数据集会慢
+3. **无统计学打分**：用碎片离子比例打分，非 hyperscore/binomial
+4. **无 FDR 计算**：所有 PSM 默认通过（q_value = None）
+5. **pFind 待对接**：需提供 .cfg 格式样例和输出文件样例
 
-#### Task 1.4.7：测试
+#### 原 M1.4 任务 1.4.3-1.4.7（pFind 相关）→ 推迟
 
-- **Sub-task 1.4.7.1**：Mock adapter 单元测试：验证 registry 查找、tool 流程逻辑
-- **Sub-task 1.4.7.2**：PFindConfig 单元测试：各种 SearchParams → .cfg 正确性
-- **Sub-task 1.4.7.3**：PFindParser 单元测试：fixture 输出文件 → SearchResult 正确性
-- **Sub-task 1.4.7.4**：集成测试（需 pFind 环境）：实际 SSH 调用 → 验证端到端
+原计划的 pFind 配置生成、SSH 远程执行、结果解析、进度跟踪、集成测试推迟到获取 pFind 样例文件后实施。对应的 Task 编号保留，实现时参考原 Sub-task 描述。
 
 ---
 

@@ -230,21 +230,27 @@ pub struct SearchPreset {
 
 ### 3.4 `search-engine`（lib crate）
 
-**职责**：搜索引擎的调度、调用和结果解析。通过 Adapter 模式封装外部搜索引擎。
+**职责**：搜索引擎的调度、调用和结果解析。包含一个简化的内置搜索引擎（MVP 验证用）和 pFind adapter 预留结构。
 
 **对外暴露**：
 ```rust
-// core 中定义的 trait
+// core 中定义的 trait（使用 #[async_trait]）
+#[async_trait]
 pub trait SearchEngineAdapter: Send + Sync {
     async fn search(&self, params: &SearchParams, input_files: &[PathBuf])
-        -> Result<SearchResult>;
+        -> Result<SearchResult, CoreError>;
     fn engine_info(&self) -> EngineInfo;
-    async fn health_check(&self) -> Result<HealthStatus>;
+    async fn health_check(&self) -> Result<HealthStatus, CoreError>;
 }
 
-// search-engine crate 中的实现
-pub struct PFindAdapter { config: PFindConfig }
-impl SearchEngineAdapter for PFindAdapter { ... }
+// 简化内置搜索引擎（MVP）
+pub struct SimpleSearchEngine;
+impl SearchEngineAdapter for SimpleSearchEngine { ... }
+// 完整流程: FASTA→酶切→precursor匹配→b/y离子打分→SearchResult
+
+// pFind adapter（预留桩，待对接真实 pFind）
+pub struct PFindAdapter { ssh_config: SshConfig }
+impl SearchEngineAdapter for PFindAdapter { ... } // 当前返回 not-implemented 错误
 
 // 引擎注册与发现
 pub struct EngineRegistry { engines: HashMap<String, Box<dyn SearchEngineAdapter>> }
@@ -258,23 +264,29 @@ impl EngineRegistry {
 **内部结构**：
 ```text
 search-engine/src/
-├── lib.rs
+├── lib.rs                   ← 模块声明 + 公开 API
+├── error.rs                 ← SearchEngineError
 ├── registry.rs              ← EngineRegistry
-├── adapters/
-│   ├── mod.rs
-│   ├── pfind.rs             ← PFindAdapter
-│   ├── pfind_config.rs      ← pFind 配置文件生成
-│   └── pfind_parser.rs      ← pFind 输出结果解析
-└── progress.rs              ← 搜索进度追踪
+├── progress.rs              ← SearchProgress
+├── chemistry.rs             ← 氨基酸质量表 + 质量计算（共享）
+├── fasta.rs                 ← FASTA 数据库解析
+├── digest.rs                ← 酶切消化（支持 7 种酶）
+├── matching.rs              ← precursor m/z 匹配 + b/y 离子打分
+├── simple_engine.rs         ← SimpleSearchEngine 实现
+└── adapters/
+    ├── mod.rs
+    └── pfind.rs             ← PFindAdapter + SshConfig（预留桩）
 ```
 
-**依赖**：`core`, `tokio`（子进程管理）, `tracing`
+**依赖**：`core`, `spectrum-io`, `tokio`, `async-trait`
 
 **设计原则**：
-- Adapter 内部逻辑完全隔离：pFind 的 .cfg 格式、输出格式解析等不泄露到外部
+- SimpleSearchEngine 是 MVP 验证引擎，用于测试端到端数据流正确性
+- pFind adapter 预留完整结构（SshConfig、cfg 生成、结果解析），待提供 pFind 样例后对接
+- Adapter 内部逻辑完全隔离：各引擎的配置格式、输出格式解析不泄露到外部
 - `SearchResult` 是标准化输出——不管哪个引擎，返回相同结构
-- 搜索执行是 async：通过 `tokio::process::Command` 管理子进程
-- 进度追踪通过轮询日志文件或 stdout 实现
+- 搜索执行是 async，通过 `#[async_trait]` 支持 `Box<dyn SearchEngineAdapter>`
+- 氨基酸质量表集中在 `chemistry.rs`，避免重复
 
 ---
 
