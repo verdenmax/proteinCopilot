@@ -5,14 +5,14 @@ members = ["crates/*"]
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.80"
+rust-version = "1.85"
 license = "MIT"
 
 [workspace.dependencies]
 # Serialization
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-schemars = { version = "0.8", features = ["uuid1", "chrono"] }
+schemars = { version = "1", features = ["uuid1", "chrono04"] }
 
 # Error handling
 thiserror = "1"
