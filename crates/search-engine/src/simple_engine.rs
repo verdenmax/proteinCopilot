@@ -330,16 +330,8 @@ fn build_summary(psms: &[Psm], total_spectra: u64, duration: f64) -> SearchResul
     scores.sort_by(|a, b| a.total_cmp(b));
     delta_ppms.sort_by(|a, b| a.total_cmp(b));
 
-    let median_score = if scores.is_empty() {
-        0.0
-    } else {
-        scores[scores.len() / 2]
-    };
-    let median_delta = if delta_ppms.is_empty() {
-        0.0
-    } else {
-        delta_ppms[delta_ppms.len() / 2]
-    };
+    let median_score = protein_copilot_core::util::compute_median(&scores);
+    let median_delta = protein_copilot_core::util::compute_median(&delta_ppms);
     let id_rate = if total_spectra > 0 {
         total_psms as f64 / total_spectra as f64
     } else {

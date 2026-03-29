@@ -143,11 +143,7 @@ impl SummaryAccumulator {
 
         // Compute median peak count
         self.peak_counts.sort_unstable();
-        let median_peaks = if self.peak_counts.is_empty() {
-            0
-        } else {
-            self.peak_counts[self.peak_counts.len() / 2]
-        };
+        let median_peaks = protein_copilot_core::util::compute_median_u32(&self.peak_counts);
 
         let summary = SpectrumSummary {
             file_path: path.to_string_lossy().to_string(),

@@ -439,7 +439,10 @@ pub struct SearchResult {
     pub peptides: Vec<PeptideResult>,
     /// Protein-level aggregation.
     pub proteins: Vec<ProteinResult>,
-    /// Statistical summary.
+    /// Statistical summary (engine-side, before FDR filtering).
+    ///
+    /// For a summary with proper FDR filtering, use
+    /// `ReportGenerator::generate_summary()` from the `report` crate.
     pub summary: SearchResultSummary,
     /// Full run metadata for provenance tracking.
     pub metadata: RunMetadata,

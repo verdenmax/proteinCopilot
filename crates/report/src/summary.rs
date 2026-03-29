@@ -3,19 +3,7 @@
 use std::collections::{HashMap, HashSet};
 
 use protein_copilot_core::search_result::{SearchResult, SearchResultSummary};
-
-/// Computes the median of a sorted f64 slice.
-/// Returns 0.0 for empty slices. For even-length slices, averages the two middle values.
-fn compute_median(sorted: &[f64]) -> f64 {
-    let len = sorted.len();
-    if len == 0 {
-        0.0
-    } else if len % 2 == 0 {
-        (sorted[len / 2 - 1] + sorted[len / 2]) / 2.0
-    } else {
-        sorted[len / 2]
-    }
-}
+use protein_copilot_core::util::compute_median;
 
 /// Generates a statistical summary with optional FDR filtering.
 pub(crate) fn generate_summary(result: &SearchResult) -> SearchResultSummary {

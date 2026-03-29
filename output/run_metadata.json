@@ -1,0 +1,51 @@
+{
+  "run_id": "2a547ede-6d9f-4037-8813-967e25ef3159",
+  "created_at": "2026-03-29T13:48:47.090283287Z",
+  "input_files": [
+    "/home/verden/pfind/2025-fall/code/20190830_HF_ZHW_hela_SILAC_DIA_350_1000_Rep1.mzML"
+  ],
+  "params_used": {
+    "enzyme": "Trypsin",
+    "missed_cleavages": 2,
+    "fixed_modifications": [
+      {
+        "name": "Carbamidomethyl",
+        "mass_delta": 57.021464,
+        "residues": [
+          "C"
+        ],
+        "position": "Anywhere"
+      }
+    ],
+    "variable_modifications": [
+      {
+        "name": "Oxidation",
+        "mass_delta": 15.994915,
+        "residues": [
+          "M"
+        ],
+        "position": "Anywhere"
+      }
+    ],
+    "precursor_tolerance": {
+      "value": 10.0,
+      "unit": "Ppm"
+    },
+    "fragment_tolerance": {
+      "value": 0.02,
+      "unit": "Da"
+    },
+    "database_path": "/home/verden/pfind/2025-fall/code/uniprotkb_Human_AND_reviewed_true_AND_m_2025_12_30.fasta",
+    "decoy_strategy": "Reverse"
+  },
+  "engine_info": {
+    "name": "SimpleSearch",
+    "version": "0.1.0",
+    "supported_features": [
+      "basic_search",
+      "b_y_scoring"
+    ]
+  },
+  "duration_sec": 352.252235682,
+  "status": "Completed"
+}
