@@ -3,7 +3,7 @@
 > **文件名**：`prd-mvp-proteomics-search.md`
 > **版本**：1.0
 > **创建日期**：2026-03-27
-> **状态**：Draft
+> **状态**：In Progress — M1.1 core crate ✅ 完成（160 tests, 0 warnings）
 
 ---
 
@@ -468,10 +468,12 @@ M1.7 (集成验证)    ← 需要所有 MVP Milestone
 
 ### Milestone 1.1：项目骨架与 `core` crate
 
+> **状态**：✅ 已完成（160 tests, 0 clippy warnings）
+
 > 建立 Rust Workspace 结构，定义所有共享数据类型和 trait，为后续 MCP crate 提供基础。
 > 关联 FR：FR-7.1 ~ FR-7.7
 
-#### Task 1.1.1：初始化 Rust Workspace
+#### Task 1.1.1：初始化 Rust Workspace ✅
 
 - **Sub-task 1.1.1.1**：创建根 `Cargo.toml`（workspace 定义），配置 `crates/*` 成员
 - **Sub-task 1.1.1.2**：创建 `crates/core/Cargo.toml` 和 `crates/core/src/lib.rs`
@@ -479,42 +481,48 @@ M1.7 (集成验证)    ← 需要所有 MVP Milestone
 - **Sub-task 1.1.1.4**：配置 `rustfmt.toml` 和 `.clippy.toml`，确保代码风格一致
 - **Sub-task 1.1.1.5**：验证 `cargo build` 和 `cargo test` 通过
 
-#### Task 1.1.2：定义谱图数据结构（`spectrum.rs`）
+#### Task 1.1.2：定义谱图数据结构（`spectrum.rs`）✅
 
 - **Sub-task 1.1.2.1**：定义 `MsLevel` 枚举（MS1, MS2, Other(u8)）
-- **Sub-task 1.1.2.2**：定义 `PrecursorInfo` 结构体（mz, charge, intensity）
-- **Sub-task 1.1.2.3**：定义 `Spectrum` 结构体（scan_number, ms_level, retention_time_sec, precursor, mz_array, intensity_array）
+- **Sub-task 1.1.2.2**：定义 `PrecursorInfo` 结构体（mz, charge, intensity, isolation_window: Option\<IsolationWindow\>）
+- **Sub-task 1.1.2.3**：定义 `Spectrum` 结构体（scan_number, ms_level, retention_time_sec, precursors: Vec\<PrecursorInfo\>, mz_array, intensity_array）
+  - DDA: 1 precursor, DIA: 0~1 with wide isolation window, MS1: empty
+  - `IsolationWindow`：target_mz, lower_offset, upper_offset（对齐 mzML）
 - **Sub-task 1.1.2.4**：定义 `SpectrumSummary` 结构体（file_path, format, total_spectra, ms1_count, ms2_count, mz_range, rt_range_sec, precursor_charge_distribution, median_peaks_per_spectrum）
 - **Sub-task 1.1.2.5**：定义 `SpectrumFileInfo` 结构体（path, format, file_size_bytes），`SpectrumFormat` 枚举（MzML, Mgf）
 - **Sub-task 1.1.2.6**：所有结构体 derive `Serialize`, `Deserialize`, `Debug`, `Clone`, `JsonSchema`
 - **Sub-task 1.1.2.7**：编写单元测试：序列化/反序列化 round-trip 测试
+- **实现补充**：`Spectrum::new()` 构造器 + `validate()` 方法：mz/intensity 数组长度一致、mz 升序、m/z > 0、intensity ≥ 0、scan_number ≥ 1、precursor 字段校验。`SpectrumSummary::validate()` 校验范围一致性。`SpectrumError` 枚举（8 变体）。
 
-#### Task 1.1.3：定义搜索参数结构（`search_params.rs`）
+#### Task 1.1.3：定义搜索参数结构（`search_params.rs`）✅
 
 - **Sub-task 1.1.3.1**：定义 `Enzyme` 枚举（Trypsin, LysC, GluC, AspN, Chymotrypsin, TrypsinP, NonSpecific, Custom { name, cleavage_rule }）
 - **Sub-task 1.1.3.2**：定义 `ModPosition` 枚举（Anywhere, AnyNTerm, AnyCTerm, ProteinNTerm, ProteinCTerm）
 - **Sub-task 1.1.3.3**：定义 `Modification` 结构体（name, mass_delta, residues: Vec\<char\>, position: ModPosition）
 - **Sub-task 1.1.3.4**：定义 `ToleranceUnit` 枚举（Ppm, Da），`MassTolerance` 结构体（value, unit）
 - **Sub-task 1.1.3.5**：定义 `DecoyStrategy` 枚举（Reverse, Shuffle, None）
-- **Sub-task 1.1.3.6**：定义 `SearchParams` 结构体（enzyme, missed_cleavages, fixed_modifications, variable_modifications, precursor_tolerance, fragment_tolerance, database_path, decoy_strategy）
-- **Sub-task 1.1.3.7**：实现 `SearchParams::validate()` → `Result<(), CoreError>`：检查 database_path 非空、tolerance > 0、missed_cleavages ≤ 5
+- **Sub-task 1.1.3.6**：定义 `SearchParams` 结构体（enzyme, missed_cleavages, fixed_modifications, variable_modifications, precursor_tolerance, fragment_tolerance, database_path: String, decoy_strategy: DecoyStrategy）
+- **Sub-task 1.1.3.7**：实现 `SearchParams::validate()` → `Result<(), SearchParamsError>`：检查 database_path 非空、tolerance > 0 且 finite、missed_cleavages ≤ 5、modification mass_delta finite
 - **Sub-task 1.1.3.8**：编写单元测试：合法参数通过、非法参数返回明确错误
+- **实现补充**：`SearchParams` 额外 derive `PartialEq`（支持一致性校验）。`SearchParamsError` 枚举（4 变体）。
 
-#### Task 1.1.4：定义搜索结果结构（`search_result.rs`）
+#### Task 1.1.4：定义搜索结果结构（`search_result.rs`）✅
 
-- **Sub-task 1.1.4.1**：定义 `PSM` 结构体（spectrum_scan, peptide_sequence, modifications, charge, precursor_mz, calculated_mz, delta_mass_ppm, score, q_value, protein_accessions, is_decoy）
+- **Sub-task 1.1.4.1**：定义 `Psm` 结构体（spectrum_scan, peptide_sequence, modifications, charge, precursor_mz, calculated_mz, delta_mass_ppm, score, q_value, protein_accessions, is_decoy）
 - **Sub-task 1.1.4.2**：定义 `PeptideResult` 结构体（sequence, protein_accessions, best_score, q_value, psm_count）
 - **Sub-task 1.1.4.3**：定义 `ProteinResult` 结构体（accession, description, coverage, peptide_count, unique_peptide_count）
 - **Sub-task 1.1.4.4**：定义 `SearchResultSummary` 结构体（total_spectra_searched, total_psms, psms_at_1pct_fdr, unique_peptides_at_1pct_fdr, protein_groups_at_1pct_fdr, median_score, median_delta_mass_ppm, identification_rate, modification_distribution, charge_distribution, search_duration_sec）
-- **Sub-task 1.1.4.5**：定义 `SearchResult` 结构体（run_id: Uuid, engine_info, params_used, psms, peptides, proteins, summary, metadata: RunMetadata）
+- **Sub-task 1.1.4.5**：定义 `SearchResult` 结构体（run_id: Uuid, engine_info: EngineInfo, params_used: SearchParams, psms, peptides, proteins, summary, metadata: RunMetadata）
 - **Sub-task 1.1.4.6**：编写单元测试：构造完整 SearchResult → JSON round-trip
+- **实现补充**：所有类型均有 `validate()` 方法。`SearchResultError` 枚举（10 变体）。`SearchResult::validate()` 校验 run_id/engine_info/params_used 与 metadata 一致性，并委托到 summary.validate() + metadata.validate()。
 
-#### Task 1.1.5：定义 AI 决策输出结构（`ai_decision.rs`）
+#### Task 1.1.5：定义 AI 决策输出结构（`ai_decision.rs`）✅
 
-- **Sub-task 1.1.5.1**：定义 `AiDecision<T: Serialize>` 泛型结构体（decision: T, confidence: f64, explanation: String, input_summary: String, alternatives: Vec\<String\>, evidence: Vec\<String\>）
-- **Sub-task 1.1.5.2**：编写单元测试：`AiDecision<SearchParams>` 的 JSON 输出格式符合 copilot-instructions.md §2.4 规范
+- **Sub-task 1.1.5.1**：定义 `AiDecision<T>` 泛型结构体（decision: T, confidence: f64, explanation: String, input_summary: String, alternatives: Vec\<String\>, evidence: Vec\<String\>）
+- **Sub-task 1.1.5.2**：编写单元测试：`AiDecision<String>` 和 `AiDecision<SearchParams>` 的 JSON 输出格式符合 copilot-instructions.md §2.4 规范
+- **实现补充**：`AiDecision::validate()` 校验 confidence∈[0,1]、explanation/input_summary 非空。`AiDecisionError` 枚举（2 变体）。
 
-#### Task 1.1.6：定义领域错误类型（`error.rs`）
+#### Task 1.1.6：定义领域错误类型（`error.rs`）✅
 
 - **Sub-task 1.1.6.1**：定义 `CoreError` 枚举，使用 `#[derive(thiserror::Error)]`：
   - `SpectrumParseError { format: String, detail: String, suggestion: String }`
@@ -524,9 +532,11 @@ M1.7 (集成验证)    ← 需要所有 MVP Milestone
   - `UnsupportedFormat { format: String, supported: Vec<String> }`
   - `SshConnectionError { host: String, detail: String }`
   - `ResultParseError { engine: String, file: PathBuf, detail: String }`
+  - `ValidationError { context: String, detail: String, suggestion: String }`
 - **Sub-task 1.1.6.2**：实现 `CoreError::suggestion(&self) -> &str` 方法，返回建议操作
+- **实现补充**：`ErrorReport` 可序列化错误摘要（category, message, suggestion）用于 MCP 响应。`From` impl 覆盖所有 5 个模块错误类型 → CoreError。
 
-#### Task 1.1.7：定义搜索引擎 Adapter trait（`engine.rs`）
+#### Task 1.1.7：定义搜索引擎 Adapter trait（`engine.rs`）✅
 
 - **Sub-task 1.1.7.1**：定义 `SearchEngineAdapter` async trait：
   - `async fn search(&self, params: &SearchParams, input_files: &[PathBuf]) -> Result<SearchResult, CoreError>`
@@ -535,11 +545,12 @@ M1.7 (集成验证)    ← 需要所有 MVP Milestone
 - **Sub-task 1.1.7.2**：定义 `EngineInfo` 结构体（name: String, version: String, supported_features: Vec\<String\>）
 - **Sub-task 1.1.7.3**：定义 `HealthStatus` 枚举（Healthy, Degraded { reason }, Unavailable { reason }）
 
-#### Task 1.1.8：定义运行元数据结构（`run_metadata.rs`）
+#### Task 1.1.8：定义运行元数据结构（`run_metadata.rs`）✅
 
 - **Sub-task 1.1.8.1**：定义 `RunStatus` 枚举（Pending, Running, Completed, Failed { reason }）
 - **Sub-task 1.1.8.2**：定义 `RunMetadata` 结构体（run_id: Uuid, created_at: DateTime, input_files: Vec\<PathBuf\>, params_used: SearchParams, engine_info: EngineInfo, duration_sec: Option\<f64\>, status: RunStatus）
 - **Sub-task 1.1.8.3**：实现 `RunMetadata::new(params, engine_info, input_files)` 自动生成 run_id + timestamp
+- **实现补充**：`RunMetadata::validate()` 校验 duration_sec finite+非负、input_files 非空、engine_info 非空，并委托到 `params_used.validate()`。`RunMetadataError` 枚举（4 变体）。
 
 ---
 

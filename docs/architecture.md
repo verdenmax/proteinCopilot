@@ -404,7 +404,7 @@ pub struct SpectrumSummary {
 
 // ===== search_params.rs =====
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct SearchParams {
     pub enzyme: Enzyme,
     pub missed_cleavages: u32,
@@ -412,8 +412,8 @@ pub struct SearchParams {
     pub variable_modifications: Vec<Modification>,
     pub precursor_tolerance: MassTolerance,
     pub fragment_tolerance: MassTolerance,
-    pub database_path: PathBuf,
-    pub decoy_strategy: Option<DecoyStrategy>,
+    pub database_path: String,
+    pub decoy_strategy: DecoyStrategy,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -455,7 +455,7 @@ pub struct SearchResult {
     pub run_id: Uuid,
     pub engine_info: EngineInfo,
     pub params_used: SearchParams,
-    pub psms: Vec<PSM>,
+    pub psms: Vec<Psm>,
     pub peptides: Vec<PeptideResult>,
     pub proteins: Vec<ProteinResult>,
     pub summary: SearchResultSummary,
@@ -463,7 +463,7 @@ pub struct SearchResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct PSM {
+pub struct Psm {
     pub spectrum_scan: u32,
     pub peptide_sequence: String,
     pub modifications: Vec<Modification>,
