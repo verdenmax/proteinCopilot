@@ -43,6 +43,10 @@ pub enum RunMetadataError {
         /// Name of the field.
         field: &'static str,
     },
+
+    /// Delegated search params validation failed.
+    #[error("params_used validation failed: {0}")]
+    InvalidParams(String),
 }
 
 // ---------------------------------------------------------------------------
@@ -148,7 +152,9 @@ impl RunMetadata {
                 field: "engine_info.version",
             });
         }
-        Ok(())
+        self.params_used
+            .validate()
+            .map_err(|e| RunMetadataError::InvalidParams(e.to_string()))
     }
 }
 
@@ -341,5 +347,13 @@ mod tests {
         r.engine_info.name = "".to_string();
         let err = r.validate().unwrap_err();
         assert!(err.to_string().contains("engine_info.name"));
+    }
+
+    #[test]
+    fn validate_delegates_to_params_used() {
+        let mut r = sample_run_metadata();
+        r.params_used.database_path = "".to_string();
+        let err = r.validate().unwrap_err();
+        assert!(err.to_string().contains("params_used"));
     }
 }
