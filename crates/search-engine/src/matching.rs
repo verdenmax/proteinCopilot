@@ -370,7 +370,8 @@ mod tests {
             residues: vec!['C'],
             position: protein_copilot_core::search_params::ModPosition::Anywhere,
         };
-        let modified_mass = peptide.neutral_mass + apply_fixed_mods("PEPTIDCK", std::slice::from_ref(&cam));
+        let modified_mass =
+            peptide.neutral_mass + apply_fixed_mods("PEPTIDCK", std::slice::from_ref(&cam));
         assert!((modified_mass - peptide.neutral_mass - 57.021464).abs() < 0.001);
     }
 
