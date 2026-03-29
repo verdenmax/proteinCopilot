@@ -9,6 +9,11 @@ use protein_copilot_core::search_result::SearchResult;
 
 use crate::error::ReportError;
 
+/// Sanitizes a string for TSV output by replacing tabs and newlines.
+fn sanitize_tsv(s: &str) -> String {
+    s.replace(['\t', '\n'], " ").replace('\r', "")
+}
+
 /// Exports search results as 3 TSV files in the given directory.
 ///
 /// Creates: `psm.tsv`, `peptide.tsv`, `protein.tsv`
@@ -28,19 +33,27 @@ pub(crate) fn export_tsv(result: &SearchResult, output_dir: &Path) -> Result<(),
     .map_err(|e| io_err(&psm_path, e))?;
 
     for psm in &result.psms {
-        let mods: Vec<String> = psm.modifications.iter().map(|m| m.name.clone()).collect();
+        let mods: Vec<String> = psm
+            .modifications
+            .iter()
+            .map(|m| sanitize_tsv(&m.name))
+            .collect();
         writeln!(
             psm_file,
             "{}\t{}\t{}\t{:.6}\t{:.6}\t{:.2}\t{:.6}\t{}\t{}\t{}\t{}",
             psm.spectrum_scan,
-            psm.peptide_sequence,
+            sanitize_tsv(&psm.peptide_sequence),
             psm.charge,
             psm.precursor_mz,
             psm.calculated_mz,
             psm.delta_mass_ppm,
             psm.score,
             psm.q_value.map_or("NA".to_string(), |q| format!("{q:.6}")),
-            psm.protein_accessions.join(";"),
+            psm.protein_accessions
+                .iter()
+                .map(|a| sanitize_tsv(a))
+                .collect::<Vec<_>>()
+                .join(";"),
             psm.is_decoy,
             mods.join(";"),
         )
@@ -60,8 +73,12 @@ pub(crate) fn export_tsv(result: &SearchResult, output_dir: &Path) -> Result<(),
         writeln!(
             pep_file,
             "{}\t{}\t{:.6}\t{}\t{}",
-            pep.sequence,
-            pep.protein_accessions.join(";"),
+            sanitize_tsv(&pep.sequence),
+            pep.protein_accessions
+                .iter()
+                .map(|a| sanitize_tsv(a))
+                .collect::<Vec<_>>()
+                .join(";"),
             pep.best_score,
             pep.q_value.map_or("NA".to_string(), |q| format!("{q:.6}")),
             pep.psm_count,
@@ -82,8 +99,8 @@ pub(crate) fn export_tsv(result: &SearchResult, output_dir: &Path) -> Result<(),
         writeln!(
             prot_file,
             "{}\t{}\t{:.4}\t{}\t{}",
-            prot.accession,
-            prot.description,
+            sanitize_tsv(&prot.accession),
+            sanitize_tsv(&prot.description),
             prot.coverage,
             prot.peptide_count,
             prot.unique_peptide_count,

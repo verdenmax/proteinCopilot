@@ -4,6 +4,19 @@ use std::collections::{HashMap, HashSet};
 
 use protein_copilot_core::search_result::{SearchResult, SearchResultSummary};
 
+/// Computes the median of a sorted f64 slice.
+/// Returns 0.0 for empty slices. For even-length slices, averages the two middle values.
+fn compute_median(sorted: &[f64]) -> f64 {
+    let len = sorted.len();
+    if len == 0 {
+        0.0
+    } else if len % 2 == 0 {
+        (sorted[len / 2 - 1] + sorted[len / 2]) / 2.0
+    } else {
+        sorted[len / 2]
+    }
+}
+
 /// Generates a statistical summary with optional FDR filtering.
 pub(crate) fn generate_summary(result: &SearchResult) -> SearchResultSummary {
     let total_spectra = result.summary.total_spectra_searched;
@@ -63,16 +76,8 @@ pub(crate) fn generate_summary(result: &SearchResult) -> SearchResultSummary {
     scores.sort_by(|a, b| a.total_cmp(b));
     delta_ppms.sort_by(|a, b| a.total_cmp(b));
 
-    let median_score = if scores.is_empty() {
-        0.0
-    } else {
-        scores[scores.len() / 2]
-    };
-    let median_delta = if delta_ppms.is_empty() {
-        0.0
-    } else {
-        delta_ppms[delta_ppms.len() / 2]
-    };
+    let median_score = compute_median(&scores);
+    let median_delta = compute_median(&delta_ppms);
 
     SearchResultSummary {
         total_spectra_searched: total_spectra,
@@ -223,8 +228,8 @@ mod tests {
     fn summary_median_score() {
         let result = sample_result_with_qvalues();
         let summary = generate_summary(&result);
-        // Filtered PSMs scores: [0.6, 0.8], median = 0.8 (index 1 of 2)
-        assert!((summary.median_score - 0.8).abs() < 0.01);
+        // Filtered PSMs scores: [0.6, 0.8], proper median = (0.6+0.8)/2 = 0.7
+        assert!((summary.median_score - 0.7).abs() < 0.01);
     }
 
     #[test]
