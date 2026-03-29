@@ -16,6 +16,13 @@
 //! this engine. The output `AiDecision<SearchParams>` contains the
 //! recommended parameters along with confidence, explanation, and
 //! alternatives — ready for the LLM to present to the user.
+//!
+//! # Important: `database_path`
+//!
+//! The recommended `SearchParams` uses a placeholder `"<database_path>"`
+//! for the FASTA database path. **Callers must replace this** before
+//! passing to a search engine. Use [`SearchPreset::with_database`] or
+//! set `decision.database_path` directly.
 
 pub mod error;
 pub mod hints;
@@ -65,8 +72,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn list_presets_returns_4() {
+    fn list_presets_returns_5() {
         let presets = ParamRecommender::list_presets();
-        assert_eq!(presets.len(), 4);
+        assert_eq!(presets.len(), 5);
     }
 }

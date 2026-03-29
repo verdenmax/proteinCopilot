@@ -14,3 +14,4 @@ thiserror = { workspace = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }
+protein-copilot-spectrum-io = { workspace = true }

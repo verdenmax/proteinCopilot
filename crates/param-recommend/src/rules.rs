@@ -144,6 +144,8 @@ fn select_preset(experiment_type: &str) -> SearchParams {
         preset::phospho_preset()
     } else if lower.contains("tmt") {
         preset::tmt_preset()
+    } else if lower.contains("silac") {
+        preset::silac_preset()
     } else if lower.contains("open") {
         preset::open_search_preset()
     } else {
@@ -263,6 +265,9 @@ fn build_alternatives(experiment_type: &str) -> Vec<String> {
     }
     if !lower.contains("tmt") {
         alts.push("TMT-labeled search with TMT6plex modifications".to_string());
+    }
+    if !lower.contains("silac") {
+        alts.push("SILAC labeled search with heavy K/R modifications".to_string());
     }
     if lower != "standard" && !lower.contains("standard") {
         alts.push("Standard search without special modifications".to_string());

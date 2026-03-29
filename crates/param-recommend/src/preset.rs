@@ -198,12 +198,54 @@ pub fn open_search_preset() -> SearchPreset {
     }
 }
 
+fn silac_heavy_k() -> Modification {
+    Modification {
+        name: "Label:13C(6)15N(2)".to_string(),
+        mass_delta: 8.014199,
+        residues: vec!['K'],
+        position: ModPosition::Anywhere,
+    }
+}
+
+fn silac_heavy_r() -> Modification {
+    Modification {
+        name: "Label:13C(6)15N(4)".to_string(),
+        mass_delta: 10.008269,
+        residues: vec!['R'],
+        position: ModPosition::Anywhere,
+    }
+}
+
+/// SILAC (Stable Isotope Labeling by Amino acids in Cell culture) preset.
+pub fn silac_preset() -> SearchPreset {
+    SearchPreset {
+        name: "silac".to_string(),
+        description: "SILAC heavy labeling: 13C6-15N2-Lys (+8.014 Da) and 13C6-15N4-Arg (+10.008 Da) as variable modifications".to_string(),
+        params: SearchParams {
+            database_path: PLACEHOLDER_DB.to_string(),
+            enzyme: Enzyme::Trypsin,
+            missed_cleavages: 2,
+            fixed_modifications: vec![carbamidomethyl_c()],
+            variable_modifications: vec![oxidation_m(), silac_heavy_k(), silac_heavy_r()],
+            precursor_tolerance: MassTolerance { value: 10.0, unit: ToleranceUnit::Ppm },
+            fragment_tolerance: MassTolerance { value: 0.02, unit: ToleranceUnit::Da },
+            decoy_strategy: DecoyStrategy::Reverse,
+        },
+        applicable_scenarios: vec![
+            "SILAC quantification".to_string(),
+            "Metabolic labeling".to_string(),
+            "Protein turnover analysis".to_string(),
+        ],
+    }
+}
+
 /// Returns all built-in search presets.
 pub fn all_presets() -> Vec<SearchPreset> {
     vec![
         standard_preset(),
         phospho_preset(),
         tmt_preset(),
+        silac_preset(),
         open_search_preset(),
     ]
 }
@@ -213,8 +255,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn all_presets_have_4_entries() {
-        assert_eq!(all_presets().len(), 4);
+    fn all_presets_have_5_entries() {
+        assert_eq!(all_presets().len(), 5);
     }
 
     #[test]
@@ -223,7 +265,7 @@ mod tests {
         let mut names: Vec<&str> = presets.iter().map(|p| p.name.as_str()).collect();
         names.sort();
         names.dedup();
-        assert_eq!(names.len(), 4);
+        assert_eq!(names.len(), 5);
     }
 
     #[test]
@@ -261,5 +303,18 @@ mod tests {
         let p = open_search_preset();
         assert!(p.params.precursor_tolerance.value >= 500.0);
         assert_eq!(p.params.precursor_tolerance.unit, ToleranceUnit::Da);
+    }
+
+    #[test]
+    fn silac_preset_has_heavy_labels() {
+        let p = silac_preset();
+        let var_names: Vec<&str> = p
+            .params
+            .variable_modifications
+            .iter()
+            .map(|m| m.name.as_str())
+            .collect();
+        assert!(var_names.iter().any(|n| n.contains("13C(6)15N(2)")));
+        assert!(var_names.iter().any(|n| n.contains("13C(6)15N(4)")));
     }
 }

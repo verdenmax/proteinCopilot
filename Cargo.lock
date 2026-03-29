@@ -249,6 +249,7 @@ name = "protein-copilot-param-recommend"
 version = "0.1.0"
 dependencies = [
  "protein-copilot-core",
+ "protein-copilot-spectrum-io",
  "schemars",
  "serde",
  "serde_json",
