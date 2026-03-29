@@ -273,7 +273,7 @@ impl SpectrumReader for MgfReader {
             peak_counts[peak_counts.len() / 2]
         };
 
-        Ok(SpectrumSummary {
+        let summary = SpectrumSummary {
             file_path: path.to_string_lossy().to_string(),
             format: SpectrumFormat::Mgf,
             total_spectra: total,
@@ -283,7 +283,14 @@ impl SpectrumReader for MgfReader {
             rt_range_sec: (rt_min, rt_max),
             precursor_charge_distribution: charge_dist,
             median_peaks_per_spectrum: median_peaks,
-        })
+        };
+        summary
+            .validate()
+            .map_err(|e| SpectrumIoError::ValidationError {
+                scan: 0,
+                detail: format!("summary: {e}"),
+            })?;
+        Ok(summary)
     }
 
     fn read_spectrum(&self, path: &Path, scan: u32) -> Result<Spectrum, SpectrumIoError> {

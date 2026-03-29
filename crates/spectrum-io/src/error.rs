@@ -95,3 +95,76 @@ impl From<std::io::Error> for SpectrumIoError {
         }
     }
 }
+
+impl From<SpectrumIoError> for protein_copilot_core::error::CoreError {
+    fn from(err: SpectrumIoError) -> Self {
+        match err {
+            SpectrumIoError::FileNotFound { path } => {
+                protein_copilot_core::error::CoreError::FileNotFound { path }
+            }
+            SpectrumIoError::UnknownFormat { path } => {
+                protein_copilot_core::error::CoreError::UnsupportedFormat {
+                    format: path
+                        .extension()
+                        .map(|e| e.to_string_lossy().to_string())
+                        .unwrap_or_default(),
+                    supported: vec!["mzML".to_string(), "mgf".to_string()],
+                }
+            }
+            SpectrumIoError::UnsupportedFormat { format, .. } => {
+                protein_copilot_core::error::CoreError::UnsupportedFormat {
+                    format,
+                    supported: vec!["mzML".to_string(), "mgf".to_string()],
+                }
+            }
+            SpectrumIoError::IoError { path, source } => {
+                protein_copilot_core::error::CoreError::SpectrumParseError {
+                    format: "unknown".to_string(),
+                    detail: format!("I/O error reading {}: {source}", path.display()),
+                    suggestion: "Check file permissions and disk availability".to_string(),
+                }
+            }
+            SpectrumIoError::ParseError { path, line, detail } => {
+                protein_copilot_core::error::CoreError::SpectrumParseError {
+                    format: path
+                        .extension()
+                        .map(|e| e.to_string_lossy().to_string())
+                        .unwrap_or_default(),
+                    detail: format!("line {line}: {detail}"),
+                    suggestion: "Check spectrum file integrity".to_string(),
+                }
+            }
+            SpectrumIoError::XmlError { path, detail } => {
+                protein_copilot_core::error::CoreError::SpectrumParseError {
+                    format: "mzML".to_string(),
+                    detail: format!("{}: {detail}", path.display()),
+                    suggestion: "Verify the mzML file is well-formed XML".to_string(),
+                }
+            }
+            SpectrumIoError::BinaryDecodeError { path, detail } => {
+                protein_copilot_core::error::CoreError::SpectrumParseError {
+                    format: "mzML".to_string(),
+                    detail: format!("{}: {detail}", path.display()),
+                    suggestion: "Check binary data encoding in the mzML file".to_string(),
+                }
+            }
+            SpectrumIoError::ValidationError { scan, detail } => {
+                protein_copilot_core::error::CoreError::SpectrumParseError {
+                    format: "spectrum".to_string(),
+                    detail: format!("scan {scan}: {detail}"),
+                    suggestion: "Check spectrum data integrity".to_string(),
+                }
+            }
+            SpectrumIoError::ScanNotFound { path, scan } => {
+                protein_copilot_core::error::CoreError::SpectrumParseError {
+                    format: path
+                        .extension()
+                        .map(|e| e.to_string_lossy().to_string())
+                        .unwrap_or_default(),
+                    detail: format!("scan {scan} not found in {}", path.display()),
+                    suggestion: "Verify the scan number exists in the file".to_string(),
+                }
+            }
+        }
+    }
+}
