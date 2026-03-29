@@ -288,6 +288,40 @@ search-engine/src/
 - 搜索执行是 async，通过 `#[async_trait]` 支持 `Box<dyn SearchEngineAdapter>`
 - 氨基酸质量表集中在 `chemistry.rs`，避免重复
 
+**SimpleSearchEngine 搜索算法详情**：
+
+```text
+输入: SearchParams + spectrum_files + FASTA
+
+Step 1: 参数校验 (validate)
+Step 2: 读取 FASTA → 蛋白质列表
+Step 3: 酶切消化 → 候选肽段列表
+         ├── 按 Enzyme 规则切割 (Trypsin: K/R 后切, P 除外)
+         ├── missed cleavages 0~N
+         └── 过滤: 6 ≤ 肽段长度 ≤ 50 aa
+Step 4: 读取谱图文件 (spectrum-io)
+Step 5: 逐谱图匹配
+         对于每张 MS2 谱图:
+           observed_mz = precursor m/z
+           对于每个候选肽段:
+             modified_mass = peptide_mass + Σ fixed_mod_delta
+             对于每个 charge (已知用实际值, 未知试 2→3→1→4):
+               theoretical_mz = (modified_mass + charge × 1.007276) / charge
+               if |observed - theoretical| / theoretical × 1e6 < tolerance_ppm:
+                 生成理论 b 离子: cumulative_residue_mass + proton
+                 生成理论 y 离子: cumulative_from_C_term + water + proton
+                 matched = 在实验 peak list 中 binary search 匹配数
+                 score = matched / total_theoretical_ions
+                 保留最高分匹配
+Step 6: 聚合 → PSM → Peptide → Protein (位置追踪 coverage)
+Step 7: 统计 → SearchResultSummary + RunMetadata
+```
+
+**复杂度**: O(spectra × peptides × charges)，全量遍历无索引。
+**性能实测**: 1 spectrum × 20420 proteins (UniProt Human) = 0.83 sec (release)。
+**电荷范围**: 已知 charge 用实际值；未知 charge 尝试 2, 3, 1, 4（按常见频率排序）。
+**打分模型**: 匹配碎片离子数 / 总理论碎片数（简化版，非统计学打分）。
+
 ---
 
 ### 3.5 `report`（lib crate）

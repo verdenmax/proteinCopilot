@@ -3,7 +3,7 @@
 > **文件名**：`prd-mvp-proteomics-search.md`
 > **版本**：1.0
 > **创建日期**：2026-03-27
-> **状态**：In Progress — M1.1 ✅ M1.2 ✅ M1.3 ✅ M1.4 ✅（278 tests, 0 warnings）
+> **状态**：In Progress — M1.1 ✅ M1.2 ✅ M1.3 ✅ M1.4 ✅（282 tests, 0 warnings）
 
 ---
 
@@ -712,10 +712,14 @@ M1.7 (集成验证)    ← 需要所有 MVP Milestone
 #### M1.4 已知局限性
 
 1. **SimpleSearchEngine 是验证引擎**：搜索质量不如 pFind/MSFragger，仅用于验证架构和数据流
-2. **O(N×M) 全量匹配**：无索引优化，大数据集会慢
-3. **无统计学打分**：用碎片离子比例打分，非 hyperscore/binomial
-4. **无 FDR 计算**：所有 PSM 默认通过（q_value = None）
-5. **pFind 待对接**：需提供 .cfg 格式样例和输出文件样例
+2. **O(N×M) 全量匹配**：每张谱图对每个候选肽段逐一比较，无索引优化。1 spectrum × 20420 proteins ≈ 0.83 sec，2000 spectra 会需要 ~30 min
+3. **无统计学打分**：用 matched_b_y_ions / total_theoretical_ions 比例打分，非 hyperscore/binomial 统计模型
+4. **无 FDR 计算**：所有 PSM 默认通过（q_value = None），无 target-decoy 策略执行
+5. **电荷范围**：已知 charge 用实际值；未知 charge 尝试 2→3→1→4 四个电荷态
+6. **仅支持单电荷碎片离子**：b/y 离子只生成 z=1，不生成 z=2 或中性丢失离子
+7. **pFind 待对接**：需提供 .cfg 格式样例和输出文件样例
+
+**真实数据验证**：使用 pBuild MGF (1 spectrum, charge 5+) + UniProt Human reviewed (20420 proteins) 完成端到端搜索，鉴定到 `DQSSWQNSDASQEVGGHQER` (TB182_HUMAN, Δ5.6 ppm, score 0.079)。
 
 #### 原 M1.4 任务 1.4.3-1.4.7（pFind 相关）→ 推迟
 
