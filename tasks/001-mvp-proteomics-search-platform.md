@@ -3,7 +3,7 @@
 > **文件名**：`prd-mvp-proteomics-search.md`
 > **版本**：1.0
 > **创建日期**：2026-03-27
-> **状态**：In Progress — M1.1 ✅ M1.2 ✅ M1.3 ✅ M1.4 ✅（282 tests, 0 warnings）
+> **状态**：In Progress — M1.1 ✅ M1.2 ✅ M1.3 ✅ M1.4 ✅ M1.5 ✅（299 tests, 0 warnings）
 
 ---
 
@@ -729,37 +729,41 @@ M1.7 (集成验证)    ← 需要所有 MVP Milestone
 
 ### Milestone 1.5：`report` — 报告生成 Library Crate
 
+> **状态**：✅ 已完成（10 tests, 0 warnings）
+>
 > 搜索结果的统计聚合与导出。纯计算，不依赖 MCP。
 > 关联 FR：FR-4.1 ~ FR-4.6 | 关联 US：US-6
 
-#### Task 1.5.1：创建 crate
+#### Task 1.5.1：创建 crate ✅
 
-- **Sub-task 1.5.1.1**：创建 `crates/report/Cargo.toml`，依赖 `core`, `csv`
+- **Sub-task 1.5.1.1**：创建 `crates/report/Cargo.toml`，依赖 `core`, `serde_json`, `thiserror`
+- **实现补充**：ReportError（3 变体）+ From for CoreError
 
-#### Task 1.5.2：实现摘要生成
+#### Task 1.5.2：实现摘要生成 ✅
 
 - **Sub-task 1.5.2.1**：实现 `ReportGenerator::generate_summary(result) -> SearchResultSummary`
 - **Sub-task 1.5.2.2**：统计计算：total_psms, 按 q_value ≤ 0.01 过滤得 psms_at_1pct_fdr, 去重得 unique_peptides, 蛋白分组
 - **Sub-task 1.5.2.3**：计算 identification_rate = psms_at_1pct_fdr / total_spectra_searched
 - **Sub-task 1.5.2.4**：统计 modification_distribution（每种修饰出现次数）和 charge_distribution
-- **Sub-task 1.5.2.5**：计算 median_score 和 median_delta_mass_ppm
+- **Sub-task 1.5.2.5**：使用 `core::util::compute_median` 计算 median_score 和 median_delta_mass_ppm（跨 crate 统一算法）
+- **实现补充**：无 q-value 时保留所有 PSM（兼容 SimpleSearchEngine）。`SearchResult.summary` 是引擎侧初步统计，`generate_summary()` 是带 FDR 过滤的最终版本。
 
-#### Task 1.5.3：实现结果导出
+#### Task 1.5.3：实现结果导出 ✅
 
 - **Sub-task 1.5.3.1**：实现 `ReportGenerator::export_tsv(result, output_dir)` → 生成 3 个 TSV：psm.tsv, peptide.tsv, protein.tsv
 - **Sub-task 1.5.3.2**：实现 `ReportGenerator::export_json(result, output_path)` → 完整 JSON 导出
 - **Sub-task 1.5.3.3**：实现 `ReportGenerator::export_metadata(metadata, output_path)` → run_metadata.json
+- **实现补充**：TSV 输出使用 `sanitize_tsv()` 转义 tab/换行字符。
 
-#### Task 1.5.4：实现结果比较（P2，可选）
+#### Task 1.5.4：实现结果比较（P2，推迟）
 
-- **Sub-task 1.5.4.1**：定义 `ComparisonSummary` 结构体（psm_count_diff, peptide_overlap, protein_overlap, unique_to_a, unique_to_b）
-- **Sub-task 1.5.4.2**：实现 `ReportGenerator::compare(a, b) -> ComparisonSummary`
+- 推迟到后续迭代。ComparisonSummary 结构和 compare() 方法未实现。
 
-#### Task 1.5.5：测试
+#### Task 1.5.5：测试 ✅
 
-- **Sub-task 1.5.5.1**：构造 SearchResult fixture → 验证 summary 各字段计算正确
-- **Sub-task 1.5.5.2**：验证导出的 TSV 字段数和内容正确
-- **Sub-task 1.5.5.3**：验证 run_metadata.json 包含所有必要字段
+- **Sub-task 1.5.5.1**：构造 SearchResult fixture → 验证 summary 各字段计算正确（FDR 过滤、median、charge 分布）
+- **Sub-task 1.5.5.2**：验证导出的 TSV 文件创建和字段内容正确
+- **Sub-task 1.5.5.3**：验证 JSON roundtrip 和 run_metadata.json 字段完整
 
 ---
 

@@ -326,21 +326,38 @@ Step 7: 统计 → SearchResultSummary + RunMetadata
 
 ### 3.5 `report`（lib crate）
 
-**职责**：将 `SearchResult` 转换为各种输出格式（摘要、TSV、JSON）。
+**职责**：将 `SearchResult` 转换为统计摘要和各种输出格式（TSV、JSON）。
 
 **对外暴露**：
 ```rust
 pub struct ReportGenerator;
 
 impl ReportGenerator {
+    /// 生成带 FDR 过滤的统计摘要（q_value ≤ 0.01）。
+    /// 与 SearchResult.summary（引擎侧初步统计）互补。
     pub fn generate_summary(result: &SearchResult) -> SearchResultSummary;
-    pub fn export_tsv(result: &SearchResult, output: &Path) -> Result<()>;
-    pub fn export_json(result: &SearchResult, output: &Path) -> Result<()>;
-    pub fn compare(a: &SearchResult, b: &SearchResult) -> ComparisonSummary;
+
+    /// 导出 3 个 TSV 文件：psm.tsv, peptide.tsv, protein.tsv
+    pub fn export_tsv(result: &SearchResult, output_dir: &Path) -> Result<(), ReportError>;
+
+    /// 导出完整 SearchResult 为 JSON
+    pub fn export_json(result: &SearchResult, output_path: &Path) -> Result<(), ReportError>;
+
+    /// 导出运行元数据为 JSON
+    pub fn export_metadata(metadata: &RunMetadata, output_path: &Path) -> Result<(), ReportError>;
 }
 ```
 
-**依赖**：`core`, `csv`（TSV 导出）
+**内部结构**：
+```text
+report/src/
+├── lib.rs         ← ReportGenerator 门面
+├── error.rs       ← ReportError（3 变体）
+├── summary.rs     ← FDR 过滤 + 统计聚合
+└── export.rs      ← TSV/JSON 导出（含 sanitize_tsv 转义）
+```
+
+**依赖**：`core`（共享类型 + compute_median）, `serde_json`
 
 ---
 
