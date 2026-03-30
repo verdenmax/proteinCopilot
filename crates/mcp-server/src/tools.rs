@@ -50,18 +50,77 @@ struct RecommendParamsInput {
     summary: Option<SpectrumSummary>,
     /// Path to spectrum file. Used to generate summary if summary is not provided.
     file_path: Option<String>,
-    /// Optional user hints
+    /// Optional user hints (experiment_type, instrument_type, enzyme)
+    #[serde(default, deserialize_with = "deserialize_hints")]
+    #[schemars(with = "Option<UserHints>")]
     hints: Option<UserHints>,
     /// FASTA database path. If provided, sets database_path in the recommended params.
     database_path: Option<String>,
 }
 
+/// Deserialize hints from either a JSON object or a JSON string containing an object.
+fn deserialize_hints<'de, D>(deserializer: D) -> Result<Option<UserHints>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::Error;
+
+    let value: Option<serde_json::Value> = Option::deserialize(deserializer)?;
+    match value {
+        None => Ok(None),
+        Some(serde_json::Value::Object(map)) => {
+            let hints: UserHints =
+                serde_json::from_value(serde_json::Value::Object(map)).map_err(D::Error::custom)?;
+            Ok(Some(hints))
+        }
+        Some(serde_json::Value::String(s)) => {
+            let hints: UserHints = serde_json::from_str(&s).map_err(D::Error::custom)?;
+            Ok(Some(hints))
+        }
+        Some(other) => Err(D::Error::custom(format!(
+            "hints must be an object or JSON string, got: {other}"
+        ))),
+    }
+}
+
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct RunSearchInput {
-    /// Search parameters
-    params: SearchParams,
+    /// Search parameters (from recommend_params decision). If not provided, auto-recommends.
+    #[serde(default, deserialize_with = "deserialize_params")]
+    #[schemars(with = "Option<SearchParams>")]
+    params: Option<SearchParams>,
     /// Paths to spectrum files
     input_files: Vec<String>,
+    /// FASTA database path (used if params is not provided or params.database_path is placeholder)
+    database_path: Option<String>,
+    /// Optional user hints for auto-recommendation (used when params not provided)
+    #[serde(default, deserialize_with = "deserialize_hints")]
+    #[schemars(with = "Option<UserHints>")]
+    hints: Option<UserHints>,
+}
+
+/// Deserialize params from either a JSON object or a JSON string.
+fn deserialize_params<'de, D>(deserializer: D) -> Result<Option<SearchParams>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::Error;
+    let value: Option<serde_json::Value> = Option::deserialize(deserializer)?;
+    match value {
+        None => Ok(None),
+        Some(serde_json::Value::Object(map)) => {
+            let p: SearchParams =
+                serde_json::from_value(serde_json::Value::Object(map)).map_err(D::Error::custom)?;
+            Ok(Some(p))
+        }
+        Some(serde_json::Value::String(s)) => {
+            let p: SearchParams = serde_json::from_str(&s).map_err(D::Error::custom)?;
+            Ok(Some(p))
+        }
+        Some(other) => Err(D::Error::custom(format!(
+            "params must be an object or JSON string, got: {other}"
+        ))),
+    }
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -274,15 +333,42 @@ impl ProteinCopilotServer {
     /// Execute a database search against spectrum files.
     #[rmcp::tool(
         name = "run_search",
-        description = "Run a proteomics database search. Input: SearchParams (from recommend_params or manual) + spectrum file paths. Output: SearchResult with PSMs, peptides, proteins, and summary statistics. The result is cached server-side — use the returned run_id with generate_summary and export_results."
+        description = "Run a proteomics database search. Can auto-recommend parameters if only input_files and database_path are provided. Or pass explicit params from recommend_params. The result is cached — use the returned run_id with generate_summary and export_results."
     )]
     async fn run_search(
         &self,
         Parameters(input): Parameters<RunSearchInput>,
     ) -> Result<Json<SearchResult>, ErrorData> {
-        // Validate params before search
-        input
-            .params
+        // Resolve params: use provided or auto-recommend
+        let mut params = if let Some(p) = input.params {
+            p
+        } else {
+            // Auto-recommend from first input file
+            let first_file = input
+                .input_files
+                .first()
+                .ok_or_else(|| mcp_err(ErrorCode::INVALID_PARAMS, "input_files is empty"))?;
+            let path = Path::new(first_file);
+            let info = protein_copilot_spectrum_io::detect_format(path)
+                .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
+            let reader = protein_copilot_spectrum_io::create_reader(&info);
+            let summary = reader
+                .read_summary(path)
+                .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
+            let recommender = ParamRecommender;
+            let decision = recommender
+                .recommend(&summary, input.hints.as_ref())
+                .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
+            decision.decision
+        };
+
+        // Inject database_path if provided
+        if let Some(ref db_path) = input.database_path {
+            params.database_path = db_path.clone();
+        }
+
+        // Validate params
+        params
             .validate()
             .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
 
@@ -293,10 +379,7 @@ impl ProteinCopilotServer {
             .ok_or_else(|| mcp_err(ErrorCode::INTERNAL_ERROR, "no search engine available"))?;
 
         let files: Vec<PathBuf> = input.input_files.iter().map(PathBuf::from).collect();
-        let result = engine
-            .search(&input.params, &files)
-            .await
-            .map_err(mcp_core_err)?;
+        let result = engine.search(&params, &files).await.map_err(mcp_core_err)?;
 
         // Cache result for later use by generate_summary / export_results
         if let Ok(mut cache) = self.result_cache.lock() {
