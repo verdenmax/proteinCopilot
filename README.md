@@ -38,8 +38,27 @@ crates/
 ├── spectrum-io/       谱图文件解析（mgf/mzML streaming 读取）
 ├── param-recommend/   参数推荐规则引擎（确定性，不调 LLM）
 ├── search-engine/     搜索引擎（SimpleSearch + pFind adapter 预留）
-└── report/            报告生成（摘要 + TSV/JSON 导出）
+├── report/            报告生成（摘要 + TSV/JSON 导出）
+└── mcp-server/        MCP Server 二进制（8 tools，stdio transport）
+
+.github/
+├── agents/proteomics-search.agent.md   蛋白搜索助手 Agent
+├── prompts/basic-search.prompt.md      基础搜索 Skill
+└── prompts/result-interpretation.prompt.md  结果解读 Skill
 ```
+
+## MCP Tools（8 个）
+
+| Tool | 功能 |
+|------|------|
+| `read_spectra` | 读取谱图文件 → 统计摘要 |
+| `get_spectrum` | 按 scan 读取单张谱图 |
+| `recommend_params` | 推荐搜索参数 + 解释 |
+| `list_presets` | 列出内置预设 |
+| `run_search` | 执行数据库搜索 |
+| `check_engine` | 检查引擎状态 |
+| `generate_summary` | FDR 过滤统计摘要 |
+| `export_results` | 导出 TSV/JSON 文件 |
 
 ## 架构原则
 
@@ -57,7 +76,7 @@ crates/
 | M1.3 param-recommend | ✅ 规则引擎 + 5 个预设 |
 | M1.4 search-engine | ✅ SimpleSearch + pFind 预留 |
 | M1.5 report | ✅ 摘要 + TSV/JSON 导出 |
-| M1.6 mcp-server | 🔲 MCP Server 组装 |
+| M1.6 mcp-server | ✅ 8 MCP tools + Agent + Skill |
 | M1.7 integration | 🔲 端到端集成验证 |
 
 详细计划：`tasks/001-mvp-proteomics-search-platform.md`

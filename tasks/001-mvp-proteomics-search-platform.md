@@ -3,7 +3,7 @@
 > **文件名**：`prd-mvp-proteomics-search.md`
 > **版本**：1.0
 > **创建日期**：2026-03-27
-> **状态**：In Progress — M1.1 ✅ M1.2 ✅ M1.3 ✅ M1.4 ✅ M1.5 ✅（299 tests, 0 warnings）
+> **状态**：In Progress — M1.1 ✅ M1.2 ✅ M1.3 ✅ M1.4 ✅ M1.5 ✅ M1.6 ✅（299 tests, 0 warnings）
 
 ---
 
@@ -769,39 +769,46 @@ M1.7 (集成验证)    ← 需要所有 MVP Milestone
 
 ### Milestone 1.6：`mcp-server` — MCP Server 二进制 + Agent/Skill
 
+> **状态**：✅ 已完成（8 MCP tools 注册，Agent + 2 Skill 编写完成）
+>
 > 组装所有 library crate 为 MCP Server，编写蛋白搜索 Agent 和 Skill。
 > 关联 FR：FR-5.1 ~ FR-5.5 | 关联 US：US-1
 
-#### Task 1.6.1：搭建 MCP Server 框架
+#### Task 1.6.0：升级 schemars + rust-version ✅
 
-- **Sub-task 1.6.1.1**：创建 `crates/mcp-server/Cargo.toml`，依赖所有 library + `rmcp`, `tokio`, `tracing`, `clap`
-- **Sub-task 1.6.1.2**：实现 `main.rs`：初始化 tracing → 读取配置 → 构建 handler → `serve(stdio())`
+- schemars 0.8 → 1.x（rmcp v1.3 依赖）
+- rust-version 1.80 → 1.85
+
+#### Task 1.6.1：搭建 MCP Server 框架 ✅
+
+- **Sub-task 1.6.1.1**：创建 `crates/mcp-server/Cargo.toml`，依赖所有 library + `rmcp` v1.3, `tokio`, `tracing`
+- **Sub-task 1.6.1.2**：实现 `main.rs`：初始化 tracing → 构建 ProteinCopilotServer → `serve(stdio())`
 - **Sub-task 1.6.1.3**：定义 `AppConfig` 结构体（ssh_config, pfind_config, data_dirs），从配置文件或环境变量加载 → **推迟到 pFind 接入时实现**（当前 SimpleSearchEngine 无需外部配置）
 - **Sub-task 1.6.1.4**：验证 MCP Server 启动 → `Copilot CLI` 能发现并列出 tools
 
-#### Task 1.6.2：注册 spectrum-io Tools
+#### Task 1.6.2：注册 spectrum-io Tools ✅
 
 - **Sub-task 1.6.2.1**：实现 `#[tool] read_spectra(file_path, format?)` → 调用 `spectrum_io::create_reader` → `reader.read_summary()` → 返回 JSON
 - **Sub-task 1.6.2.2**：实现 `#[tool] get_spectrum(file_path, scan_number)` → `reader.read_spectrum()` → 返回 JSON
 - **Sub-task 1.6.2.3**：错误转换：`CoreError` → MCP error response（error_code + message + suggestion）
 
-#### Task 1.6.3：注册 param-recommend Tools
+#### Task 1.6.3：注册 param-recommend Tools ✅
 
 - **Sub-task 1.6.3.1**：实现 `#[tool] recommend_params(spectrum_summary, user_hints?)` → `ParamRecommender::recommend()` → 返回 JSON
 - **Sub-task 1.6.3.2**：实现 `#[tool] list_presets()` → `ParamRecommender::list_presets()` → 返回 JSON
 
-#### Task 1.6.4：注册 search-engine Tools
+#### Task 1.6.4：注册 search-engine Tools ✅
 
 - **Sub-task 1.6.4.1**：实现 `#[tool] run_search(params, input_files, engine?)` → `EngineRegistry::get(engine)` → `adapter.search()` → 返回 JSON
 - **Sub-task 1.6.4.2**：实现 `#[tool] check_engine()` → 遍历所有 adapter → 返回 EngineInfo + HealthStatus 列表
 - **Sub-task 1.6.4.3**：实现 `#[tool] get_search_status(run_id)` → 返回 SearchProgress → **推迟到 pFind 接入时实现**（SimpleSearchEngine 同步执行，无中间进度可查询）
 
-#### Task 1.6.5：注册 report Tools
+#### Task 1.6.5：注册 report Tools ✅
 
 - **Sub-task 1.6.5.1**：实现 `#[tool] generate_summary(search_result)` → `ReportGenerator::generate_summary()` → 返回 JSON
 - **Sub-task 1.6.5.2**：实现 `#[tool] export_results(search_result, format, output_path)` → 调用导出方法 → 返回文件路径
 
-#### Task 1.6.6：编写 `proteomics-search.agent.md`
+#### Task 1.6.6：编写 proteomics-search.agent.md ✅
 
 - **Sub-task 1.6.6.1**：frontmatter：description, tools 列表
 - **Sub-task 1.6.6.2**：角色定义：蛋白质质谱搜索助手，覆盖新手和资深用户
@@ -820,14 +827,14 @@ M1.7 (集成验证)    ← 需要所有 MVP Milestone
   - 禁止：自行估算数值、跳过参数确认
 - **Sub-task 1.6.6.5**：嵌入领域知识片段：常见消化酶说明、FDR 含义、常见修饰类型
 
-#### Task 1.6.7：编写 `basic-search.prompt.md` Skill
+#### Task 1.6.7：编写 basic-search.prompt.md ✅
 
 - **Sub-task 1.6.7.1**：mode: agent, description
 - **Sub-task 1.6.7.2**：step-by-step 流程（与 agent 的标准工作流程一致，但更紧凑）
 - **Sub-task 1.6.7.3**：输入要求：谱图文件路径 + FASTA 路径
 - **Sub-task 1.6.7.4**：输出格式：搜索结果摘要表 + 自然语言解读段落
 
-#### Task 1.6.8：编写 `result-interpretation.prompt.md` Skill
+#### Task 1.6.8：编写 result-interpretation.prompt.md ✅
 
 - **Sub-task 1.6.8.1**：mode: agent, description
 - **Sub-task 1.6.8.2**：引导 LLM 从 SearchResultSummary 中提取关键洞察的模板：
@@ -837,7 +844,7 @@ M1.7 (集成验证)    ← 需要所有 MVP Milestone
   - 质量偏差中位数是否在 tolerance 范围内
 - **Sub-task 1.6.8.3**：常见问题的解释模式库（鉴定率低的可能原因、异常修饰分布的解释等）
 
-#### Task 1.6.9：配置 MCP Server 注册
+#### Task 1.6.9：配置 MCP Server 注册 ✅
 
 - **Sub-task 1.6.9.1**：创建项目根目录 `.mcp.json`：注册 mcp-server 二进制（stdio transport）
 - **Sub-task 1.6.9.2**：验证 Copilot CLI 打开项目后能自动发现 server 并列出所有 tools

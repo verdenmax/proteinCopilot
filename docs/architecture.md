@@ -365,39 +365,36 @@ report/src/
 
 **职责**：唯一的二进制入口。组装所有 library，注册为 MCP Tools，启动 stdio server。
 
+**注册的 8 个 MCP Tools**：
+
+| Tool | 功能 | 对应 Library |
+|------|------|-------------|
+| `read_spectra` | 读取谱图文件 → SpectrumSummary | spectrum-io |
+| `get_spectrum` | 按 scan 读取单张谱图 | spectrum-io |
+| `recommend_params` | 推荐搜索参数 → AiDecision | param-recommend |
+| `list_presets` | 列出内置预设 | param-recommend |
+| `run_search` | 执行数据库搜索 → SearchResult | search-engine |
+| `check_engine` | 检查引擎状态 | search-engine |
+| `generate_summary` | FDR 过滤统计摘要 | report |
+| `export_results` | 导出 TSV/JSON 文件 | report |
+
 **内部结构**：
 ```text
 mcp-server/src/
-├── main.rs                  ← 入口：初始化 + 启动 MCP Server
-├── tools/
-│   ├── mod.rs
-│   ├── spectrum.rs          ← read_spectra, get_spectrum tool 实现
-│   ├── params.rs            ← recommend_params, list_presets tool 实现
-│   ├── search.rs            ← run_search, check_engine, get_search_status tool 实现
-│   └── report.rs            ← generate_summary, export_results tool 实现
-└── config.rs                ← 服务器配置（搜索引擎路径等）
+├── main.rs       ← 入口：tracing 初始化 + ProteinCopilotServer + serve(stdio)
+└── tools.rs      ← 8 个 tool 定义 + EngineRegistry 初始化
+                     使用 #[rmcp::tool_router] + #[rmcp::tool_handler] 宏
 ```
 
-**模式**：每个 tool 模块是一个薄包装层——
+**关键实现细节**：
+- `#[rmcp::tool_router]` 自动生成 tool 注册和 JSON Schema
+- `#[rmcp::tool_handler]` 自动实现 `list_tools` 和 `call_tool`
+- `EngineRegistry` 在启动时注册 SimpleSearchEngine
+- 错误通过 `mcp_core_err()` 统一转换，包含 `CoreError::suggestion()`
+- `run_search` 入口显式调用 `params.validate()` 提前拦截无效参数
+- 返回类型统一使用 `Result<Json<T>, ErrorData>`
 
-```rust
-// tools/spectrum.rs 示意
-#[tool(description = "Read spectra from a mass spectrometry file (mzML/mgf). \
-    Returns a summary including spectrum count, mass range, MS level distribution, \
-    and retention time range. Use this as the first step to understand input data.")]
-async fn read_spectra(&self, #[tool(param)] input: ReadSpectraInput) -> String {
-    // 1. 调用 spectrum_io::create_reader()
-    // 2. 调用 reader.read_summary()
-    // 3. 序列化为 JSON 返回
-}
-```
-
-**依赖**：`core`, `spectrum-io`, `param-recommend`, `search-engine`, `report`, `rmcp`, `tokio`, `tracing`
-
-**设计原则**：
-- Tool 实现只做「胶水」：参数解析 → 调用 library → 序列化响应
-- 不在 tool 实现中写业务逻辑
-- 错误统一转换为 MCP error response（包含 error_code + message + suggestion）
+**依赖**：`core`, `spectrum-io`, `param-recommend`, `search-engine`, `report`, `rmcp` v1.3, `tokio`, `tracing`
 
 ---
 
