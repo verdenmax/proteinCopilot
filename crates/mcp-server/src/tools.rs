@@ -7,7 +7,8 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use rmcp::handler::server::tool::ToolRouter;
 use rmcp::handler::server::wrapper::{Json, Parameters};
@@ -18,13 +19,13 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use protein_copilot_core::ai_decision::AiDecision;
-use protein_copilot_core::engine::HealthStatus;
+use protein_copilot_core::engine::{HealthStatus, SearchEngineAdapter};
 use protein_copilot_core::search_params::SearchParams;
 use protein_copilot_core::search_result::{SearchResult, SearchResultSummary};
 use protein_copilot_core::spectrum::{Spectrum, SpectrumSummary};
 use protein_copilot_param_recommend::{ParamRecommender, SearchPreset, UserHints};
 use protein_copilot_report::ReportGenerator;
-use protein_copilot_search_engine::SimpleSearchEngine;
+use protein_copilot_search_engine::{SearchProgress, SimpleSearchEngine};
 
 // ---------------------------------------------------------------------------
 // Tool input types
@@ -148,6 +149,23 @@ struct EngineStatus {
     status: HealthStatus,
 }
 
+/// Response when search is started asynchronously
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct SearchStarted {
+    /// Run ID to use with get_search_status, generate_summary, export_results
+    run_id: String,
+    /// Current status
+    status: String,
+    /// Message for the user
+    message: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct GetSearchStatusInput {
+    /// Run ID from run_search
+    run_id: String,
+}
+
 /// Presets list response
 #[derive(Debug, Serialize, schemars::JsonSchema)]
 struct PresetsResponse {
@@ -175,8 +193,9 @@ pub struct ProteinCopilotServer {
     tool_router: ToolRouter<Self>,
     registry: protein_copilot_search_engine::EngineRegistry,
     /// Server-side cache of SearchResults keyed by run_id.
-    /// Avoids LLM needing to pass large SearchResult objects back.
-    result_cache: Mutex<HashMap<Uuid, SearchResult>>,
+    result_cache: Arc<Mutex<HashMap<Uuid, SearchResult>>>,
+    /// Progress tracking for async searches.
+    progress_cache: Arc<Mutex<HashMap<Uuid, SearchProgress>>>,
 }
 
 impl ProteinCopilotServer {
@@ -186,7 +205,8 @@ impl ProteinCopilotServer {
         Self {
             tool_router: Self::tool_router(),
             registry,
-            result_cache: Mutex::new(HashMap::new()),
+            result_cache: Arc::new(Mutex::new(HashMap::new())),
+            progress_cache: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -330,20 +350,18 @@ impl ProteinCopilotServer {
         })
     }
 
-    /// Execute a database search against spectrum files.
+    /// Execute a database search asynchronously.
     #[rmcp::tool(
         name = "run_search",
-        description = "Run a proteomics database search. Can auto-recommend parameters if only input_files and database_path are provided. Or pass explicit params from recommend_params. The result is cached — use the returned run_id with generate_summary and export_results."
+        description = "Run a proteomics database search. Returns immediately with a run_id. The search runs in the background. Call get_search_status(run_id) to check progress. When status is Completed, use generate_summary(run_id) and export_results(run_id)."
     )]
     async fn run_search(
         &self,
         Parameters(input): Parameters<RunSearchInput>,
-    ) -> Result<Json<SearchResult>, ErrorData> {
-        // Resolve params: use provided or auto-recommend
+    ) -> Result<Json<SearchStarted>, ErrorData> {
         let mut params = if let Some(p) = input.params {
             p
         } else {
-            // Auto-recommend from first input file
             let first_file = input
                 .input_files
                 .first()
@@ -355,38 +373,109 @@ impl ProteinCopilotServer {
             let summary = reader
                 .read_summary(path)
                 .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
-            let recommender = ParamRecommender;
-            let decision = recommender
+            let decision = ParamRecommender
                 .recommend(&summary, input.hints.as_ref())
                 .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
             decision.decision
         };
 
-        // Inject database_path if provided
         if let Some(ref db_path) = input.database_path {
             params.database_path = db_path.clone();
         }
 
-        // Validate params
         params
             .validate()
             .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
 
-        // Use registry to get engine
-        let engine = self
-            .registry
-            .get("SimpleSearch")
-            .ok_or_else(|| mcp_err(ErrorCode::INTERNAL_ERROR, "no search engine available"))?;
-
+        let run_id = Uuid::new_v4();
         let files: Vec<PathBuf> = input.input_files.iter().map(PathBuf::from).collect();
-        let result = engine.search(&params, &files).await.map_err(mcp_core_err)?;
 
-        // Cache result for later use by generate_summary / export_results
-        if let Ok(mut cache) = self.result_cache.lock() {
-            cache.insert(result.run_id, result.clone());
+        if let Ok(mut progress) = self.progress_cache.lock() {
+            progress.insert(
+                run_id,
+                SearchProgress {
+                    run_id,
+                    status: "Running".to_string(),
+                    progress_pct: Some(0.0),
+                    elapsed_sec: 0.0,
+                    estimated_remaining_sec: None,
+                },
+            );
         }
 
-        Ok(Json(result))
+        let result_cache = Arc::clone(&self.result_cache);
+        let progress_cache = Arc::clone(&self.progress_cache);
+        let engine = SimpleSearchEngine::new();
+
+        tokio::spawn(async move {
+            let start = Instant::now();
+            match engine.search(&params, &files).await {
+                Ok(mut result) => {
+                    result.run_id = run_id;
+                    result.metadata.run_id = run_id;
+                    let duration = start.elapsed().as_secs_f64();
+                    if let Ok(mut cache) = result_cache.lock() {
+                        cache.insert(run_id, result);
+                    }
+                    if let Ok(mut progress) = progress_cache.lock() {
+                        progress.insert(
+                            run_id,
+                            SearchProgress {
+                                run_id,
+                                status: "Completed".to_string(),
+                                progress_pct: Some(1.0),
+                                elapsed_sec: duration,
+                                estimated_remaining_sec: Some(0.0),
+                            },
+                        );
+                    }
+                }
+                Err(e) => {
+                    let duration = start.elapsed().as_secs_f64();
+                    if let Ok(mut progress) = progress_cache.lock() {
+                        progress.insert(
+                            run_id,
+                            SearchProgress {
+                                run_id,
+                                status: format!("Failed: {e}"),
+                                progress_pct: None,
+                                elapsed_sec: duration,
+                                estimated_remaining_sec: None,
+                            },
+                        );
+                    }
+                }
+            }
+        });
+
+        Ok(Json(SearchStarted {
+            run_id: run_id.to_string(),
+            status: "Running".to_string(),
+            message: "Search started. Call get_search_status(run_id) to check progress."
+                .to_string(),
+        }))
+    }
+
+    /// Check the status of a running search.
+    #[rmcp::tool(
+        name = "get_search_status",
+        description = "Check the status of a search started by run_search. Returns progress percentage and elapsed time. When status is Completed, use generate_summary(run_id) to get results."
+    )]
+    fn get_search_status(
+        &self,
+        Parameters(input): Parameters<GetSearchStatusInput>,
+    ) -> Result<Json<SearchProgress>, ErrorData> {
+        let id = Uuid::parse_str(&input.run_id)
+            .map_err(|_| mcp_err(ErrorCode::INVALID_PARAMS, "invalid run_id format"))?;
+        let progress = self
+            .progress_cache
+            .lock()
+            .map_err(|_| mcp_err(ErrorCode::INTERNAL_ERROR, "cache lock failed"))?;
+        let p = progress
+            .get(&id)
+            .cloned()
+            .ok_or_else(|| mcp_err(ErrorCode::INVALID_PARAMS, format!("run_id {id} not found")))?;
+        Ok(Json(p))
     }
 
     /// Check available search engines and their health status.
