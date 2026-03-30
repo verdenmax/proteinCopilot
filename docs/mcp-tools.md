@@ -81,9 +81,17 @@ cargo run --release -p protein-copilot-mcp-server
 
 ## run_search
 
-执行蛋白质数据库搜索。结果自动缓存，后续可通过 `run_id` 引用。
+执行蛋白质数据库搜索。支持两种调用方式：
 
-**输入**：
+**简单模式（LLM 推荐）**— 自动推荐参数：
+```json
+{
+  "input_files": ["/data/sample.mgf"],
+  "database_path": "/data/human.fasta"
+}
+```
+
+**高级模式** — 传入 recommend_params 返回的参数：
 ```json
 {
   "params": { ... },
@@ -91,7 +99,7 @@ cargo run --release -p protein-copilot-mcp-server
 }
 ```
 
-> 通常直接传 `recommend_params` 返回的 `decision` 字段作为 `params`。
+结果自动缓存，后续用 `run_id` 引用。
 
 **输出**：`SearchResult`（含 run_id、PSMs、summary）
 
@@ -142,12 +150,20 @@ cargo run --release -p protein-copilot-mcp-server
 
 ## LLM 完整工作流
 
+**最简模式（一步搜索）：**
 ```
-① read_spectra(file_path)
-② recommend_params(file_path, database_path, hints?)
-③ run_search(decision, input_files)  →  得到 run_id
-④ generate_summary(run_id)
-⑤ export_results(run_id, output_dir)
+① run_search(input_files, database_path)  →  得到 run_id + 结果
+② generate_summary(run_id)                →  统计摘要
+③ export_results(run_id, output_dir)      →  导出文件
+```
+
+**标准模式（分步控制）：**
+```
+① read_spectra(file_path)                 →  数据摘要
+② recommend_params(file_path, database_path, hints)  →  推荐参数
+③ run_search(decision, input_files)       →  搜索
+④ generate_summary(run_id)                →  统计摘要
+⑤ export_results(run_id, output_dir)      →  导出文件
 ```
 
 LLM 全程只需传简单参数（路径、run_id），无需构造复杂 JSON。
