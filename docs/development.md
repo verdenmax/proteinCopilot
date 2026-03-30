@@ -93,3 +93,35 @@ cargo build --release -p protein-copilot-mcp-server
 3. **不允许 library 代码 unwrap()**：用 `Result` + `?`
 4. **MCP Tool 只做胶水**：参数解析 → 调 library → 返回 JSON
 5. **错误必须含 suggestion**：通过 `CoreError::suggestion()` 提供修复建议
+
+## Agent 与 Skill（Prompt）
+
+```text
+.github/
+├── agents/proteomics-search.agent.md    ← Agent 定义
+├── prompts/basic-search.prompt.md       ← Skill: 基础搜索流程
+└── prompts/result-interpretation.prompt.md  ← Skill: 结果解读
+```
+
+### 关系
+
+- **Agent**（`.agent.md`）：定义 LLM 的角色、可用 tools、工作流程、决策边界。Agent 是"长期身份"，持续整个对话。
+- **Skill/Prompt**（`.prompt.md`）：可复用的任务模板，用户通过 `/` 命令触发。Skill 是"短期任务"，执行特定流程。
+
+### Agent 调用 Skill
+
+用户对话中，Agent 可以参考 Skill 的步骤执行操作：
+1. 用户说"帮我搜索这个数据" → Agent 按 `basic-search.prompt.md` 的流程执行
+2. 搜索完成后说"解读一下结果" → Agent 按 `result-interpretation.prompt.md` 分析
+
+### 编写规范
+
+- Agent 必须列出所有可用 `tools`（frontmatter）
+- Agent 必须定义决策边界（什么可以自动执行，什么需要用户确认）
+- Skill 必须说明输入要求、预期输出、适用场景
+- Agent 调用 MCP Tool 前不能凭空推断数据（§4.3）
+
+### 搜索引擎说明
+
+当前 MVP 使用 **SimpleSearchEngine**（内置简化搜索引擎），不需要 SSH 或外部依赖。
+后续接入 pFind 后，Agent 工作流程不变，`run_search` tool 会通过 `EngineRegistry` 自动分发到 pFind adapter。
