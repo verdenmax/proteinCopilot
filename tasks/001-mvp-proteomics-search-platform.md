@@ -3,7 +3,7 @@
 > **文件名**：`prd-mvp-proteomics-search.md`
 > **版本**：1.0
 > **创建日期**：2026-03-27
-> **状态**：In Progress — M1.1 ✅ M1.2 ✅ M1.3 ✅ M1.4 ✅ M1.5 ✅ M1.6 ✅（299 tests, 0 warnings）
+> **状态**：In Progress — M1.1 ✅ M1.2 ✅ M1.3 ✅ M1.4 ✅ M1.5 ✅ M1.6 ✅ M1.7 ✅（305 tests, 0 warnings）— MVP 完成
 
 ---
 

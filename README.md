@@ -77,7 +77,7 @@ crates/
 | M1.4 search-engine | ✅ SimpleSearch + pFind 预留 |
 | M1.5 report | ✅ 摘要 + TSV/JSON 导出 |
 | M1.6 mcp-server | ✅ 8 MCP tools + Agent + Skill |
-| M1.7 integration | 🔲 端到端集成验证 |
+| M1.7 integration | ✅ 端到端测试 + 文档 |
 
 详细计划：`tasks/001-mvp-proteomics-search-platform.md`
 架构设计：`docs/architecture.md`
