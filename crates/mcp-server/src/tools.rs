@@ -43,8 +43,10 @@ struct GetSpectrumInput {
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct RecommendParamsInput {
-    /// Spectrum summary (from read_spectra)
-    summary: SpectrumSummary,
+    /// Spectrum summary (from read_spectra). If provided, uses this directly.
+    summary: Option<SpectrumSummary>,
+    /// Path to spectrum file. Used to generate summary if summary is not provided.
+    file_path: Option<String>,
     /// Optional user hints
     hints: Option<UserHints>,
 }
@@ -179,15 +181,33 @@ impl ProteinCopilotServer {
     /// Recommend search parameters based on spectrum characteristics.
     #[rmcp::tool(
         name = "recommend_params",
-        description = "Recommend search parameters based on spectrum file characteristics. Input: SpectrumSummary from read_spectra + optional UserHints (experiment_type, instrument_type, enzyme). Output: recommended SearchParams with confidence score and explanation."
+        description = "Recommend search parameters based on spectrum file characteristics. Input: SpectrumSummary from read_spectra + optional UserHints (experiment_type, instrument_type, enzyme). Output: recommended SearchParams with confidence score and explanation. Note: set database_path in params to the FASTA file path."
     )]
     fn recommend_params(
         &self,
         Parameters(input): Parameters<RecommendParamsInput>,
     ) -> Result<Json<AiDecision<SearchParams>>, ErrorData> {
+        // Get summary: use provided summary or read from file_path
+        let summary = if let Some(s) = input.summary {
+            s
+        } else if let Some(ref fp) = input.file_path {
+            let path = std::path::Path::new(fp);
+            let info = protein_copilot_spectrum_io::detect_format(path)
+                .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
+            let reader = protein_copilot_spectrum_io::create_reader(&info);
+            reader
+                .read_summary(path)
+                .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?
+        } else {
+            return Err(mcp_err(
+                ErrorCode::INVALID_PARAMS,
+                "provide either 'summary' or 'file_path'",
+            ));
+        };
+
         let recommender = ParamRecommender;
         let result = recommender
-            .recommend(&input.summary, input.hints.as_ref())
+            .recommend(&summary, input.hints.as_ref())
             .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
         Ok(Json(result))
     }
