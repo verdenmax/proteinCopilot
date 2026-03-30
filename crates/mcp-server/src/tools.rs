@@ -184,35 +184,38 @@ fn mcp_err(code: ErrorCode, err: impl std::fmt::Display) -> ErrorData {
     ErrorData::new(code, err.to_string(), None)
 }
 
-/// Guard that sets progress to "Failed" if the task panics without completing.
+/// State for a single search run.
+struct RunState {
+    progress: SearchProgress,
+    result: Option<SearchResult>,
+}
+
+/// Maximum number of cached runs before eviction.
+const MAX_CACHE_SIZE: usize = 100;
+
+/// Unified run cache — single lock protects both progress and result.
+type RunCache = Arc<Mutex<HashMap<Uuid, RunState>>>;
+
+/// Guard that sets progress to "Failed" if the task terminates abnormally.
 struct PanicGuard {
     run_id: Uuid,
-    progress_cache: Arc<Mutex<HashMap<Uuid, SearchProgress>>>,
+    cache: RunCache,
     start: Instant,
-    completed: bool,
 }
 
 impl Drop for PanicGuard {
     fn drop(&mut self) {
-        if !self.completed {
-            if let Ok(mut pc) = self.progress_cache.lock() {
-                pc.insert(
-                    self.run_id,
-                    SearchProgress {
-                        run_id: self.run_id,
-                        status: "Failed: task panicked".to_string(),
-                        progress_pct: None,
-                        elapsed_sec: self.start.elapsed().as_secs_f64(),
-                        estimated_remaining_sec: None,
-                    },
-                );
+        if let Ok(mut cache) = self.cache.lock() {
+            if let Some(state) = cache.get_mut(&self.run_id) {
+                if state.progress.status == "Running" {
+                    state.progress.status = "Failed: task panicked".to_string();
+                    state.progress.elapsed_sec = self.start.elapsed().as_secs_f64();
+                    state.progress.progress_pct = None;
+                }
             }
         }
     }
 }
-
-/// Maximum number of cached results before eviction.
-const MAX_CACHE_SIZE: usize = 100;
 
 // ---------------------------------------------------------------------------
 // Server struct
@@ -222,10 +225,8 @@ const MAX_CACHE_SIZE: usize = 100;
 pub struct ProteinCopilotServer {
     tool_router: ToolRouter<Self>,
     registry: protein_copilot_search_engine::EngineRegistry,
-    /// Server-side cache of SearchResults keyed by run_id.
-    result_cache: Arc<Mutex<HashMap<Uuid, SearchResult>>>,
-    /// Progress tracking for async searches.
-    progress_cache: Arc<Mutex<HashMap<Uuid, SearchProgress>>>,
+    /// Unified cache for all search runs (progress + result in one lock).
+    run_cache: RunCache,
 }
 
 impl ProteinCopilotServer {
@@ -235,8 +236,7 @@ impl ProteinCopilotServer {
         Self {
             tool_router: Self::tool_router(),
             registry,
-            result_cache: Arc::new(Mutex::new(HashMap::new())),
-            progress_cache: Arc::new(Mutex::new(HashMap::new())),
+            run_cache: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -253,13 +253,19 @@ impl ProteinCopilotServer {
             let id = Uuid::parse_str(id_str)
                 .map_err(|_| mcp_err(ErrorCode::INVALID_PARAMS, "invalid run_id format"))?;
             let cache = self
-                .result_cache
+                .run_cache
                 .lock()
                 .map_err(|_| mcp_err(ErrorCode::INTERNAL_ERROR, "cache lock failed"))?;
-            return cache.get(&id).cloned().ok_or_else(|| {
+            let state = cache.get(&id).ok_or_else(|| {
+                mcp_err(ErrorCode::INVALID_PARAMS, format!("run_id {id} not found"))
+            })?;
+            return state.result.clone().ok_or_else(|| {
                 mcp_err(
                     ErrorCode::INVALID_PARAMS,
-                    format!("run_id {id} not found in cache"),
+                    format!(
+                        "search {id} not yet completed (status: {})",
+                        state.progress.status
+                    ),
                 )
             });
         }
@@ -420,117 +426,74 @@ impl ProteinCopilotServer {
         let run_id = Uuid::new_v4();
         let files: Vec<PathBuf> = input.input_files.iter().map(PathBuf::from).collect();
 
-        // Evict oldest entries if cache is full
-        if let Ok(mut rc) = self.result_cache.lock() {
-            while rc.len() >= MAX_CACHE_SIZE {
-                if let Some(&oldest_id) = rc.keys().next() {
-                    rc.remove(&oldest_id);
-                } else {
-                    break;
-                }
-            }
-        }
-        if let Ok(mut pc) = self.progress_cache.lock() {
-            // Only evict completed/failed entries
-            if pc.len() >= MAX_CACHE_SIZE {
-                let to_remove: Vec<Uuid> = pc
+        // Evict + initialize in unified cache
+        if let Ok(mut cache) = self.run_cache.lock() {
+            // Evict oldest completed/failed entries if full
+            if cache.len() >= MAX_CACHE_SIZE {
+                let to_remove: Vec<Uuid> = cache
                     .iter()
-                    .filter(|(_, p)| p.status != "Running")
+                    .filter(|(_, s)| s.progress.status != "Running")
                     .map(|(id, _)| *id)
-                    .take(pc.len() / 2)
+                    .take(cache.len() / 2)
                     .collect();
                 for id in to_remove {
-                    pc.remove(&id);
+                    cache.remove(&id);
                 }
             }
-            pc.insert(
+            cache.insert(
                 run_id,
-                SearchProgress {
-                    run_id,
-                    status: "Running".to_string(),
-                    progress_pct: Some(0.0),
-                    elapsed_sec: 0.0,
-                    estimated_remaining_sec: None,
+                RunState {
+                    progress: SearchProgress {
+                        run_id,
+                        status: "Running".to_string(),
+                        progress_pct: Some(0.0),
+                        elapsed_sec: 0.0,
+                        estimated_remaining_sec: None,
+                    },
+                    result: None,
                 },
             );
         }
 
-        let result_cache = Arc::clone(&self.result_cache);
-        let progress_cache = Arc::clone(&self.progress_cache);
+        let run_cache_clone = Arc::clone(&self.run_cache);
         let engine = SimpleSearchEngine::new();
-
-        // Clone progress_cache for the panic guard
-        let panic_progress = Arc::clone(&self.progress_cache);
 
         tokio::spawn(async move {
             let start = Instant::now();
 
-            // Panic guard: if the task panics, mark progress as Failed
+            // Panic guard: on abnormal exit, sets status to "Failed: task panicked"
             let _guard = PanicGuard {
                 run_id,
-                progress_cache: Arc::clone(&panic_progress),
+                cache: Arc::clone(&run_cache_clone),
                 start,
-                completed: false,
             };
 
             let search_result = engine.search(&params, &files).await;
             let duration = start.elapsed().as_secs_f64();
 
-            match search_result {
-                Ok(mut result) => {
-                    result.run_id = run_id;
-                    result.metadata.run_id = run_id;
-
-                    // Both caches must succeed together for consistency
-                    let result_locked = result_cache.lock();
-                    let progress_locked = progress_cache.lock();
-
-                    if let (Ok(mut rc), Ok(mut pc)) = (result_locked, progress_locked) {
-                        rc.insert(run_id, result);
-                        pc.insert(
-                            run_id,
-                            SearchProgress {
-                                run_id,
-                                status: "Completed".to_string(),
-                                progress_pct: Some(1.0),
-                                elapsed_sec: duration,
-                                estimated_remaining_sec: Some(0.0),
-                            },
-                        );
-                    } else {
-                        // Lock failure — mark as failed so LLM knows
-                        if let Ok(mut pc) = progress_cache.lock() {
-                            pc.insert(
-                                run_id,
-                                SearchProgress {
-                                    run_id,
-                                    status: "Failed: internal cache error".to_string(),
-                                    progress_pct: None,
-                                    elapsed_sec: duration,
-                                    estimated_remaining_sec: None,
-                                },
-                            );
+            // Single lock — update progress + result atomically
+            if let Ok(mut cache) = run_cache_clone.lock() {
+                if let Some(state) = cache.get_mut(&run_id) {
+                    match search_result {
+                        Ok(mut result) => {
+                            result.run_id = run_id;
+                            result.metadata.run_id = run_id;
+                            state.result = Some(result);
+                            state.progress.status = "Completed".to_string();
+                            state.progress.progress_pct = Some(1.0);
+                            state.progress.elapsed_sec = duration;
+                            state.progress.estimated_remaining_sec = Some(0.0);
                         }
-                    }
-                }
-                Err(e) => {
-                    if let Ok(mut pc) = progress_cache.lock() {
-                        pc.insert(
-                            run_id,
-                            SearchProgress {
-                                run_id,
-                                status: format!("Failed: {e}"),
-                                progress_pct: None,
-                                elapsed_sec: duration,
-                                estimated_remaining_sec: None,
-                            },
-                        );
+                        Err(e) => {
+                            state.progress.status = format!("Failed: {e}");
+                            state.progress.progress_pct = None;
+                            state.progress.elapsed_sec = duration;
+                        }
                     }
                 }
             }
 
-            // Mark guard as completed so Drop doesn't set "Failed"
-            // (we need to prevent the guard from running its destructor)
+            // Forget guard — normal completion, don't trigger panic handler
             std::mem::forget(_guard);
         });
 
@@ -553,15 +516,14 @@ impl ProteinCopilotServer {
     ) -> Result<Json<SearchProgress>, ErrorData> {
         let id = Uuid::parse_str(&input.run_id)
             .map_err(|_| mcp_err(ErrorCode::INVALID_PARAMS, "invalid run_id format"))?;
-        let progress = self
-            .progress_cache
+        let cache = self
+            .run_cache
             .lock()
             .map_err(|_| mcp_err(ErrorCode::INTERNAL_ERROR, "cache lock failed"))?;
-        let p = progress
+        let state = cache
             .get(&id)
-            .cloned()
             .ok_or_else(|| mcp_err(ErrorCode::INVALID_PARAMS, format!("run_id {id} not found")))?;
-        Ok(Json(p))
+        Ok(Json(state.progress.clone()))
     }
 
     /// Check available search engines and their health status.
