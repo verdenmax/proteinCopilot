@@ -5,7 +5,9 @@
 //! 2. Delegates to a library crate
 //! 3. Returns structured JSON or a proper MCP error
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use rmcp::handler::server::tool::ToolRouter;
 use rmcp::handler::server::wrapper::{Json, Parameters};
@@ -13,6 +15,7 @@ use rmcp::model::{ErrorCode, ServerInfo};
 use rmcp::schemars;
 use rmcp::{ErrorData, ServerHandler};
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use protein_copilot_core::ai_decision::AiDecision;
 use protein_copilot_core::engine::HealthStatus;
@@ -49,6 +52,8 @@ struct RecommendParamsInput {
     file_path: Option<String>,
     /// Optional user hints
     hints: Option<UserHints>,
+    /// FASTA database path. If provided, sets database_path in the recommended params.
+    database_path: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -61,14 +66,18 @@ struct RunSearchInput {
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct GenerateSummaryInput {
-    /// Search result to summarize
-    result: SearchResult,
+    /// Search result to summarize (provide either this or run_id)
+    result: Option<SearchResult>,
+    /// Run ID from a previous run_search call (server retrieves cached result)
+    run_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct ExportResultsInput {
-    /// Search result to export
-    result: SearchResult,
+    /// Search result to export (provide either this or run_id)
+    result: Option<SearchResult>,
+    /// Run ID from a previous run_search call (server retrieves cached result)
+    run_id: Option<String>,
     /// Output directory path
     output_dir: String,
 }
@@ -106,6 +115,9 @@ fn mcp_err(code: ErrorCode, err: impl std::fmt::Display) -> ErrorData {
 pub struct ProteinCopilotServer {
     tool_router: ToolRouter<Self>,
     registry: protein_copilot_search_engine::EngineRegistry,
+    /// Server-side cache of SearchResults keyed by run_id.
+    /// Avoids LLM needing to pass large SearchResult objects back.
+    result_cache: Mutex<HashMap<Uuid, SearchResult>>,
 }
 
 impl ProteinCopilotServer {
@@ -115,7 +127,37 @@ impl ProteinCopilotServer {
         Self {
             tool_router: Self::tool_router(),
             registry,
+            result_cache: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// Resolve a SearchResult from direct input or cached run_id.
+    fn get_result(
+        &self,
+        direct: &Option<SearchResult>,
+        run_id: &Option<String>,
+    ) -> Result<SearchResult, ErrorData> {
+        if let Some(r) = direct {
+            return Ok(r.clone());
+        }
+        if let Some(id_str) = run_id {
+            let id = Uuid::parse_str(id_str)
+                .map_err(|_| mcp_err(ErrorCode::INVALID_PARAMS, "invalid run_id format"))?;
+            let cache = self
+                .result_cache
+                .lock()
+                .map_err(|_| mcp_err(ErrorCode::INTERNAL_ERROR, "cache lock failed"))?;
+            return cache.get(&id).cloned().ok_or_else(|| {
+                mcp_err(
+                    ErrorCode::INVALID_PARAMS,
+                    format!("run_id {id} not found in cache"),
+                )
+            });
+        }
+        Err(mcp_err(
+            ErrorCode::INVALID_PARAMS,
+            "provide either 'result' or 'run_id'",
+        ))
     }
 }
 
@@ -206,10 +248,16 @@ impl ProteinCopilotServer {
         };
 
         let recommender = ParamRecommender;
-        let result = recommender
+        let mut decision = recommender
             .recommend(&summary, input.hints.as_ref())
             .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
-        Ok(Json(result))
+
+        // Inject database_path if provided (saves LLM from JSON manipulation)
+        if let Some(ref db_path) = input.database_path {
+            decision.decision.database_path = db_path.clone();
+        }
+
+        Ok(Json(decision))
     }
 
     /// List all available search parameter presets.
@@ -226,7 +274,7 @@ impl ProteinCopilotServer {
     /// Execute a database search against spectrum files.
     #[rmcp::tool(
         name = "run_search",
-        description = "Run a proteomics database search. Input: SearchParams (from recommend_params or manual) + spectrum file paths. Output: SearchResult with PSMs, peptides, proteins, and summary statistics. Note: set database_path in params to the FASTA file path."
+        description = "Run a proteomics database search. Input: SearchParams (from recommend_params or manual) + spectrum file paths. Output: SearchResult with PSMs, peptides, proteins, and summary statistics. The result is cached server-side — use the returned run_id with generate_summary and export_results."
     )]
     async fn run_search(
         &self,
@@ -238,7 +286,7 @@ impl ProteinCopilotServer {
             .validate()
             .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
 
-        // Use registry to get engine (defaults to first available)
+        // Use registry to get engine
         let engine = self
             .registry
             .get("SimpleSearch")
@@ -249,6 +297,12 @@ impl ProteinCopilotServer {
             .search(&input.params, &files)
             .await
             .map_err(mcp_core_err)?;
+
+        // Cache result for later use by generate_summary / export_results
+        if let Ok(mut cache) = self.result_cache.lock() {
+            cache.insert(result.run_id, result.clone());
+        }
+
         Ok(Json(result))
     }
 
@@ -299,8 +353,9 @@ impl ProteinCopilotServer {
     fn generate_summary(
         &self,
         Parameters(input): Parameters<GenerateSummaryInput>,
-    ) -> Json<SearchResultSummary> {
-        Json(ReportGenerator::generate_summary(&input.result))
+    ) -> Result<Json<SearchResultSummary>, ErrorData> {
+        let result = self.get_result(&input.result, &input.run_id)?;
+        Ok(Json(ReportGenerator::generate_summary(&result)))
     }
 
     /// Export search results as TSV and JSON files.
@@ -312,17 +367,15 @@ impl ProteinCopilotServer {
         &self,
         Parameters(input): Parameters<ExportResultsInput>,
     ) -> Result<String, ErrorData> {
+        let result = self.get_result(&input.result, &input.run_id)?;
         let output_dir = Path::new(&input.output_dir);
 
-        ReportGenerator::export_tsv(&input.result, output_dir)
+        ReportGenerator::export_tsv(&result, output_dir)
             .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
-        ReportGenerator::export_json(&input.result, &output_dir.join("result.json"))
+        ReportGenerator::export_json(&result, &output_dir.join("result.json"))
             .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
-        ReportGenerator::export_metadata(
-            &input.result.metadata,
-            &output_dir.join("run_metadata.json"),
-        )
-        .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
+        ReportGenerator::export_metadata(&result.metadata, &output_dir.join("run_metadata.json"))
+            .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
 
         Ok(format!(
             "Exported to {}: psm.tsv, peptide.tsv, protein.tsv, result.json, run_metadata.json",
