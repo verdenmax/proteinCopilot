@@ -27,19 +27,6 @@ cargo run --release -p protein-copilot-mcp-server
 ```
 
 **输出**：`SpectrumSummary`
-```json
-{
-  "file_path": "/data/sample.mgf",
-  "format": "Mgf",
-  "total_spectra": 10000,
-  "ms1_count": 500,
-  "ms2_count": 9500,
-  "mz_range": [100.0, 2000.0],
-  "rt_range_sec": [60.0, 3600.0],
-  "precursor_charge_distribution": {"2": 5000, "3": 3000},
-  "median_peaks_per_spectrum": 256
-}
-```
 
 **使用场景**：分析数据特征，为参数推荐提供输入。
 
@@ -59,39 +46,26 @@ cargo run --release -p protein-copilot-mcp-server
 
 **输出**：`Spectrum`（含 mz_array、intensity_array、precursors）
 
-**使用场景**：检查特定谱图的详细数据。
-
 ---
 
 ## recommend_params
 
-基于谱图特征推荐搜索参数。
+基于谱图特征推荐搜索参数。可直接传文件路径 + 数据库路径。
 
 **输入**：
 ```json
 {
-  "summary": { ... },
+  "file_path": "/data/sample.mgf",
+  "database_path": "/data/human.fasta",
   "hints": {
-    "experiment_type": "phosphorylation",
-    "instrument_type": "Orbitrap",
-    "enzyme": "Trypsin"
+    "experiment_type": "phosphorylation"
   }
 }
 ```
 
-**输出**：`AiDecision<SearchParams>`
-```json
-{
-  "decision": { "enzyme": "Trypsin", "precursor_tolerance": {"value": 10, "unit": "Ppm"}, ... },
-  "confidence": 0.92,
-  "explanation": "Based on m/z range...",
-  "input_summary": "10000 spectra, ...",
-  "alternatives": ["Open search", "TMT labeled"],
-  "evidence": ["m/z range: 100-2000", ...]
-}
-```
+**输出**：`AiDecision<SearchParams>`（含 decision、confidence、explanation）
 
-**使用场景**：自动推荐参数，LLM 向用户展示推荐理由。
+> **注意**：`database_path` 会自动注入到推荐结果的 `decision` 中，LLM 无需手动修改。
 
 ---
 
@@ -101,36 +75,25 @@ cargo run --release -p protein-copilot-mcp-server
 
 **输入**：无
 
-**输出**：`{ "presets": [...] }`（5 个预设：standard、phospho、tmt、silac、open）
-
-**使用场景**：用户选择预设而非自定义参数。
+**输出**：`{ "presets": [...] }`（5 个预设）
 
 ---
 
 ## run_search
 
-执行蛋白质数据库搜索。
+执行蛋白质数据库搜索。结果自动缓存，后续可通过 `run_id` 引用。
 
 **输入**：
 ```json
 {
-  "params": {
-    "database_path": "/data/human.fasta",
-    "enzyme": "Trypsin",
-    "missed_cleavages": 2,
-    "precursor_tolerance": {"value": 10, "unit": "Ppm"},
-    "fragment_tolerance": {"value": 0.02, "unit": "Da"},
-    "fixed_modifications": [{"name": "Carbamidomethyl", "mass_delta": 57.021464, "residues": ["C"], "position": "Anywhere"}],
-    "variable_modifications": [],
-    "decoy_strategy": "Reverse"
-  },
+  "params": { ... },
   "input_files": ["/data/sample.mgf"]
 }
 ```
 
-**输出**：`SearchResult`（含 PSMs、peptides、proteins、summary、metadata）
+> 通常直接传 `recommend_params` 返回的 `decision` 字段作为 `params`。
 
-**使用场景**：执行搜索，必须在用户确认参数后调用。
+**输出**：`SearchResult`（含 run_id、PSMs、summary）
 
 ---
 
@@ -142,39 +105,49 @@ cargo run --release -p protein-copilot-mcp-server
 
 **输出**：`{ "engine": {...}, "status": "Healthy" }`
 
-**使用场景**：验证引擎可用性。
-
 ---
 
 ## generate_summary
 
-从搜索结果生成 FDR 过滤后的统计摘要。
+从搜索结果生成 FDR 过滤后的统计摘要。支持通过 `run_id` 引用缓存结果。
 
 **输入**：
 ```json
 {
-  "result": { ... }
+  "run_id": "7ab6d7d4-df4d-4aa0-..."
 }
 ```
 
-**输出**：`SearchResultSummary`（含 psms_at_1pct_fdr、identification_rate 等）
+或直接传 `{"result": {...}}`
 
-**使用场景**：搜索完成后，生成供 LLM 解读的统计数据。
+**输出**：`SearchResultSummary`
 
 ---
 
 ## export_results
 
-将搜索结果导出为文件。
+将搜索结果导出为文件。支持通过 `run_id` 引用缓存结果。
 
 **输入**：
 ```json
 {
-  "result": { ... },
+  "run_id": "7ab6d7d4-df4d-4aa0-...",
   "output_dir": "./output"
 }
 ```
 
-**输出**：导出文件列表（psm.tsv、peptide.tsv、protein.tsv、result.json、run_metadata.json）
+**输出**：导出文件列表
 
-**使用场景**：用户请求保存结果。
+---
+
+## LLM 完整工作流
+
+```
+① read_spectra(file_path)
+② recommend_params(file_path, database_path, hints?)
+③ run_search(decision, input_files)  →  得到 run_id
+④ generate_summary(run_id)
+⑤ export_results(run_id, output_dir)
+```
+
+LLM 全程只需传简单参数（路径、run_id），无需构造复杂 JSON。
