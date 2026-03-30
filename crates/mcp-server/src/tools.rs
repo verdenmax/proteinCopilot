@@ -15,7 +15,7 @@ use rmcp::{ErrorData, ServerHandler};
 use serde::{Deserialize, Serialize};
 
 use protein_copilot_core::ai_decision::AiDecision;
-use protein_copilot_core::engine::{HealthStatus, SearchEngineAdapter};
+use protein_copilot_core::engine::HealthStatus;
 use protein_copilot_core::search_params::SearchParams;
 use protein_copilot_core::search_result::{SearchResult, SearchResultSummary};
 use protein_copilot_core::spectrum::{Spectrum, SpectrumSummary};
@@ -84,6 +84,13 @@ struct PresetsResponse {
     presets: Vec<SearchPreset>,
 }
 
+/// Helper to create MCP error with suggestion from CoreError
+fn mcp_core_err(err: protein_copilot_core::error::CoreError) -> ErrorData {
+    let suggestion = err.suggestion().to_string();
+    let message = format!("{err}\n\nSuggestion: {suggestion}");
+    ErrorData::new(ErrorCode::INTERNAL_ERROR, message, None)
+}
+
 /// Helper to create MCP error from any Display error
 fn mcp_err(code: ErrorCode, err: impl std::fmt::Display) -> ErrorData {
     ErrorData::new(code, err.to_string(), None)
@@ -96,12 +103,16 @@ fn mcp_err(code: ErrorCode, err: impl std::fmt::Display) -> ErrorData {
 #[allow(dead_code)]
 pub struct ProteinCopilotServer {
     tool_router: ToolRouter<Self>,
+    registry: protein_copilot_search_engine::EngineRegistry,
 }
 
 impl ProteinCopilotServer {
     pub fn new() -> Self {
+        let mut registry = protein_copilot_search_engine::EngineRegistry::new();
+        registry.register(Box::new(SimpleSearchEngine::new()));
         Self {
             tool_router: Self::tool_router(),
+            registry,
         }
     }
 }
@@ -138,11 +149,11 @@ impl ProteinCopilotServer {
     ) -> Result<Json<SpectrumSummary>, ErrorData> {
         let path = Path::new(&input.file_path);
         let info = protein_copilot_spectrum_io::detect_format(path)
-            .map_err(|e| mcp_err(ErrorCode::INVALID_PARAMS, e))?;
+            .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
         let reader = protein_copilot_spectrum_io::create_reader(&info);
         let summary = reader
             .read_summary(path)
-            .map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, e))?;
+            .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
         Ok(Json(summary))
     }
 
@@ -157,11 +168,11 @@ impl ProteinCopilotServer {
     ) -> Result<Json<Spectrum>, ErrorData> {
         let path = Path::new(&input.file_path);
         let info = protein_copilot_spectrum_io::detect_format(path)
-            .map_err(|e| mcp_err(ErrorCode::INVALID_PARAMS, e))?;
+            .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
         let reader = protein_copilot_spectrum_io::create_reader(&info);
         let spectrum = reader
             .read_spectrum(path, input.scan_number)
-            .map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, e))?;
+            .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
         Ok(Json(spectrum))
     }
 
@@ -177,7 +188,7 @@ impl ProteinCopilotServer {
         let recommender = ParamRecommender;
         let result = recommender
             .recommend(&input.summary, input.hints.as_ref())
-            .map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, e))?;
+            .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
         Ok(Json(result))
     }
 
@@ -201,12 +212,23 @@ impl ProteinCopilotServer {
         &self,
         Parameters(input): Parameters<RunSearchInput>,
     ) -> Result<Json<SearchResult>, ErrorData> {
-        let engine = SimpleSearchEngine::new();
+        // Validate params before search
+        input
+            .params
+            .validate()
+            .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
+
+        // Use registry to get engine (defaults to first available)
+        let engine = self
+            .registry
+            .get("SimpleSearch")
+            .ok_or_else(|| mcp_err(ErrorCode::INTERNAL_ERROR, "no search engine available"))?;
+
         let files: Vec<PathBuf> = input.input_files.iter().map(PathBuf::from).collect();
         let result = engine
             .search(&input.params, &files)
             .await
-            .map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, e))?;
+            .map_err(mcp_core_err)?;
         Ok(Json(result))
     }
 
@@ -216,18 +238,37 @@ impl ProteinCopilotServer {
         description = "Check available search engines and their health status. Returns engine name, version, supported features, and availability."
     )]
     async fn check_engine(&self) -> Json<EngineStatus> {
-        let engine = SimpleSearchEngine::new();
-        let info = engine.engine_info();
-        let status = engine
-            .health_check()
-            .await
-            .unwrap_or(HealthStatus::Unavailable {
-                reason: "health check failed".to_string(),
-            });
-        Json(EngineStatus {
-            engine: info,
-            status,
-        })
+        // Use first engine from registry
+        let engines = self.registry.list_available();
+        if let Some(info) = engines.first() {
+            let status = if let Some(engine) = self.registry.get(&info.name) {
+                engine
+                    .health_check()
+                    .await
+                    .unwrap_or(HealthStatus::Unavailable {
+                        reason: "health check failed".to_string(),
+                    })
+            } else {
+                HealthStatus::Unavailable {
+                    reason: "engine not found".to_string(),
+                }
+            };
+            Json(EngineStatus {
+                engine: info.clone(),
+                status,
+            })
+        } else {
+            Json(EngineStatus {
+                engine: protein_copilot_core::engine::EngineInfo {
+                    name: "none".to_string(),
+                    version: "0.0.0".to_string(),
+                    supported_features: vec![],
+                },
+                status: HealthStatus::Unavailable {
+                    reason: "no engines registered".to_string(),
+                },
+            })
+        }
     }
 
     /// Generate a statistical summary with FDR filtering.
@@ -254,14 +295,14 @@ impl ProteinCopilotServer {
         let output_dir = Path::new(&input.output_dir);
 
         ReportGenerator::export_tsv(&input.result, output_dir)
-            .map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, e))?;
+            .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
         ReportGenerator::export_json(&input.result, &output_dir.join("result.json"))
-            .map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, e))?;
+            .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
         ReportGenerator::export_metadata(
             &input.result.metadata,
             &output_dir.join("run_metadata.json"),
         )
-        .map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, e))?;
+        .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
 
         Ok(format!(
             "Exported to {}: psm.tsv, peptide.tsv, protein.tsv, result.json, run_metadata.json",
