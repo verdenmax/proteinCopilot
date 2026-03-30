@@ -776,7 +776,7 @@ M1.7 (集成验证)    ← 需要所有 MVP Milestone
 
 - **Sub-task 1.6.1.1**：创建 `crates/mcp-server/Cargo.toml`，依赖所有 library + `rmcp`, `tokio`, `tracing`, `clap`
 - **Sub-task 1.6.1.2**：实现 `main.rs`：初始化 tracing → 读取配置 → 构建 handler → `serve(stdio())`
-- **Sub-task 1.6.1.3**：定义 `AppConfig` 结构体（ssh_config, pfind_config, data_dirs），从配置文件或环境变量加载
+- **Sub-task 1.6.1.3**：定义 `AppConfig` 结构体（ssh_config, pfind_config, data_dirs），从配置文件或环境变量加载 → **推迟到 pFind 接入时实现**（当前 SimpleSearchEngine 无需外部配置）
 - **Sub-task 1.6.1.4**：验证 MCP Server 启动 → `Copilot CLI` 能发现并列出 tools
 
 #### Task 1.6.2：注册 spectrum-io Tools
@@ -794,7 +794,7 @@ M1.7 (集成验证)    ← 需要所有 MVP Milestone
 
 - **Sub-task 1.6.4.1**：实现 `#[tool] run_search(params, input_files, engine?)` → `EngineRegistry::get(engine)` → `adapter.search()` → 返回 JSON
 - **Sub-task 1.6.4.2**：实现 `#[tool] check_engine()` → 遍历所有 adapter → 返回 EngineInfo + HealthStatus 列表
-- **Sub-task 1.6.4.3**：实现 `#[tool] get_search_status(run_id)` → 返回 SearchProgress
+- **Sub-task 1.6.4.3**：实现 `#[tool] get_search_status(run_id)` → 返回 SearchProgress → **推迟到 pFind 接入时实现**（SimpleSearchEngine 同步执行，无中间进度可查询）
 
 #### Task 1.6.5：注册 report Tools
 
