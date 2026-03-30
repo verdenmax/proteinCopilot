@@ -933,3 +933,32 @@ M1.7 (集成验证)    ← 需要所有 MVP Milestone
 | 2026-03-26 | 初始任务规划版本 | 项目启动 |
 | 2026-03-27 | 重写为 PRD 格式，补充 User Stories、Functional Requirements、Technical Considerations | 按 prd-creation.prompt.md 规范完善 |
 | 2026-03-27 | 补充详细的 Milestone/Task/Sub-task 实施计划，与 architecture.md 对齐 | 实施计划细化 |
+
+---
+
+### Post-MVP：异步搜索模式
+
+> **问题**：run_search 同步阻塞，长时间搜索（10+ min）导致 LLM 认为 MCP 超时。
+> **方案**：改为异步模式，run_search 立即返回 run_id，后台执行搜索。
+
+#### Task P1：实现异步搜索
+
+- **Sub-task P1.1**：run_search 改为 `tokio::spawn` 后台执行，立即返回 `{run_id, status: "Running"}`
+- **Sub-task P1.2**：添加 `progress_cache: HashMap<Uuid, SearchProgress>` 到 server
+- **Sub-task P1.3**：搜索完成后将结果存入 `result_cache`，状态更新为 `Completed`
+- **Sub-task P1.4**：实现 `get_search_status(run_id)` tool，返回 `SearchProgress`
+- **Sub-task P1.5**：更新 Agent 指令：搜索后轮询 `get_search_status` 直到完成
+- **Sub-task P1.6**：测试：验证异步搜索 + 状态轮询 + 结果获取的完整流程
+
+#### 工作流变化
+
+```text
+之前（同步）：
+  run_search() ── 10min 阻塞 ──→ SearchResult（LLM 可能超时）
+
+之后（异步）：
+  run_search()          → {run_id, status: "Running"}     （< 1秒）
+  get_search_status()   → {progress: 30%, elapsed: 3min}  （轮询）
+  get_search_status()   → {status: "Completed"}           （完成）
+  generate_summary()    → SearchResultSummary              （结果）
+```
