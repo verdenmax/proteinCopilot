@@ -189,11 +189,17 @@ async fn scenario_phospho_with_hints() {
 
     let hints = UserHints {
         experiment_type: Some("phosphorylation".to_string()),
+        instrument_type: Some("Orbitrap".to_string()),
         ..Default::default()
     };
     let recommendation = ParamRecommender.recommend(&summary, Some(&hints)).unwrap();
 
-    assert!(recommendation.confidence >= 0.90);
+    // With both experiment_type + instrument_type hints, confidence should be >= 0.90
+    assert!(
+        recommendation.confidence >= 0.90,
+        "Expected confidence >= 0.90 with hints, got {}",
+        recommendation.confidence
+    );
     assert!(recommendation
         .decision
         .variable_modifications
