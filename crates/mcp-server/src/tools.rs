@@ -78,6 +78,12 @@ struct EngineStatus {
     status: HealthStatus,
 }
 
+/// Presets list response
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct PresetsResponse {
+    presets: Vec<SearchPreset>,
+}
+
 /// Helper to create MCP error from any Display error
 fn mcp_err(code: ErrorCode, err: impl std::fmt::Display) -> ErrorData {
     ErrorData::new(code, err.to_string(), None)
@@ -100,6 +106,7 @@ impl ProteinCopilotServer {
     }
 }
 
+#[rmcp::tool_handler]
 impl ServerHandler for ProteinCopilotServer {
     fn get_info(&self) -> ServerInfo {
         let mut info = ServerInfo::default();
@@ -179,8 +186,10 @@ impl ProteinCopilotServer {
         name = "list_presets",
         description = "List all built-in search parameter presets (standard, phospho, TMT, SILAC, open search). Each preset includes name, description, parameters, and applicable scenarios."
     )]
-    fn list_presets(&self) -> Json<Vec<SearchPreset>> {
-        Json(ParamRecommender::list_presets())
+    fn list_presets(&self) -> Json<PresetsResponse> {
+        Json(PresetsResponse {
+            presets: ParamRecommender::list_presets(),
+        })
     }
 
     /// Execute a database search against spectrum files.
