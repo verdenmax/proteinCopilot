@@ -352,10 +352,10 @@ pub struct SpectrumSummary {
     pub ms1_count: u64,
     /// Number of MS2 spectra.
     pub ms2_count: u64,
-    /// m/z range as (min, max).
-    pub mz_range: (f64, f64),
-    /// Retention time range as (min, max) in seconds.
-    pub rt_range_sec: (f64, f64),
+    /// m/z range: \[min, max\].
+    pub mz_range: [f64; 2],
+    /// Retention time range: \[min, max\] in seconds.
+    pub rt_range_sec: [f64; 2],
     /// Distribution of precursor charge states (charge → count).
     pub precursor_charge_distribution: HashMap<i32, u64>,
     /// Median number of peaks per spectrum.
@@ -378,26 +378,26 @@ impl SpectrumSummary {
     /// - `mz_range` values are finite and min ≤ max
     /// - `rt_range_sec` values are finite and min ≤ max
     pub fn validate(&self) -> Result<(), SpectrumError> {
-        if !self.mz_range.0.is_finite() || !self.mz_range.1.is_finite() {
+        if !self.mz_range[0].is_finite() || !self.mz_range[1].is_finite() {
             return Err(SpectrumError::NonFiniteValue { field: "mz_range" });
         }
-        if !self.rt_range_sec.0.is_finite() || !self.rt_range_sec.1.is_finite() {
+        if !self.rt_range_sec[0].is_finite() || !self.rt_range_sec[1].is_finite() {
             return Err(SpectrumError::NonFiniteValue {
                 field: "rt_range_sec",
             });
         }
-        if self.mz_range.0 > self.mz_range.1 {
+        if self.mz_range[0] > self.mz_range[1] {
             return Err(SpectrumError::InvalidRange {
                 field: "mz_range",
-                min: self.mz_range.0,
-                max: self.mz_range.1,
+                min: self.mz_range[0],
+                max: self.mz_range[1],
             });
         }
-        if self.rt_range_sec.0 > self.rt_range_sec.1 {
+        if self.rt_range_sec[0] > self.rt_range_sec[1] {
             return Err(SpectrumError::InvalidRange {
                 field: "rt_range_sec",
-                min: self.rt_range_sec.0,
-                max: self.rt_range_sec.1,
+                min: self.rt_range_sec[0],
+                max: self.rt_range_sec[1],
             });
         }
         Ok(())
@@ -445,8 +445,8 @@ mod tests {
             total_spectra: 12345,
             ms1_count: 2345,
             ms2_count: 10000,
-            mz_range: (100.0, 2000.0),
-            rt_range_sec: (0.0, 3600.0),
+            mz_range: [100.0, 2000.0],
+            rt_range_sec: [0.0, 3600.0],
             precursor_charge_distribution: charge_dist,
             median_peaks_per_spectrum: 150,
         }
@@ -594,8 +594,8 @@ mod tests {
             total_spectra: 0,
             ms1_count: 0,
             ms2_count: 0,
-            mz_range: (0.0, 0.0),
-            rt_range_sec: (0.0, 0.0),
+            mz_range: [0.0, 0.0],
+            rt_range_sec: [0.0, 0.0],
             precursor_charge_distribution: HashMap::new(),
             median_peaks_per_spectrum: 0,
         };
@@ -613,7 +613,7 @@ mod tests {
     #[test]
     fn spectrum_summary_validate_rejects_nan_mz_range() {
         let mut s = sample_summary();
-        s.mz_range = (f64::NAN, 2000.0);
+        s.mz_range = [f64::NAN, 2000.0];
         assert!(s.validate().is_err());
         assert!(s.validate().unwrap_err().to_string().contains("mz_range"));
     }
@@ -621,7 +621,7 @@ mod tests {
     #[test]
     fn spectrum_summary_validate_rejects_infinity_rt_range() {
         let mut s = sample_summary();
-        s.rt_range_sec = (0.0, f64::INFINITY);
+        s.rt_range_sec = [0.0, f64::INFINITY];
         assert!(s.validate().is_err());
         assert!(s
             .validate()
@@ -633,7 +633,7 @@ mod tests {
     #[test]
     fn spectrum_summary_validate_rejects_inverted_mz_range() {
         let mut s = sample_summary();
-        s.mz_range = (2000.0, 100.0); // min > max
+        s.mz_range = [2000.0, 100.0]; // min > max
         let err = s.validate().unwrap_err();
         assert!(err.to_string().contains("mz_range"));
         assert!(err.to_string().contains("2000"));
@@ -642,7 +642,7 @@ mod tests {
     #[test]
     fn spectrum_summary_validate_rejects_inverted_rt_range() {
         let mut s = sample_summary();
-        s.rt_range_sec = (3600.0, 0.0); // min > max
+        s.rt_range_sec = [3600.0, 0.0]; // min > max
         let err = s.validate().unwrap_err();
         assert!(err.to_string().contains("rt_range_sec"));
     }
@@ -650,8 +650,8 @@ mod tests {
     #[test]
     fn spectrum_summary_validate_accepts_equal_range() {
         let mut s = sample_summary();
-        s.mz_range = (500.0, 500.0); // min == max is OK (single value)
-        s.rt_range_sec = (100.0, 100.0);
+        s.mz_range = [500.0, 500.0]; // min == max is OK (single value)
+        s.rt_range_sec = [100.0, 100.0];
         assert!(s.validate().is_ok());
     }
 

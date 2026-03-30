@@ -151,8 +151,8 @@ impl SummaryAccumulator {
             total_spectra: self.total,
             ms1_count: self.ms1_count,
             ms2_count: self.ms2_count,
-            mz_range: (self.mz_min, self.mz_max),
-            rt_range_sec: (self.rt_min, self.rt_max),
+            mz_range: [self.mz_min, self.mz_max],
+            rt_range_sec: [self.rt_min, self.rt_max],
             precursor_charge_distribution: self.charge_dist,
             median_peaks_per_spectrum: median_peaks,
         };

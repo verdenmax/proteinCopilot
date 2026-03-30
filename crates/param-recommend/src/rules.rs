@@ -63,11 +63,11 @@ pub(crate) fn recommend(
     let input_summary = format!(
         "{} spectra, m/z range [{:.0}-{:.0}], median {} peaks/spectrum, RT [{:.0}-{:.0}] sec",
         summary.total_spectra,
-        summary.mz_range.0,
-        summary.mz_range.1,
+        summary.mz_range[0],
+        summary.mz_range[1],
         summary.median_peaks_per_spectrum,
-        summary.rt_range_sec.0,
-        summary.rt_range_sec.1,
+        summary.rt_range_sec[0],
+        summary.rt_range_sec[1],
     );
 
     Ok(AiDecision {
@@ -104,7 +104,7 @@ fn infer_instrument(summary: &SpectrumSummary, hints: Option<&UserHints>) -> Ins
     }
 
     // Scoring-based inference from data characteristics
-    let mz_upper = summary.mz_range.1;
+    let mz_upper = summary.mz_range[1];
     let median_peaks = summary.median_peaks_per_spectrum;
     let mut hi_score: i32 = 0;
     let mut lo_score: i32 = 0;
@@ -221,7 +221,7 @@ fn build_explanation(
          inferred {instrument_desc}. Recommending {tolerance_desc}. \
          Experiment type: \"{experiment_type}\", using Trypsin digestion with \
          appropriate modification set.",
-        summary.mz_range.0, summary.mz_range.1, summary.median_peaks_per_spectrum,
+        summary.mz_range[0], summary.mz_range[1], summary.median_peaks_per_spectrum,
     )
 }
 
@@ -229,7 +229,7 @@ fn build_evidence(summary: &SpectrumSummary, instrument: &InstrumentClass) -> Ve
     let mut evidence = vec![
         format!(
             "m/z range: {:.0}-{:.0}",
-            summary.mz_range.0, summary.mz_range.1
+            summary.mz_range[0], summary.mz_range[1]
         ),
         format!(
             "Median peaks per spectrum: {}",
@@ -360,8 +360,8 @@ mod tests {
             total_spectra: 10000,
             ms1_count: 500,
             ms2_count: 9500,
-            mz_range: (100.0, 2000.0),
-            rt_range_sec: (0.0, 3600.0),
+            mz_range: [100.0, 2000.0],
+            rt_range_sec: [0.0, 3600.0],
             precursor_charge_distribution: charge_dist,
             median_peaks_per_spectrum: 256,
         }
@@ -377,8 +377,8 @@ mod tests {
             total_spectra: 5000,
             ms1_count: 0,
             ms2_count: 5000,
-            mz_range: (100.0, 1100.0),
-            rt_range_sec: (0.0, 1800.0),
+            mz_range: [100.0, 1100.0],
+            rt_range_sec: [0.0, 1800.0],
             precursor_charge_distribution: charge_dist,
             median_peaks_per_spectrum: 50,
         }
@@ -391,8 +391,8 @@ mod tests {
             total_spectra: 0,
             ms1_count: 0,
             ms2_count: 0,
-            mz_range: (0.0, 0.0),
-            rt_range_sec: (0.0, 0.0),
+            mz_range: [0.0, 0.0],
+            rt_range_sec: [0.0, 0.0],
             precursor_charge_distribution: HashMap::new(),
             median_peaks_per_spectrum: 0,
         }
@@ -585,7 +585,7 @@ mod tests {
     #[test]
     fn mid_res_data_gets_15ppm() {
         let mut summary = high_res_summary();
-        summary.mz_range = (100.0, 1600.0); // borderline
+        summary.mz_range = [100.0, 1600.0]; // borderline
         summary.median_peaks_per_spectrum = 150; // between thresholds
         let result = recommend(&summary, None).unwrap();
         assert_eq!(result.decision.precursor_tolerance.value, 15.0);

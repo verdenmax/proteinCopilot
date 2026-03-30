@@ -342,12 +342,12 @@ mod tests {
         assert_eq!(summary.format, SpectrumFormat::Mgf);
 
         // m/z range: smallest first peak to largest last peak
-        assert!(summary.mz_range.0 > 0.0);
-        assert!(summary.mz_range.1 > summary.mz_range.0);
+        assert!(summary.mz_range[0] > 0.0);
+        assert!(summary.mz_range[1] > summary.mz_range[0]);
 
         // RT range: 120.5 to 240.0
-        assert!((summary.rt_range_sec.0 - 120.5).abs() < 0.1);
-        assert!((summary.rt_range_sec.1 - 240.0).abs() < 0.1);
+        assert!((summary.rt_range_sec[0] - 120.5).abs() < 0.1);
+        assert!((summary.rt_range_sec[1] - 240.0).abs() < 0.1);
 
         // Charge distribution should have entries
         assert!(!summary.precursor_charge_distribution.is_empty());

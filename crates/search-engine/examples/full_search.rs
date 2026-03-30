@@ -61,11 +61,11 @@ async fn main() {
             println!("  MS1 / MS2:      {} / {}", s.ms1_count, s.ms2_count);
             println!(
                 "  m/z range:      {:.1} - {:.1}",
-                s.mz_range.0, s.mz_range.1
+                s.mz_range[0], s.mz_range[1]
             );
             println!(
                 "  RT range:       {:.1} - {:.1} sec",
-                s.rt_range_sec.0, s.rt_range_sec.1
+                s.rt_range_sec[0], s.rt_range_sec[1]
             );
             println!("  Median peaks:   {}", s.median_peaks_per_spectrum);
             s

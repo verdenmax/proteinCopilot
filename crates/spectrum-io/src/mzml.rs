@@ -602,8 +602,8 @@ mod tests {
         assert_eq!(summary.total_spectra, 10);
         assert_eq!(summary.ms2_count, 10);
         assert_eq!(summary.format, SpectrumFormat::MzML);
-        assert!((summary.rt_range_sec.0 - 120.5).abs() < 0.1);
-        assert!((summary.rt_range_sec.1 - 240.0).abs() < 0.1);
+        assert!((summary.rt_range_sec[0] - 120.5).abs() < 0.1);
+        assert!((summary.rt_range_sec[1] - 240.0).abs() < 0.1);
 
         let charge_2 = summary.precursor_charge_distribution.get(&2).unwrap_or(&0);
         assert_eq!(*charge_2, 5);
