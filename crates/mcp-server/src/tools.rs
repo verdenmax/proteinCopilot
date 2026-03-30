@@ -184,6 +184,36 @@ fn mcp_err(code: ErrorCode, err: impl std::fmt::Display) -> ErrorData {
     ErrorData::new(code, err.to_string(), None)
 }
 
+/// Guard that sets progress to "Failed" if the task panics without completing.
+struct PanicGuard {
+    run_id: Uuid,
+    progress_cache: Arc<Mutex<HashMap<Uuid, SearchProgress>>>,
+    start: Instant,
+    completed: bool,
+}
+
+impl Drop for PanicGuard {
+    fn drop(&mut self) {
+        if !self.completed {
+            if let Ok(mut pc) = self.progress_cache.lock() {
+                pc.insert(
+                    self.run_id,
+                    SearchProgress {
+                        run_id: self.run_id,
+                        status: "Failed: task panicked".to_string(),
+                        progress_pct: None,
+                        elapsed_sec: self.start.elapsed().as_secs_f64(),
+                        estimated_remaining_sec: None,
+                    },
+                );
+            }
+        }
+    }
+}
+
+/// Maximum number of cached results before eviction.
+const MAX_CACHE_SIZE: usize = 100;
+
 // ---------------------------------------------------------------------------
 // Server struct
 // ---------------------------------------------------------------------------
@@ -390,8 +420,30 @@ impl ProteinCopilotServer {
         let run_id = Uuid::new_v4();
         let files: Vec<PathBuf> = input.input_files.iter().map(PathBuf::from).collect();
 
-        if let Ok(mut progress) = self.progress_cache.lock() {
-            progress.insert(
+        // Evict oldest entries if cache is full
+        if let Ok(mut rc) = self.result_cache.lock() {
+            while rc.len() >= MAX_CACHE_SIZE {
+                if let Some(&oldest_id) = rc.keys().next() {
+                    rc.remove(&oldest_id);
+                } else {
+                    break;
+                }
+            }
+        }
+        if let Ok(mut pc) = self.progress_cache.lock() {
+            // Only evict completed/failed entries
+            if pc.len() >= MAX_CACHE_SIZE {
+                let to_remove: Vec<Uuid> = pc
+                    .iter()
+                    .filter(|(_, p)| p.status != "Running")
+                    .map(|(id, _)| *id)
+                    .take(pc.len() / 2)
+                    .collect();
+                for id in to_remove {
+                    pc.remove(&id);
+                }
+            }
+            pc.insert(
                 run_id,
                 SearchProgress {
                     run_id,
@@ -407,18 +459,35 @@ impl ProteinCopilotServer {
         let progress_cache = Arc::clone(&self.progress_cache);
         let engine = SimpleSearchEngine::new();
 
+        // Clone progress_cache for the panic guard
+        let panic_progress = Arc::clone(&self.progress_cache);
+
         tokio::spawn(async move {
             let start = Instant::now();
-            match engine.search(&params, &files).await {
+
+            // Panic guard: if the task panics, mark progress as Failed
+            let _guard = PanicGuard {
+                run_id,
+                progress_cache: Arc::clone(&panic_progress),
+                start,
+                completed: false,
+            };
+
+            let search_result = engine.search(&params, &files).await;
+            let duration = start.elapsed().as_secs_f64();
+
+            match search_result {
                 Ok(mut result) => {
                     result.run_id = run_id;
                     result.metadata.run_id = run_id;
-                    let duration = start.elapsed().as_secs_f64();
-                    if let Ok(mut cache) = result_cache.lock() {
-                        cache.insert(run_id, result);
-                    }
-                    if let Ok(mut progress) = progress_cache.lock() {
-                        progress.insert(
+
+                    // Both caches must succeed together for consistency
+                    let result_locked = result_cache.lock();
+                    let progress_locked = progress_cache.lock();
+
+                    if let (Ok(mut rc), Ok(mut pc)) = (result_locked, progress_locked) {
+                        rc.insert(run_id, result);
+                        pc.insert(
                             run_id,
                             SearchProgress {
                                 run_id,
@@ -428,12 +497,25 @@ impl ProteinCopilotServer {
                                 estimated_remaining_sec: Some(0.0),
                             },
                         );
+                    } else {
+                        // Lock failure — mark as failed so LLM knows
+                        if let Ok(mut pc) = progress_cache.lock() {
+                            pc.insert(
+                                run_id,
+                                SearchProgress {
+                                    run_id,
+                                    status: "Failed: internal cache error".to_string(),
+                                    progress_pct: None,
+                                    elapsed_sec: duration,
+                                    estimated_remaining_sec: None,
+                                },
+                            );
+                        }
                     }
                 }
                 Err(e) => {
-                    let duration = start.elapsed().as_secs_f64();
-                    if let Ok(mut progress) = progress_cache.lock() {
-                        progress.insert(
+                    if let Ok(mut pc) = progress_cache.lock() {
+                        pc.insert(
                             run_id,
                             SearchProgress {
                                 run_id,
@@ -446,6 +528,10 @@ impl ProteinCopilotServer {
                     }
                 }
             }
+
+            // Mark guard as completed so Drop doesn't set "Failed"
+            // (we need to prevent the guard from running its destructor)
+            std::mem::forget(_guard);
         });
 
         Ok(Json(SearchStarted {
