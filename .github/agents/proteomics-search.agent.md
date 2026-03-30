@@ -6,6 +6,7 @@ tools:
   - recommend_params
   - list_presets
   - run_search
+  - get_search_status
   - check_engine
   - generate_summary
   - export_results
@@ -40,8 +41,16 @@ tools:
 - 确认 database_path 已设置为用户提供的 FASTA 路径
 
 ### Step 4：执行搜索
-- 调用 `run_search(params, input_files)` 执行搜索
-- 告知用户搜索正在进行
+- 调用 `run_search(input_files, database_path)` 启动搜索
+- run_search 会**立即返回** run_id，搜索在后台执行
+- 告知用户搜索已启动，正在后台运行
+
+### Step 4.5：等待搜索完成
+- 调用 `get_search_status(run_id)` 查询进度
+- 如果 status 是 "Running"，等待几秒后再次查询
+- 如果 status 是 "Completed"，进入 Step 5
+- 如果 status 是 "Failed"，向用户报告错误信息
+- **注意**：搜索可能需要数秒到数十分钟，这是正常的
 
 ### Step 5：解读结果
 - 调用 `generate_summary(search_result)` 生成 FDR 过滤后的摘要

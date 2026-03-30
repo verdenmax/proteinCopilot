@@ -101,7 +101,34 @@ cargo run --release -p protein-copilot-mcp-server
 
 结果自动缓存，后续用 `run_id` 引用。
 
-**输出**：`SearchResult`（含 run_id、PSMs、summary）
+**输出**：`{run_id, status: "Running", message: "..."}`（立即返回，搜索在后台执行）
+
+> **异步模式**：run_search 不阻塞。搜索完成后用 `get_search_status(run_id)` 确认，再用 `generate_summary(run_id)` 获取结果。
+
+---
+
+## get_search_status
+
+查询搜索进度。搜索完成后 status 变为 "Completed"。
+
+**输入**：
+```json
+{
+  "run_id": "9f71e493-..."
+}
+```
+
+**输出**：`SearchProgress`
+```json
+{
+  "run_id": "...",
+  "status": "Completed",
+  "progress_pct": 1.0,
+  "elapsed_sec": 5.2
+}
+```
+
+status 值：`Running` / `Completed` / `Failed: <reason>`
 
 ---
 
@@ -152,18 +179,21 @@ cargo run --release -p protein-copilot-mcp-server
 
 **最简模式（一步搜索）：**
 ```
-① run_search(input_files, database_path)  →  得到 run_id + 结果
-② generate_summary(run_id)                →  统计摘要
-③ export_results(run_id, output_dir)      →  导出文件
+① run_search(input_files, database_path)       →  {run_id, "Running"}
+② get_search_status(run_id)                    →  轮询直到 "Completed"
+③ generate_summary(run_id)                     →  统计摘要
+④ export_results(run_id, output_dir)           →  导出文件
 ```
 
 **标准模式（分步控制）：**
 ```
-① read_spectra(file_path)                 →  数据摘要
-② recommend_params(file_path, database_path, hints)  →  推荐参数
-③ run_search(decision, input_files)       →  搜索
-④ generate_summary(run_id)                →  统计摘要
-⑤ export_results(run_id, output_dir)      →  导出文件
+① read_spectra(file_path)                      →  数据摘要
+② recommend_params(file_path, database_path)   →  推荐参数
+③ run_search(decision, input_files)            →  {run_id, "Running"}
+④ get_search_status(run_id)                    →  轮询直到 "Completed"
+⑤ generate_summary(run_id)                     →  统计摘要
+⑥ export_results(run_id, output_dir)           →  导出文件
 ```
 
 LLM 全程只需传简单参数（路径、run_id），无需构造复杂 JSON。
+搜索不会阻塞 — LLM 可以在等待期间与用户交互。
