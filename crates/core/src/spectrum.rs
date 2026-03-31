@@ -281,11 +281,14 @@ impl Spectrum {
                     field: "isolation_window.target_mz",
                 });
             }
-            if w.lower_offset < 0.0 || w.upper_offset < 0.0 {
-                return Err(SpectrumError::InvalidRange {
-                    field: "isolation_window offsets",
-                    min: w.lower_offset,
-                    max: w.upper_offset,
+            if w.lower_offset < 0.0 {
+                return Err(SpectrumError::NegativeValue {
+                    field: "isolation_window.lower_offset",
+                });
+            }
+            if w.upper_offset < 0.0 {
+                return Err(SpectrumError::NegativeValue {
+                    field: "isolation_window.upper_offset",
                 });
             }
         }

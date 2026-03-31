@@ -25,17 +25,27 @@ pub(crate) fn recommend(
         return Err(ParamRecommendError::EmptySummary);
     }
 
+    // Validate summary fields (reject NaN/Inf values)
+    summary
+        .validate()
+        .map_err(|e| ParamRecommendError::InvalidSummary {
+            field: "summary",
+            detail: e.to_string(),
+        })?;
+
     // Step 1: Select base preset
     let experiment_type = hints
         .and_then(|h| h.experiment_type.as_deref())
         .unwrap_or("standard");
 
-    let mut base = select_preset(experiment_type);
+    let lower_type = experiment_type.to_lowercase();
+    let is_open_search = lower_type.contains("open");
+
+    let mut base = select_preset(&lower_type, is_open_search);
 
     // Step 2: Adjust tolerance based on instrument inference
     let instrument = infer_instrument(summary, hints);
     // Don't override tolerance for open search (uses Da-based tolerance)
-    let is_open_search = experiment_type.to_lowercase().contains("open");
     if !is_open_search {
         apply_tolerance(&mut base, &instrument);
     }
@@ -138,20 +148,48 @@ fn infer_instrument(summary: &SpectrumSummary, hints: Option<&UserHints>) -> Ins
 // Preset selection
 // ---------------------------------------------------------------------------
 
-fn select_preset(experiment_type: &str) -> SearchParams {
-    let lower = experiment_type.to_lowercase();
-    let preset = if lower.contains("phospho") {
-        preset::phospho_preset()
-    } else if lower.contains("tmt") {
-        preset::tmt_preset()
-    } else if lower.contains("silac") {
-        preset::silac_preset()
-    } else if lower.contains("open") {
-        preset::open_search_preset()
+fn select_preset(lower_type: &str, is_open_search: bool) -> SearchParams {
+    // Open search takes priority: it defines the tolerance strategy,
+    // then we layer experiment-specific modifications on top.
+    if is_open_search {
+        let mut params = preset::open_search_preset().params;
+        // Layer experiment-specific modifications onto open search base
+        if lower_type.contains("phospho") {
+            merge_modifications(&mut params, &preset::phospho_preset().params);
+        } else if lower_type.contains("tmt") {
+            merge_modifications(&mut params, &preset::tmt_preset().params);
+        } else if lower_type.contains("silac") {
+            merge_modifications(&mut params, &preset::silac_preset().params);
+        }
+        params
+    } else if lower_type.contains("phospho") {
+        preset::phospho_preset().params
+    } else if lower_type.contains("tmt") {
+        preset::tmt_preset().params
+    } else if lower_type.contains("silac") {
+        preset::silac_preset().params
     } else {
-        preset::standard_preset()
-    };
-    preset.params
+        preset::standard_preset().params
+    }
+}
+
+/// Merge fixed and variable modifications from `source` into `target`,
+/// avoiding duplicates (by modification name).
+fn merge_modifications(target: &mut SearchParams, source: &SearchParams) {
+    for m in &source.fixed_modifications {
+        if !target.fixed_modifications.iter().any(|t| t.name == m.name) {
+            target.fixed_modifications.push(m.clone());
+        }
+    }
+    for m in &source.variable_modifications {
+        if !target
+            .variable_modifications
+            .iter()
+            .any(|t| t.name == m.name)
+        {
+            target.variable_modifications.push(m.clone());
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -564,6 +602,31 @@ mod tests {
         assert!(
             !result.explanation.contains("⚠ Warnings"),
             "Open search preset should not trigger self-conflict"
+        );
+    }
+
+    // -- Compound experiment types --------------------------------------
+
+    #[test]
+    fn tmt_open_gets_open_tolerance_with_tmt_mods() {
+        let hints = UserHints {
+            experiment_type: Some("tmt open".to_string()),
+            ..Default::default()
+        };
+        let result = recommend(&high_res_summary(), Some(&hints)).unwrap();
+        // Must use open search tolerance (500 Da), not TMT's 10 ppm
+        assert_eq!(
+            result.decision.precursor_tolerance.value, 500.0,
+            "Compound 'tmt open' should use 500 Da precursor tolerance"
+        );
+        // Must also include TMT modifications
+        assert!(
+            result
+                .decision
+                .fixed_modifications
+                .iter()
+                .any(|m| m.name.contains("TMT")),
+            "Compound 'tmt open' should include TMT modifications"
         );
     }
 

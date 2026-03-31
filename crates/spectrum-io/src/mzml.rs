@@ -456,7 +456,6 @@ impl SpectrumReader for MzMLReader {
 
     fn read_spectrum(&self, path: &Path, scan: u32) -> Result<Spectrum, SpectrumIoError> {
         let mut xml_reader = open_xml_reader(path)?;
-        xml_reader.config_mut().trim_text(true);
 
         let mut found: Option<Spectrum> = None;
         parse_mzml_streaming(&mut xml_reader, path, |s| {

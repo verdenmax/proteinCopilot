@@ -69,7 +69,12 @@ fn generate_b_ions(sequence: &str) -> Vec<f64> {
     let mut cumulative = 0.0;
 
     for &aa in &chars[..chars.len().saturating_sub(1)] {
-        cumulative += residue_mass(aa);
+        // Skip entire generation if non-standard residue encountered
+        let mass = match residue_mass(aa) {
+            Some(m) => m,
+            None => return Vec::new(),
+        };
+        cumulative += mass;
         // b-ion m/z (singly charged) = cumulative + proton
         ions.push(cumulative + PROTON_MASS);
     }
@@ -84,7 +89,11 @@ fn generate_y_ions(sequence: &str) -> Vec<f64> {
     let mut cumulative = WATER_MASS;
 
     for &aa in chars.iter().rev().take(chars.len().saturating_sub(1)) {
-        cumulative += residue_mass(aa);
+        let mass = match residue_mass(aa) {
+            Some(m) => m,
+            None => return Vec::new(),
+        };
+        cumulative += mass;
         // y-ion m/z (singly charged) = cumulative + proton
         ions.push(cumulative + PROTON_MASS);
     }
@@ -263,7 +272,7 @@ mod tests {
         DigestedPeptide {
             sequence: sequence.to_string(),
             protein_accession: accession.to_string(),
-            neutral_mass: peptide_mass(sequence),
+            neutral_mass: peptide_mass(sequence).expect("test uses standard residues"),
         }
     }
 

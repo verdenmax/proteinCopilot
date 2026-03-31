@@ -474,11 +474,22 @@ impl ProteinCopilotServer {
             .validate()
             .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
 
+        if input.input_files.is_empty() {
+            return Err(mcp_err(
+                ErrorCode::INVALID_PARAMS,
+                "input_files is empty — provide at least one spectrum file path",
+            ));
+        }
+
         let run_id = Uuid::new_v4();
         let files: Vec<PathBuf> = input.input_files.iter().map(PathBuf::from).collect();
 
         // Evict + initialize in unified cache
-        if let Ok(mut cache) = self.run_cache.lock() {
+        {
+            let mut cache = self
+                .run_cache
+                .lock()
+                .map_err(|_| mcp_err(ErrorCode::INTERNAL_ERROR, "run cache lock is poisoned"))?;
             cache.evict_if_full();
             cache.insert(
                 run_id,
