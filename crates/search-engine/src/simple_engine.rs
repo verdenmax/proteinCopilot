@@ -12,13 +12,14 @@ use std::time::Instant;
 
 use protein_copilot_core::engine::{EngineInfo, HealthStatus, SearchEngineAdapter};
 use protein_copilot_core::error::CoreError;
-use protein_copilot_core::progress::ProgressCallback;
+use protein_copilot_core::progress::{ProgressCallback, SearchProgress};
 use protein_copilot_core::run_metadata::{RunMetadata, RunStatus};
 use protein_copilot_core::search_params::SearchParams;
 use protein_copilot_core::search_result::{
     PeptideResult, ProteinResult, Psm, SearchResult, SearchResultSummary,
 };
 use protein_copilot_core::spectrum::Spectrum;
+use uuid::Uuid;
 
 use crate::digest::{digest, DigestedPeptide};
 use crate::error::SearchEngineError;
@@ -42,8 +43,22 @@ impl SimpleSearchEngine {
         &self,
         params: &SearchParams,
         input_files: &[PathBuf],
+        on_progress: &dyn Fn(SearchProgress),
     ) -> Result<SearchResult, SearchEngineError> {
         let start = Instant::now();
+        let run_id = Uuid::new_v4();
+
+        // Helper to report progress at a given stage
+        let report = |stage: &str, pct: f64| {
+            on_progress(SearchProgress {
+                run_id,
+                status: "Running".to_string(),
+                stage: Some(stage.to_string()),
+                progress_pct: Some(pct),
+                elapsed_sec: start.elapsed().as_secs_f64(),
+                estimated_remaining_sec: None,
+            });
+        };
 
         // Step 1: Validate parameters
         params
@@ -57,9 +72,11 @@ impl SimpleSearchEngine {
         }
 
         // Step 2: Read FASTA database and digest
+        report("Reading FASTA database", 0.02);
         let fasta_path = Path::new(&params.database_path);
         let proteins = parse_fasta(fasta_path)?;
 
+        report("Digesting proteins", 0.08);
         let mut all_peptides: Vec<DigestedPeptide> = Vec::new();
         for protein in &proteins {
             let peptides = digest(
@@ -82,6 +99,7 @@ impl SimpleSearchEngine {
         }
 
         // Step 3: Read all spectra from input files
+        report("Reading spectra", 0.15);
         let mut all_spectra: Vec<Spectrum> = Vec::new();
         for file_path in input_files {
             let info = protein_copilot_spectrum_io::detect_format(file_path).map_err(|e| {
@@ -103,9 +121,18 @@ impl SimpleSearchEngine {
         }
 
         // Step 4: Match each spectrum against peptide candidates
+        let total_spectra = all_spectra.len();
         let mut psms: Vec<Psm> = Vec::new();
 
-        for spectrum in &all_spectra {
+        for (i, spectrum) in all_spectra.iter().enumerate() {
+            // Report matching progress every 50 spectra or at the last one
+            if i % 50 == 0 || i + 1 == total_spectra {
+                let pct = 0.15 + 0.75 * (i as f64 / total_spectra.max(1) as f64);
+                report(
+                    &format!("Matching spectra ({}/{})", i + 1, total_spectra),
+                    pct,
+                );
+            }
             if let Some(m) = match_spectrum(
                 spectrum,
                 &all_peptides,
@@ -118,6 +145,7 @@ impl SimpleSearchEngine {
         }
 
         // Step 5: Aggregate peptide and protein level results
+        report("Aggregating results", 0.92);
         let peptides = aggregate_peptides(&psms);
         let protein_results = aggregate_proteins(&psms, &proteins);
 
@@ -129,11 +157,12 @@ impl SimpleSearchEngine {
         let engine_info = self.engine_info();
         let mut metadata =
             RunMetadata::new(params.clone(), engine_info.clone(), input_files.to_vec());
+        metadata.run_id = run_id;
         metadata.status = RunStatus::Completed;
         metadata.duration_sec = Some(duration);
 
         Ok(SearchResult {
-            run_id: metadata.run_id,
+            run_id,
             engine_info,
             params_used: params.clone(),
             psms,
@@ -157,9 +186,9 @@ impl SearchEngineAdapter for SimpleSearchEngine {
         &self,
         params: &SearchParams,
         input_files: &[PathBuf],
-        _on_progress: ProgressCallback,
+        on_progress: ProgressCallback,
     ) -> Result<SearchResult, CoreError> {
-        self.run_search(params, input_files)
+        self.run_search(params, input_files, &*on_progress)
             .map_err(CoreError::from)
     }
 
@@ -416,7 +445,7 @@ mod tests {
         let fasta = create_test_fasta();
         let params = test_params(&fasta.path().to_string_lossy());
         let engine = SimpleSearchEngine::new();
-        let result = engine.run_search(&params, &[]);
+        let result = engine.run_search(&params, &[], &|_| {});
         assert!(result.is_err());
     }
 
@@ -439,7 +468,7 @@ mod tests {
             decoy_strategy: DecoyStrategy::Reverse,
         };
         let engine = SimpleSearchEngine::new();
-        let result = engine.run_search(&params, &[PathBuf::from("test.mgf")]);
+        let result = engine.run_search(&params, &[PathBuf::from("test.mgf")], &|_| {});
         assert!(result.is_err());
     }
 
@@ -458,7 +487,7 @@ mod tests {
             .join("small.mgf");
 
         let engine = SimpleSearchEngine::new();
-        let result = engine.run_search(&params, &[fixture]).unwrap();
+        let result = engine.run_search(&params, &[fixture], &|_| {}).unwrap();
 
         // Basic structural checks
         assert_eq!(result.engine_info.name, "SimpleSearch");
@@ -521,11 +550,58 @@ mod tests {
             .join("small.mgf");
 
         let engine = SimpleSearchEngine::new();
-        let result = engine.run_search(&params, &[fixture]);
+        let result = engine.run_search(&params, &[fixture], &|_| {});
         assert!(result.is_err());
         assert!(result
             .unwrap_err()
             .to_string()
             .contains("no candidate peptides"));
+    }
+
+    #[tokio::test]
+    async fn search_reports_progress_stages() {
+        use std::sync::{Arc, Mutex};
+
+        let stages: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        let stages_clone = Arc::clone(&stages);
+
+        let on_progress: ProgressCallback = Box::new(move |p: SearchProgress| {
+            if let Some(stage) = p.stage {
+                let mut s = stages_clone.lock().unwrap();
+                // Only push if stage changed
+                if s.last().map(|l| l != &stage).unwrap_or(true) {
+                    s.push(stage);
+                }
+            }
+        });
+
+        let fasta = create_test_fasta();
+        let params = test_params(&fasta.path().to_string_lossy());
+        let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .join("spectrum-io")
+            .join("tests")
+            .join("fixtures")
+            .join("small.mgf");
+
+        let engine = SimpleSearchEngine::new();
+        let _result = engine
+            .search(&params, &[fixture], on_progress)
+            .await
+            .unwrap();
+
+        let recorded = stages.lock().unwrap();
+        assert!(
+            recorded.len() >= 4,
+            "Expected at least 4 stages, got: {recorded:?}"
+        );
+        assert!(
+            recorded[0].contains("FASTA"),
+            "First stage should be FASTA reading, got: {}",
+            recorded[0]
+        );
+        assert!(recorded.iter().any(|s| s.contains("Matching")));
+        assert!(recorded.last().unwrap().contains("Aggregating"));
     }
 }
