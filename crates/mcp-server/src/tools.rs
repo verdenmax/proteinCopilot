@@ -172,6 +172,16 @@ struct CancelSearchInput {
     run_id: String,
 }
 
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct ListSearchesInput {
+    /// Filter by status prefix (e.g. "Completed", "Failed"). Optional.
+    #[serde(default)]
+    status_filter: Option<String>,
+    /// Maximum results to return. Default 20.
+    #[serde(default)]
+    limit: Option<u32>,
+}
+
 /// Presets list response
 #[derive(Debug, Serialize, schemars::JsonSchema)]
 struct PresetsResponse {
@@ -551,31 +561,69 @@ impl ProteinCopilotServer {
             let duration = start.elapsed().as_secs_f64();
 
             // Single lock — update progress + result atomically
-            let updated = if let Ok(mut cache) = run_cache_clone.lock() {
+            let (updated, history_entry) = if let Ok(mut cache) = run_cache_clone.lock() {
                 if let Some(state) = cache.get_mut(&run_id) {
-                    match search_result {
+                    let entry = match search_result {
                         Ok(mut result) => {
                             result.run_id = run_id;
                             result.metadata.run_id = run_id;
+                            let entry = crate::history::SearchHistoryEntry {
+                                run_id,
+                                status: "Completed".to_string(),
+                                created_at: result.metadata.created_at,
+                                elapsed_sec: duration,
+                                engine_info: result.engine_info.clone(),
+                                input_files: result.metadata.input_files.clone(),
+                                params_used: result.params_used.clone(),
+                                total_psms: Some(result.summary.total_psms),
+                                psms_at_1pct_fdr: Some(result.summary.psms_at_1pct_fdr),
+                                identification_rate: Some(result.summary.identification_rate),
+                                protein_groups: Some(result.summary.protein_groups_at_1pct_fdr),
+                            };
                             state.result = Some(result);
                             state.progress.status = "Completed".to_string();
+                            state.progress.stage = None;
                             state.progress.progress_pct = Some(1.0);
                             state.progress.elapsed_sec = duration;
                             state.progress.estimated_remaining_sec = Some(0.0);
+                            Some(entry)
                         }
                         Err(e) => {
+                            let entry = crate::history::SearchHistoryEntry {
+                                run_id,
+                                status: format!("Failed: {e}"),
+                                created_at: chrono::Utc::now(),
+                                elapsed_sec: duration,
+                                engine_info: protein_copilot_core::engine::EngineInfo {
+                                    name: "SimpleSearch".into(),
+                                    version: "0.1.0".into(),
+                                    supported_features: vec![],
+                                },
+                                input_files: files.clone(),
+                                params_used: params.clone(),
+                                total_psms: None,
+                                psms_at_1pct_fdr: None,
+                                identification_rate: None,
+                                protein_groups: None,
+                            };
                             state.progress.status = format!("Failed: {e}");
                             state.progress.progress_pct = None;
                             state.progress.elapsed_sec = duration;
+                            Some(entry)
                         }
-                    }
-                    true
+                    };
+                    (true, entry)
                 } else {
-                    false
+                    (false, None)
                 }
             } else {
-                false
+                (false, None)
             };
+
+            // Persist history to disk (outside the lock)
+            if let Some(entry) = history_entry {
+                crate::history::save_entry(&entry);
+            }
 
             // Only forget guard if we successfully updated the cache.
             // If lock failed, guard's Drop will set status to "Failed: task panicked".
@@ -733,5 +781,68 @@ impl ProteinCopilotServer {
             "Exported to {}: psm.tsv, peptide.tsv, protein.tsv, result.json, run_metadata.json",
             output_dir.display()
         ))
+    }
+
+    /// List recent search runs with status and metrics.
+    #[rmcp::tool(
+        name = "list_searches",
+        description = "List recent search runs with their status, duration, and key metrics. Includes both active searches and completed history."
+    )]
+    fn list_searches(
+        &self,
+        Parameters(input): Parameters<ListSearchesInput>,
+    ) -> Json<Vec<crate::history::SearchHistoryEntry>> {
+        let limit = input.limit.unwrap_or(20) as usize;
+        let mut entries = crate::history::load_all();
+
+        // Merge active runs from in-memory cache
+        if let Ok(cache) = self.run_cache.lock() {
+            for (id, state) in &cache.map {
+                if !entries.iter().any(|e| e.run_id == *id) {
+                    entries.push(crate::history::SearchHistoryEntry {
+                        run_id: *id,
+                        status: state.progress.status.clone(),
+                        created_at: chrono::Utc::now(),
+                        elapsed_sec: state.progress.elapsed_sec,
+                        engine_info: protein_copilot_core::engine::EngineInfo {
+                            name: "SimpleSearch".into(),
+                            version: "0.1.0".into(),
+                            supported_features: vec![],
+                        },
+                        input_files: vec![],
+                        params_used: protein_copilot_core::search_params::SearchParams {
+                            enzyme: protein_copilot_core::search_params::Enzyme::Trypsin,
+                            missed_cleavages: 0,
+                            fixed_modifications: vec![],
+                            variable_modifications: vec![],
+                            precursor_tolerance:
+                                protein_copilot_core::search_params::MassTolerance {
+                                    value: 0.0,
+                                    unit: protein_copilot_core::search_params::ToleranceUnit::Ppm,
+                                },
+                            fragment_tolerance:
+                                protein_copilot_core::search_params::MassTolerance {
+                                    value: 0.0,
+                                    unit: protein_copilot_core::search_params::ToleranceUnit::Da,
+                                },
+                            database_path: String::new(),
+                            decoy_strategy:
+                                protein_copilot_core::search_params::DecoyStrategy::Reverse,
+                        },
+                        total_psms: None,
+                        psms_at_1pct_fdr: None,
+                        identification_rate: None,
+                        protein_groups: None,
+                    });
+                }
+            }
+        }
+
+        if let Some(ref filter) = input.status_filter {
+            entries.retain(|e| e.status.starts_with(filter.as_str()));
+        }
+        entries.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        entries.truncate(limit);
+        Json(entries)
     }
 }

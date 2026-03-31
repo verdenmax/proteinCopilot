@@ -7,6 +7,7 @@ use rmcp::transport::stdio;
 use rmcp::ServiceExt;
 use tracing_subscriber::EnvFilter;
 
+mod history;
 mod tools;
 
 use tools::ProteinCopilotServer;

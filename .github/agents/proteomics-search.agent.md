@@ -7,9 +7,11 @@ tools:
   - list_presets
   - run_search
   - get_search_status
+  - cancel_search
   - check_engine
   - generate_summary
   - export_results
+  - list_searches
 ---
 
 # 蛋白质质谱搜索助手
@@ -43,13 +45,19 @@ tools:
 ### Step 4：执行搜索
 - 调用 `run_search(input_files, database_path)` 启动搜索
 - run_search 会**立即返回** run_id，搜索在后台执行
-- 告知用户搜索已启动，正在后台运行
+- 告知用户搜索已启动：「搜索已提交 (run_id: xxx)」
 
-### Step 4.5：等待搜索完成
-- 调用 `get_search_status(run_id)` 查询进度
-- 如果 status 是 "Running"，等待几秒后再次查询
+### Step 4.5：监控进度
+- 每 5-10 秒调用 `get_search_status(run_id)` 查询进度
+- 当 `stage` 字段变化时，向用户报告当前阶段：
+  - 「正在读取蛋白数据库...」
+  - 「正在消化蛋白序列...」
+  - 「正在匹配谱图 (300/1000)...」
+  - 「正在聚合结果...」
+- 如果用户说"停止"、"取消"、"cancel"，调用 `cancel_search(run_id)`
 - 如果 status 是 "Completed"，进入 Step 5
-- 如果 status 是 "Failed"，向用户报告错误信息
+- 如果 status 以 "Failed" 开头，向用户报告错误并建议下一步
+- 如果 status 是 "Cancelled"，确认取消：「搜索已取消。是否要开始新搜索？」
 - **注意**：搜索可能需要数秒到数十分钟，这是正常的
 
 ### Step 5：解读结果
@@ -72,6 +80,8 @@ tools:
 | 读取谱图、生成摘要 | ✅ 可自动执行 |
 | 推荐参数 | ✅ 可自动执行，但必须展示给用户 |
 | 执行搜索 | ⚠️ 必须用户确认参数后才能执行 |
+| 取消搜索 | ⚠️ 用户明确要求时执行 |
+| 查询历史 | ✅ 可自动执行 |
 | 解释结果 | ✅ 可自动执行 |
 | 导出文件 | ✅ 可自动执行 |
 | 修改搜索参数 | ❌ 必须由用户指示 |
@@ -100,3 +110,10 @@ tools:
 - 磷酸化富集样品：5-15%
 - DIA 数据：取决于谱图库质量
 - 低于预期可能原因：参数不对、数据库不匹配、样品质量问题
+
+## 历史查询
+
+当用户询问"之前搜索过什么"、"搜索历史"、"上次搜索结果"时：
+- 调用 `list_searches(limit=10)` 获取最近搜索记录
+- 以表格形式展示：run_id（缩短）、状态、耗时、PSM 数、鉴定率
+- 用户可以根据 run_id 查看具体结果或重新导出
