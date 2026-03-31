@@ -257,3 +257,62 @@ async fn error_invalid_params() {
     let result = engine.search(&params, &[mgf_path()], noop_progress()).await;
     assert!(result.is_err());
 }
+
+// ─────────────────────────────────────────────────────────
+// Scenario: Progress tracking e2e
+// ─────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn scenario_progress_tracking() {
+    use protein_copilot_core::progress::{ProgressCallback, SearchProgress};
+    use std::sync::{Arc, Mutex};
+
+    let stages: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let stages_clone = Arc::clone(&stages);
+    let on_progress: ProgressCallback = Box::new(move |p: SearchProgress| {
+        if let Some(ref stage) = p.stage {
+            let mut s = stages_clone.lock().unwrap();
+            if s.last().map(|l| l != stage).unwrap_or(true) {
+                s.push(stage.clone());
+            }
+        }
+        // Verify progress_pct is valid when present
+        if let Some(pct) = p.progress_pct {
+            assert!(
+                (0.0..=1.0).contains(&pct),
+                "progress_pct out of range: {pct}"
+            );
+        }
+    });
+
+    let file_info = detect_format(&mgf_path()).unwrap();
+    let summary = create_reader(&file_info).read_summary(&mgf_path()).unwrap();
+    let mut params = ParamRecommender.recommend(&summary, None).unwrap().decision;
+    params.database_path = fasta_path().to_string_lossy().to_string();
+
+    let engine = SimpleSearchEngine::new();
+    let result = engine
+        .search(&params, &[mgf_path()], on_progress)
+        .await
+        .unwrap();
+
+    assert_eq!(result.summary.total_spectra_searched, 100);
+
+    let recorded = stages.lock().unwrap();
+    assert!(
+        recorded.len() >= 4,
+        "Expected at least 4 stages, got: {recorded:?}"
+    );
+    assert!(
+        recorded[0].contains("FASTA"),
+        "First stage should mention FASTA"
+    );
+    assert!(
+        recorded.iter().any(|s| s.contains("Matching")),
+        "Should have a Matching stage"
+    );
+    assert!(
+        recorded.last().unwrap().contains("Aggregating"),
+        "Last stage should be Aggregating"
+    );
+}
