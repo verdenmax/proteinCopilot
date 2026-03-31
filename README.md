@@ -47,7 +47,7 @@ crates/
 └── prompts/result-interpretation.prompt.md  结果解读 Skill
 ```
 
-## MCP Tools（8 个）
+## MCP Tools（9 个）
 
 | Tool | 功能 |
 |------|------|
@@ -55,7 +55,8 @@ crates/
 | `get_spectrum` | 按 scan 读取单张谱图 |
 | `recommend_params` | 推荐搜索参数 + 解释 |
 | `list_presets` | 列出内置预设 |
-| `run_search` | 执行数据库搜索 |
+| `run_search` | 异步执行数据库搜索（立即返回 run_id） |
+| `get_search_status` | 查询搜索进度 |
 | `check_engine` | 检查引擎状态 |
 | `generate_summary` | FDR 过滤统计摘要 |
 | `export_results` | 导出 TSV/JSON 文件 |
@@ -76,7 +77,7 @@ crates/
 | M1.3 param-recommend | ✅ 规则引擎 + 5 个预设 |
 | M1.4 search-engine | ✅ SimpleSearch + pFind 预留 |
 | M1.5 report | ✅ 摘要 + TSV/JSON 导出 |
-| M1.6 mcp-server | ✅ 8 MCP tools + Agent + Skill |
+| M1.6 mcp-server | ✅ 9 MCP tools + Agent + Skill |
 | M1.7 integration | ✅ 端到端测试 + 文档 |
 
 详细计划：`tasks/001-mvp-proteomics-search-platform.md`

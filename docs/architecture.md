@@ -365,7 +365,7 @@ report/src/
 
 **职责**：唯一的二进制入口。组装所有 library，注册为 MCP Tools，启动 stdio server。
 
-**注册的 8 个 MCP Tools**：
+**注册的 9 个 MCP Tools**：
 
 | Tool | 功能 | 对应 Library |
 |------|------|-------------|
@@ -373,7 +373,8 @@ report/src/
 | `get_spectrum` | 按 scan 读取单张谱图 | spectrum-io |
 | `recommend_params` | 推荐搜索参数 → AiDecision | param-recommend |
 | `list_presets` | 列出内置预设 | param-recommend |
-| `run_search` | 执行数据库搜索 → SearchResult | search-engine |
+| `run_search` | 异步执行搜索（立即返回 run_id） | search-engine |
+| `get_search_status` | 查询搜索进度 | mcp-server (cache) |
 | `check_engine` | 检查引擎状态 | search-engine |
 | `generate_summary` | FDR 过滤统计摘要 | report |
 | `export_results` | 导出 TSV/JSON 文件 | report |
