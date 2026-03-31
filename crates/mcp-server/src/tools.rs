@@ -193,8 +193,59 @@ struct RunState {
 /// Maximum number of cached runs before eviction.
 const MAX_CACHE_SIZE: usize = 100;
 
-/// Unified run cache — single lock protects both progress and result.
-type RunCache = Arc<Mutex<HashMap<Uuid, RunState>>>;
+/// Ordered run cache — insertion order tracked for FIFO eviction.
+struct OrderedRunCache {
+    map: HashMap<Uuid, RunState>,
+    order: Vec<Uuid>,
+}
+
+impl OrderedRunCache {
+    fn new() -> Self {
+        Self {
+            map: HashMap::new(),
+            order: Vec::new(),
+        }
+    }
+
+    fn insert(&mut self, id: Uuid, state: RunState) {
+        if !self.map.contains_key(&id) {
+            self.order.push(id);
+        }
+        self.map.insert(id, state);
+    }
+
+    fn get(&self, id: &Uuid) -> Option<&RunState> {
+        self.map.get(id)
+    }
+
+    fn get_mut(&mut self, id: &Uuid) -> Option<&mut RunState> {
+        self.map.get_mut(id)
+    }
+
+    #[allow(dead_code)]
+    fn len(&self) -> usize {
+        self.map.len()
+    }
+
+    /// Evict oldest non-running entries until under limit.
+    fn evict_if_full(&mut self) {
+        while self.map.len() >= MAX_CACHE_SIZE {
+            let pos = self.order.iter().position(|id| {
+                self.map
+                    .get(id)
+                    .is_none_or(|s| s.progress.status != "Running")
+            });
+            if let Some(i) = pos {
+                let id = self.order.remove(i);
+                self.map.remove(&id);
+            } else {
+                break; // all running, can't evict
+            }
+        }
+    }
+}
+
+type RunCache = Arc<Mutex<OrderedRunCache>>;
 
 /// Guard that sets progress to "Failed" if the task terminates abnormally.
 struct PanicGuard {
@@ -236,7 +287,7 @@ impl ProteinCopilotServer {
         Self {
             tool_router: Self::tool_router(),
             registry,
-            run_cache: Arc::new(Mutex::new(HashMap::new())),
+            run_cache: Arc::new(Mutex::new(OrderedRunCache::new())),
         }
     }
 
@@ -428,18 +479,7 @@ impl ProteinCopilotServer {
 
         // Evict + initialize in unified cache
         if let Ok(mut cache) = self.run_cache.lock() {
-            // Evict oldest completed/failed entries if full
-            if cache.len() >= MAX_CACHE_SIZE {
-                let to_remove: Vec<Uuid> = cache
-                    .iter()
-                    .filter(|(_, s)| s.progress.status != "Running")
-                    .map(|(id, _)| *id)
-                    .take(cache.len() / 2)
-                    .collect();
-                for id in to_remove {
-                    cache.remove(&id);
-                }
-            }
+            cache.evict_if_full();
             cache.insert(
                 run_id,
                 RunState {
@@ -472,7 +512,7 @@ impl ProteinCopilotServer {
             let duration = start.elapsed().as_secs_f64();
 
             // Single lock — update progress + result atomically
-            if let Ok(mut cache) = run_cache_clone.lock() {
+            let updated = if let Ok(mut cache) = run_cache_clone.lock() {
                 if let Some(state) = cache.get_mut(&run_id) {
                     match search_result {
                         Ok(mut result) => {
@@ -490,11 +530,19 @@ impl ProteinCopilotServer {
                             state.progress.elapsed_sec = duration;
                         }
                     }
+                    true
+                } else {
+                    false
                 }
-            }
+            } else {
+                false
+            };
 
-            // Forget guard — normal completion, don't trigger panic handler
-            std::mem::forget(_guard);
+            // Only forget guard if we successfully updated the cache.
+            // If lock failed, guard's Drop will set status to "Failed: task panicked".
+            if updated {
+                std::mem::forget(_guard);
+            }
         });
 
         Ok(Json(SearchStarted {
