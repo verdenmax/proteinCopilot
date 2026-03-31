@@ -10,6 +10,7 @@ use std::env;
 use std::path::Path;
 
 use protein_copilot_core::engine::SearchEngineAdapter;
+use protein_copilot_core::progress::noop_progress;
 use protein_copilot_param_recommend::ParamRecommender;
 use protein_copilot_report::ReportGenerator;
 use protein_copilot_search_engine::SimpleSearchEngine;
@@ -132,7 +133,10 @@ async fn main() {
     println!("  Engine:         {}", engine.engine_info().name);
     println!("  Database:       {fasta_path}");
 
-    let result = match engine.search(&params, &[spectrum_path.to_path_buf()]).await {
+    let result = match engine
+        .search(&params, &[spectrum_path.to_path_buf()], noop_progress())
+        .await
+    {
         Ok(r) => r,
         Err(e) => {
             eprintln!("  ✗ Search failed: {e}");

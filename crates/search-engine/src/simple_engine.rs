@@ -12,6 +12,7 @@ use std::time::Instant;
 
 use protein_copilot_core::engine::{EngineInfo, HealthStatus, SearchEngineAdapter};
 use protein_copilot_core::error::CoreError;
+use protein_copilot_core::progress::ProgressCallback;
 use protein_copilot_core::run_metadata::{RunMetadata, RunStatus};
 use protein_copilot_core::search_params::SearchParams;
 use protein_copilot_core::search_result::{
@@ -156,6 +157,7 @@ impl SearchEngineAdapter for SimpleSearchEngine {
         &self,
         params: &SearchParams,
         input_files: &[PathBuf],
+        _on_progress: ProgressCallback,
     ) -> Result<SearchResult, CoreError> {
         self.run_search(params, input_files)
             .map_err(CoreError::from)
@@ -356,6 +358,7 @@ fn build_summary(psms: &[Psm], total_spectra: u64, duration: f64) -> SearchResul
 #[cfg(test)]
 mod tests {
     use super::*;
+    use protein_copilot_core::progress::noop_progress;
     use protein_copilot_core::search_params::{
         DecoyStrategy, Enzyme, MassTolerance, ToleranceUnit,
     };
@@ -366,7 +369,7 @@ mod tests {
         write!(
             f,
             ">sp|P001|TEST1 Test protein 1\n\
-             PEPTIDEKANOTHERRLASTR\n\
+             PEPTIDEKANSTHERRLASTR\n\
              >sp|P002|TEST2 Test protein 2\n\
              AVCDEFGKHIKLMNPQRST\n"
         )
@@ -485,7 +488,10 @@ mod tests {
             .join("small.mgf");
 
         let engine = SimpleSearchEngine::new();
-        let result = engine.search(&params, &[fixture]).await.unwrap();
+        let result = engine
+            .search(&params, &[fixture], noop_progress())
+            .await
+            .unwrap();
         assert_eq!(result.engine_info.name, "SimpleSearch");
     }
 

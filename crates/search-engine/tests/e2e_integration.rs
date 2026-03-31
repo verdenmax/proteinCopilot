@@ -6,6 +6,7 @@
 use std::path::PathBuf;
 
 use protein_copilot_core::engine::SearchEngineAdapter;
+use protein_copilot_core::progress::noop_progress;
 use protein_copilot_core::search_params::*;
 use protein_copilot_param_recommend::{ParamRecommender, UserHints};
 use protein_copilot_report::ReportGenerator;
@@ -54,7 +55,10 @@ async fn scenario_a_full_pipeline() {
 
     // Step 4: Run search
     let engine = SimpleSearchEngine::new();
-    let result = engine.search(&params, &[mgf_path()]).await.unwrap();
+    let result = engine
+        .search(&params, &[mgf_path()], noop_progress())
+        .await
+        .unwrap();
 
     // Step 5: Verify result structure
     assert_eq!(result.summary.total_spectra_searched, 100);
@@ -134,7 +138,10 @@ async fn scenario_b_direct_params() {
     assert!(params.validate().is_ok());
 
     let engine = SimpleSearchEngine::new();
-    let result = engine.search(&params, &[mgf_path()]).await.unwrap();
+    let result = engine
+        .search(&params, &[mgf_path()], noop_progress())
+        .await
+        .unwrap();
 
     assert_eq!(result.summary.total_spectra_searched, 100);
     assert_eq!(result.params_used.enzyme, Enzyme::Trypsin);
@@ -210,7 +217,7 @@ async fn scenario_phospho_with_hints() {
     params.database_path = fasta_path().to_string_lossy().to_string();
 
     let result = SimpleSearchEngine::new()
-        .search(&params, &[mgf_path()])
+        .search(&params, &[mgf_path()], noop_progress())
         .await
         .unwrap();
 
@@ -247,6 +254,6 @@ async fn error_invalid_params() {
     };
 
     let engine = SimpleSearchEngine::new();
-    let result = engine.search(&params, &[mgf_path()]).await;
+    let result = engine.search(&params, &[mgf_path()], noop_progress()).await;
     assert!(result.is_err());
 }

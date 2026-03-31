@@ -15,8 +15,10 @@ use std::path::PathBuf;
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use crate::error::CoreError;
+use crate::progress::ProgressCallback;
 use crate::search_params::SearchParams;
 use crate::search_result::SearchResult;
 
@@ -76,12 +78,16 @@ pub enum HealthStatus {
 pub trait SearchEngineAdapter: Send + Sync {
     /// Execute a search with the given parameters against input spectrum files.
     ///
+    /// The `on_progress` callback is invoked at each search stage to report
+    /// progress. Callers that don't need progress can pass [`crate::progress::noop_progress()`].
+    ///
     /// Returns a standardized [`SearchResult`] regardless of the underlying
     /// engine's native output format.
     async fn search(
         &self,
         params: &SearchParams,
         input_files: &[PathBuf],
+        on_progress: ProgressCallback,
     ) -> Result<SearchResult, CoreError>;
 
     /// Returns static metadata about this engine (name, version, features).
@@ -92,6 +98,15 @@ pub trait SearchEngineAdapter: Send + Sync {
     /// For SSH-based engines, this verifies network connectivity and
     /// that the engine binary is accessible on the remote host.
     async fn health_check(&self) -> Result<HealthStatus, CoreError>;
+
+    /// Cancel a running search identified by `run_id`.
+    ///
+    /// Default implementation is a no-op — the MCP server layer uses
+    /// `JoinHandle::abort()` to terminate the local task.
+    /// pFind adapter can override this to SSH-kill the remote process.
+    async fn cancel(&self, _run_id: Uuid) -> Result<(), CoreError> {
+        Ok(())
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -17,10 +17,12 @@ use std::path::PathBuf;
 
 use protein_copilot_core::engine::{EngineInfo, HealthStatus, SearchEngineAdapter};
 use protein_copilot_core::error::CoreError;
+use protein_copilot_core::progress::ProgressCallback;
 use protein_copilot_core::search_params::SearchParams;
 use protein_copilot_core::search_result::SearchResult;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 /// SSH connection configuration for remote pFind execution.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -82,6 +84,7 @@ impl SearchEngineAdapter for PFindAdapter {
         &self,
         _params: &SearchParams,
         _input_files: &[PathBuf],
+        _on_progress: ProgressCallback,
     ) -> Result<SearchResult, CoreError> {
         Err(CoreError::SearchEngineError {
             engine: "pFind".to_string(),
@@ -107,11 +110,20 @@ impl SearchEngineAdapter for PFindAdapter {
             reason: "pFind adapter not yet implemented".to_string(),
         })
     }
+
+    async fn cancel(&self, _run_id: Uuid) -> Result<(), CoreError> {
+        Err(CoreError::SearchEngineError {
+            engine: "pFind".to_string(),
+            detail: "cancel not yet implemented".to_string(),
+            suggestion: "pFind remote cancellation requires SSH integration".to_string(),
+        })
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use protein_copilot_core::progress::noop_progress;
 
     #[test]
     fn ssh_config_default() {
@@ -153,7 +165,7 @@ mod tests {
             },
             decoy_strategy: protein_copilot_core::search_params::DecoyStrategy::Reverse,
         };
-        let result = adapter.search(&params, &[]).await;
+        let result = adapter.search(&params, &[], noop_progress()).await;
         assert!(result.is_err());
         assert!(result
             .unwrap_err()

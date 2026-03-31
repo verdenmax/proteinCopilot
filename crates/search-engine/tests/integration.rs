@@ -6,6 +6,7 @@ use std::io::Write;
 use std::path::PathBuf;
 
 use protein_copilot_core::engine::SearchEngineAdapter;
+use protein_copilot_core::progress::noop_progress;
 use protein_copilot_core::search_params::Enzyme;
 use protein_copilot_param_recommend::{ParamRecommender, UserHints};
 use protein_copilot_search_engine::SimpleSearchEngine;
@@ -60,7 +61,10 @@ async fn full_pipeline_mgf_to_search_result() {
 
     // Step 4: Run search
     let engine = SimpleSearchEngine::new();
-    let result = engine.search(&params, &[mgf_path]).await.unwrap();
+    let result = engine
+        .search(&params, &[mgf_path], noop_progress())
+        .await
+        .unwrap();
 
     // Verify result structure
     assert_eq!(result.summary.total_spectra_searched, 10);
@@ -102,7 +106,7 @@ async fn full_pipeline_with_phospho_hints() {
     params.database_path = fasta.path().to_string_lossy().to_string();
 
     let result = SimpleSearchEngine::new()
-        .search(&params, &[mgf_path])
+        .search(&params, &[mgf_path], noop_progress())
         .await
         .unwrap();
     assert_eq!(result.summary.total_spectra_searched, 10);
@@ -129,7 +133,7 @@ async fn full_pipeline_with_enzyme_override() {
     params.database_path = fasta.path().to_string_lossy().to_string();
 
     let result = SimpleSearchEngine::new()
-        .search(&params, &[mgf_path])
+        .search(&params, &[mgf_path], noop_progress())
         .await
         .unwrap();
     assert_eq!(result.params_used.enzyme, Enzyme::LysC);

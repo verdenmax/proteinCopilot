@@ -497,6 +497,7 @@ impl ProteinCopilotServer {
                     progress: SearchProgress {
                         run_id,
                         status: "Running".to_string(),
+                        stage: None,
                         progress_pct: Some(0.0),
                         elapsed_sec: 0.0,
                         estimated_remaining_sec: None,
@@ -519,7 +520,13 @@ impl ProteinCopilotServer {
                 start,
             };
 
-            let search_result = engine.search(&params, &files).await;
+            let search_result = engine
+                .search(
+                    &params,
+                    &files,
+                    protein_copilot_core::progress::noop_progress(),
+                )
+                .await;
             let duration = start.elapsed().as_secs_f64();
 
             // Single lock — update progress + result atomically
