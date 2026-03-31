@@ -166,6 +166,12 @@ struct GetSearchStatusInput {
     run_id: String,
 }
 
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct CancelSearchInput {
+    /// Run ID of the search to cancel.
+    run_id: String,
+}
+
 /// Presets list response
 #[derive(Debug, Serialize, schemars::JsonSchema)]
 struct PresetsResponse {
@@ -188,6 +194,7 @@ fn mcp_err(code: ErrorCode, err: impl std::fmt::Display) -> ErrorData {
 struct RunState {
     progress: SearchProgress,
     result: Option<SearchResult>,
+    handle: Option<tokio::task::JoinHandle<()>>,
 }
 
 /// Maximum number of cached runs before eviction.
@@ -258,10 +265,12 @@ impl Drop for PanicGuard {
     fn drop(&mut self) {
         if let Ok(mut cache) = self.cache.lock() {
             if let Some(state) = cache.get_mut(&self.run_id) {
+                // Only overwrite if still Running — don't clobber Cancelled or Failed
                 if state.progress.status == "Running" {
                     state.progress.status = "Failed: task panicked".to_string();
                     state.progress.elapsed_sec = self.start.elapsed().as_secs_f64();
                     state.progress.progress_pct = None;
+                    state.progress.stage = None;
                 }
             }
         }
@@ -503,6 +512,7 @@ impl ProteinCopilotServer {
                         estimated_remaining_sec: None,
                     },
                     result: None,
+                    handle: None,
                 },
             );
         }
@@ -510,7 +520,24 @@ impl ProteinCopilotServer {
         let run_cache_clone = Arc::clone(&self.run_cache);
         let engine = SimpleSearchEngine::new();
 
-        tokio::spawn(async move {
+        // Construct progress callback that writes stage updates to the cache
+        let progress_cache = Arc::clone(&self.run_cache);
+        let progress_run_id = run_id;
+        let on_progress: protein_copilot_core::progress::ProgressCallback =
+            Box::new(move |p: SearchProgress| {
+                if let Ok(mut cache) = progress_cache.lock() {
+                    if let Some(state) = cache.get_mut(&progress_run_id) {
+                        if state.progress.status == "Running" {
+                            state.progress.stage = p.stage;
+                            state.progress.progress_pct = p.progress_pct;
+                            state.progress.elapsed_sec = p.elapsed_sec;
+                            state.progress.estimated_remaining_sec = p.estimated_remaining_sec;
+                        }
+                    }
+                }
+            });
+
+        let handle = tokio::spawn(async move {
             let start = Instant::now();
 
             // Panic guard: on abnormal exit, sets status to "Failed: task panicked"
@@ -520,13 +547,7 @@ impl ProteinCopilotServer {
                 start,
             };
 
-            let search_result = engine
-                .search(
-                    &params,
-                    &files,
-                    protein_copilot_core::progress::noop_progress(),
-                )
-                .await;
+            let search_result = engine.search(&params, &files, on_progress).await;
             let duration = start.elapsed().as_secs_f64();
 
             // Single lock — update progress + result atomically
@@ -563,6 +584,13 @@ impl ProteinCopilotServer {
             }
         });
 
+        // Store the JoinHandle so cancel_search can abort it
+        if let Ok(mut cache) = self.run_cache.lock() {
+            if let Some(state) = cache.get_mut(&run_id) {
+                state.handle = Some(handle);
+            }
+        }
+
         Ok(Json(SearchStarted {
             run_id: run_id.to_string(),
             status: "Running".to_string(),
@@ -589,6 +617,44 @@ impl ProteinCopilotServer {
         let state = cache
             .get(&id)
             .ok_or_else(|| mcp_err(ErrorCode::INVALID_PARAMS, format!("run_id {id} not found")))?;
+        Ok(Json(state.progress.clone()))
+    }
+
+    /// Cancel a running search.
+    #[rmcp::tool(
+        name = "cancel_search",
+        description = "Cancel a running search. The search task is immediately terminated and status is set to Cancelled."
+    )]
+    fn cancel_search(
+        &self,
+        Parameters(input): Parameters<CancelSearchInput>,
+    ) -> Result<Json<SearchProgress>, ErrorData> {
+        let id = Uuid::parse_str(&input.run_id)
+            .map_err(|_| mcp_err(ErrorCode::INVALID_PARAMS, "invalid run_id format"))?;
+        let mut cache = self
+            .run_cache
+            .lock()
+            .map_err(|_| mcp_err(ErrorCode::INTERNAL_ERROR, "cache lock failed"))?;
+        let state = cache
+            .get_mut(&id)
+            .ok_or_else(|| mcp_err(ErrorCode::INVALID_PARAMS, format!("run_id {id} not found")))?;
+
+        if state.progress.status != "Running" {
+            return Err(mcp_err(
+                ErrorCode::INVALID_PARAMS,
+                format!("search is not running (status: {})", state.progress.status),
+            ));
+        }
+
+        // Abort the tokio task
+        if let Some(handle) = state.handle.take() {
+            handle.abort();
+        }
+
+        state.progress.status = "Cancelled".to_string();
+        state.progress.stage = Some("Cancelled by user".to_string());
+        state.progress.progress_pct = None;
+
         Ok(Json(state.progress.clone()))
     }
 
