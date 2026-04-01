@@ -230,6 +230,9 @@ struct AnnotateSpectrumInput {
     /// Charge state — required for manual mode.
     #[serde(default)]
     charge: Option<i32>,
+    /// Protein accession(s) — optional for manual mode (e.g. ["sp|P00001|TEST_HUMAN"]).
+    #[serde(default)]
+    protein_accessions: Option<Vec<String>>,
     /// Output HTML file path. Default: ./annotation_scan{N}.html
     #[serde(default)]
     output_path: Option<String>,
@@ -975,7 +978,7 @@ impl ProteinCopilotServer {
                 pep.clone(),
                 ch,
                 Vec::<Modification>::new(),
-                Vec::<String>::new(),
+                input.protein_accessions.clone().unwrap_or_default(),
             )
         } else {
             return Err(mcp_err(
