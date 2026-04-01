@@ -124,6 +124,33 @@ where
     }
 }
 
+/// Deserialize MassTolerance from either a JSON object or a JSON string.
+fn deserialize_tolerance<'de, D>(
+    deserializer: D,
+) -> Result<Option<protein_copilot_core::search_params::MassTolerance>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use protein_copilot_core::search_params::MassTolerance;
+    use serde::de::Error;
+    let value: Option<serde_json::Value> = Option::deserialize(deserializer)?;
+    match value {
+        None => Ok(None),
+        Some(serde_json::Value::Object(map)) => {
+            let t: MassTolerance =
+                serde_json::from_value(serde_json::Value::Object(map)).map_err(D::Error::custom)?;
+            Ok(Some(t))
+        }
+        Some(serde_json::Value::String(s)) => {
+            let t: MassTolerance = serde_json::from_str(&s).map_err(D::Error::custom)?;
+            Ok(Some(t))
+        }
+        Some(other) => Err(D::Error::custom(format!(
+            "fragment_tolerance must be an object or JSON string, got: {other}"
+        ))),
+    }
+}
+
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct GenerateSummaryInput {
     /// Search result to summarize (provide either this or run_id)
@@ -207,7 +234,7 @@ struct AnnotateSpectrumInput {
     #[serde(default)]
     output_path: Option<String>,
     /// Fragment mass tolerance. Default: 0.02 Da.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_tolerance")]
     fragment_tolerance: Option<protein_copilot_core::search_params::MassTolerance>,
 }
 
