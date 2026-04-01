@@ -8,7 +8,9 @@
   :root {
     --b-color: #d63031;
     --y-color: #0984e3;
-    --unmatched: #e0e0e0;
+    --unmatched-peak: #d0d0d0;
+    --noise-peak: #f0f0f0;
+    --unmatched-bracket: #e0e0e0;
     --bg: #f8f9fa;
     --card-bg: #ffffff;
     --text: #2c3e50;
@@ -39,57 +41,32 @@
   .score-badge.mid  { background: #f39c12; }
   .score-badge.low  { background: #e74c3c; }
 
-  /* ── Coverage Diagram ────────────────────────────────── */
-  .coverage-card {
+  /* ── Coverage & Spectrum Cards ─────────────────────────── */
+  .coverage-card, .spectrum-card {
     background: var(--card-bg); border: 1px solid var(--border);
     border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;
     box-shadow: 0 1px 3px rgba(0,0,0,.06); overflow-x: auto;
   }
-  .coverage-card h2 { font-size: 16px; font-weight: 600; margin-bottom: 16px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px; }
-  .coverage-wrap { display: inline-flex; flex-direction: column; align-items: flex-start; min-width: min-content; }
-  .cov-row { display: flex; align-items: center; height: 22px; }
-  .cov-cell { width: 38px; text-align: center; font-size: 11px; font-weight: 600; position: relative; }
-  .cov-cell.matched-b { color: var(--b-color); }
-  .cov-cell.matched-y { color: var(--y-color); }
-  .cov-cell.unmatched { color: var(--unmatched); }
-  .cov-cell.spacer { width: 10px; }
-  .cov-pill {
-    display: inline-block; padding: 1px 5px; border-radius: 6px; font-size: 10px; font-weight: 700;
+  .coverage-card h2, .spectrum-card h2 {
+    font-size: 16px; font-weight: 600; margin-bottom: 12px;
+    color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px;
   }
-  .cov-pill.b-pill { background: rgba(214,48,49,.12); color: var(--b-color); }
-  .cov-pill.y-pill { background: rgba(9,132,227,.12); color: var(--y-color); }
-  .seq-row { display: flex; align-items: center; height: 30px; }
-  .seq-cell { width: 38px; text-align: center; font-size: 16px; font-family: 'Courier New', Courier, monospace; font-weight: 700; }
-  .seq-sep { width: 10px; display: flex; justify-content: center; }
-  .seq-sep .cleavage { width: 1px; height: 30px; background: var(--border); }
-  .seq-sep .cleavage.both-matched { width: 3px; background: linear-gradient(to right, var(--b-color), var(--y-color)); border-radius: 1px; }
-  .seq-sep .cleavage.b-matched { width: 2px; background: var(--b-color); border-radius: 1px; }
-  .seq-sep .cleavage.y-matched { width: 2px; background: var(--y-color); border-radius: 1px; }
 
-  /* ── Spectrum Plot ───────────────────────────────────── */
-  .spectrum-card {
-    background: var(--card-bg); border: 1px solid var(--border);
-    border-radius: 8px; padding: 20px 24px;
-    box-shadow: 0 1px 3px rgba(0,0,0,.06);
-  }
-  .spectrum-card h2 { font-size: 16px; font-weight: 600; margin-bottom: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px; }
+  /* ── SVG shared ────────────────────────────────────────── */
   svg text { font-family: var(--font); }
   .axis text { font-size: 11px; fill: var(--text-muted); }
   .axis line, .axis path { stroke: var(--border); }
   .axis-label { font-size: 12px; fill: var(--text); font-weight: 500; }
-  .peak-label { font-size: 12px; font-weight: 700; }
-  .peak-line { stroke-width: 2.5; }
-  .peak-line.unmatched { stroke: var(--unmatched); stroke-width: 1; }
-  .peak-line.b-ion { stroke: var(--b-color); }
-  .peak-line.y-ion { stroke: var(--y-color); }
-  .peak-hitbox { stroke: transparent; stroke-width: 8; fill: none; cursor: pointer; }
+
+  /* Coverage bracket highlight on hover */
+  .cov-bracket.highlight { filter: brightness(1.3); stroke-width: 3.5 !important; }
 
   /* ── Tooltip ─────────────────────────────────────────── */
   #tooltip {
     position: fixed; pointer-events: none; display: none;
     background: rgba(44,62,80,.95); color: #fff; padding: 10px 14px;
-    border-radius: 6px; font-size: 12px; line-height: 1.6;
-    white-space: nowrap; z-index: 1000;
+    border-radius: 6px; font-size: 12px; font-family: 'Courier New', Courier, monospace;
+    line-height: 1.6; white-space: nowrap; z-index: 1000;
     box-shadow: 0 4px 12px rgba(0,0,0,.3);
   }
   #tooltip::after {
@@ -135,10 +112,9 @@
     if (attrs) Object.keys(attrs).forEach(function (k) { e.setAttribute(k, attrs[k]); });
     return e;
   }
-  function ionSub(type, num) {
-    var span = document.createElement("span");
-    span.innerHTML = type + "<sub>" + num + "</sub>";
-    return span;
+  var SUBSCRIPT_DIGITS = "\u2080\u2081\u2082\u2083\u2084\u2085\u2086\u2087\u2088\u2089";
+  function subscript(n) {
+    return String(n).split("").map(function (c) { return SUBSCRIPT_DIGITS[parseInt(c)]; }).join("");
   }
 
   /* ── 1. Info Panel ────────────────────────────────────── */
@@ -156,7 +132,6 @@
       grid.appendChild(item);
     }
 
-    // Score badge with color
     var scoreVal = D.score;
     var badgeCls = "score-badge " + (scoreVal > 0.5 ? "good" : scoreVal >= 0.2 ? "mid" : "low");
     var badge = el("span", { "class": badgeCls }, fmt(scoreVal, 3));
@@ -175,75 +150,114 @@
     panel.appendChild(grid);
   })();
 
-  /* ── 2. Peptide Coverage ──────────────────────────────── */
+  /* ── 2. Fragment Ion Coverage (SVG bracket notation) ──── */
   (function renderCoverage() {
     var panel = document.getElementById("coverage-panel");
     panel.appendChild(el("h2", null, "Fragment Ion Coverage"));
-    var wrap = el("div", { "class": "coverage-wrap" });
     var seq = D.peptide_sequence;
     var n = seq.length;
 
-    // Build lookup: is b_i or y_i matched at cleavage position i (0-based, between residue i and i+1)
-    var bMatched = [];
-    var yMatched = [];
+    var cellW = 44;
+    var totalW = n * cellW + 40;
+    var seqY = 70;
+    var bBracketTop = 14;
+    var bBracketBot = seqY - 12;
+    var bLabelY = bBracketTop - 3;
+    var yBracketTop = seqY + 24;
+    var yBracketBot = seqY + 56;
+    var yLabelY = yBracketBot + 14;
+    var svgH = yLabelY + 10;
+    var xOff = 20;
+
+    var covSvg = svgEl("svg", {
+      width: "100%", height: "auto",
+      viewBox: "0 0 " + totalW + " " + svgH,
+      preserveAspectRatio: "xMidYMid meet",
+      style: "max-width:" + totalW + "px"
+    });
+
+    // Build match lookups
+    var bMatched = [], yMatched = [];
+    var bNumbers = [], yNumbers = [];
     for (var ci = 0; ci < n - 1; ci++) {
       var bIon = D.b_ions[ci];
       bMatched[ci] = !!(bIon && bIon.matched);
-      var yIon = D.y_ions[n - 2 - ci];
+      bNumbers[ci] = bIon ? bIon.number : (ci + 1);
+      var yIdx = n - 2 - ci;
+      var yIon = D.y_ions[yIdx];
       yMatched[ci] = !!(yIon && yIon.matched);
+      yNumbers[ci] = yIon ? yIon.number : (n - 1 - ci);
     }
 
-    // b-ion row
-    var bRow = el("div", { "class": "cov-row" });
-    bRow.appendChild(el("div", { "class": "cov-cell" }));
-    for (var i = 0; i < n - 1; i++) {
-      var bI = D.b_ions[i];
-      bRow.appendChild(el("div", { "class": "cov-cell spacer" }));
-      var bCell = el("div", { "class": "cov-cell " + (bMatched[i] ? "matched-b" : "unmatched") });
-      if (bI && bMatched[i]) {
-        var bp = el("span", { "class": "cov-pill b-pill" }, "b" + bI.number);
-        bCell.appendChild(bp);
-      } else if (bI) {
-        bCell.textContent = "b" + bI.number;
-      }
-      bRow.appendChild(bCell);
+    // Amino acid letters
+    for (var si = 0; si < n; si++) {
+      var ax = xOff + si * cellW + cellW / 2;
+      var aa = svgEl("text", {
+        x: ax, y: seqY,
+        "text-anchor": "middle",
+        "dominant-baseline": "central",
+        "font-size": "20",
+        "font-family": "'Courier New', Courier, monospace",
+        "font-weight": "700",
+        fill: "#2c3e50"
+      });
+      aa.textContent = seq[si];
+      covSvg.appendChild(aa);
     }
-    wrap.appendChild(bRow);
 
-    // sequence row with cleavage coloring
-    var sRow = el("div", { "class": "seq-row" });
-    for (var j = 0; j < n; j++) {
-      sRow.appendChild(el("div", { "class": "seq-cell" }, seq[j]));
-      if (j < n - 1) {
-        var sep = el("div", { "class": "seq-sep" });
-        var clvCls = "cleavage";
-        if (bMatched[j] && yMatched[j]) { clvCls += " both-matched"; }
-        else if (bMatched[j]) { clvCls += " b-matched"; }
-        else if (yMatched[j]) { clvCls += " y-matched"; }
-        sep.appendChild(el("div", { "class": clvCls }));
-        sRow.appendChild(sep);
-      }
+    // Draw brackets at each cleavage position
+    for (var ci2 = 0; ci2 < n - 1; ci2++) {
+      var cleavX = xOff + (ci2 + 1) * cellW;
+      var bracketLen = cellW * 0.65;
+
+      // b-ion bracket: vertical line down from top, then horizontal to the right
+      var bColor = bMatched[ci2] ? "#d63031" : "#e0e0e0";
+      var bStroke = bMatched[ci2] ? 2.5 : 1.2;
+      var bPath = "M" + cleavX + "," + bBracketTop +
+                  " L" + cleavX + "," + bBracketBot +
+                  " L" + (cleavX + bracketLen) + "," + bBracketBot;
+      var bBr = svgEl("path", {
+        d: bPath, fill: "none", stroke: bColor,
+        "stroke-width": bStroke, "stroke-linecap": "round", "stroke-linejoin": "round",
+        "class": "cov-bracket", "data-ion": "b" + bNumbers[ci2]
+      });
+      covSvg.appendChild(bBr);
+
+      // b-ion label
+      var bLbl = svgEl("text", {
+        x: cleavX + 2, y: bLabelY,
+        "font-size": "10", "font-weight": "600",
+        fill: bColor, "text-anchor": "start",
+        "class": "cov-bracket", "data-ion": "b" + bNumbers[ci2]
+      });
+      bLbl.textContent = "b" + subscript(bNumbers[ci2]);
+      covSvg.appendChild(bLbl);
+
+      // y-ion bracket: vertical line up from bottom, then horizontal to the left
+      var yColor = yMatched[ci2] ? "#0984e3" : "#e0e0e0";
+      var yStroke = yMatched[ci2] ? 2.5 : 1.2;
+      var yPath = "M" + cleavX + "," + yBracketBot +
+                  " L" + cleavX + "," + yBracketTop +
+                  " L" + (cleavX - bracketLen) + "," + yBracketTop;
+      var yBr = svgEl("path", {
+        d: yPath, fill: "none", stroke: yColor,
+        "stroke-width": yStroke, "stroke-linecap": "round", "stroke-linejoin": "round",
+        "class": "cov-bracket", "data-ion": "y" + yNumbers[ci2]
+      });
+      covSvg.appendChild(yBr);
+
+      // y-ion label
+      var yLbl = svgEl("text", {
+        x: cleavX - 2, y: yLabelY,
+        "font-size": "10", "font-weight": "600",
+        fill: yColor, "text-anchor": "end",
+        "class": "cov-bracket", "data-ion": "y" + yNumbers[ci2]
+      });
+      yLbl.textContent = "y" + subscript(yNumbers[ci2]);
+      covSvg.appendChild(yLbl);
     }
-    wrap.appendChild(sRow);
 
-    // y-ion row
-    var yRow = el("div", { "class": "cov-row" });
-    yRow.appendChild(el("div", { "class": "cov-cell" }));
-    for (var k = 0; k < n - 1; k++) {
-      var yI = D.y_ions[n - 2 - k];
-      yRow.appendChild(el("div", { "class": "cov-cell spacer" }));
-      var yCell = el("div", { "class": "cov-cell " + (yMatched[k] ? "matched-y" : "unmatched") });
-      if (yI && yMatched[k]) {
-        var yp = el("span", { "class": "cov-pill y-pill" }, "y" + yI.number);
-        yCell.appendChild(yp);
-      } else if (yI) {
-        yCell.textContent = "y" + yI.number;
-      }
-      yRow.appendChild(yCell);
-    }
-    wrap.appendChild(yRow);
-
-    panel.appendChild(wrap);
+    panel.appendChild(covSvg);
   })();
 
   /* ── 3. Interactive Spectrum ──────────────────────────── */
@@ -251,8 +265,8 @@
     var container = document.getElementById("spectrum-container");
     var tooltip = document.getElementById("tooltip");
 
-    var W = 1200, H = 450;
-    var margin = { top: 40, right: 30, bottom: 50, left: 60 };
+    var W = 1200, H = 500;
+    var margin = { top: 40, right: 30, bottom: 55, left: 65 };
     var pw = W - margin.left - margin.right;
     var ph = H - margin.top - margin.bottom;
 
@@ -266,6 +280,7 @@
     var mzMin = 0;
     var mzMax = maxMz * 1.05;
     var intMax = maxInt;
+    var minMatchedH = ph * 0.05;
 
     function xScale(v) { return margin.left + (v - mzMin) / (mzMax - mzMin) * pw; }
     function yScale(v) { return margin.top + ph - (v / intMax) * ph; }
@@ -276,113 +291,176 @@
       preserveAspectRatio: "xMidYMid meet"
     });
 
-    // axes group
+    // Background
+    svg.appendChild(svgEl("rect", {
+      x: margin.left, y: margin.top, width: pw, height: ph,
+      fill: "#f8f9fa"
+    }));
+
+    // Horizontal grid lines at 25%, 50%, 75%, 100%
+    var gGrid = svgEl("g");
+    var gridPcts = [25, 50, 75, 100];
+    for (var gi = 0; gi < gridPcts.length; gi++) {
+      var gy = yScale(gridPcts[gi] / 100 * intMax);
+      gGrid.appendChild(svgEl("line", {
+        x1: margin.left, y1: gy, x2: margin.left + pw, y2: gy,
+        stroke: "#e8e8e8", "stroke-width": "0.5", "stroke-dasharray": "4,3"
+      }));
+    }
+    svg.appendChild(gGrid);
+
+    // Axes
     var gAxis = svgEl("g", { "class": "axis" });
 
     // x-axis
-    gAxis.appendChild(svgEl("line", { x1: margin.left, y1: margin.top + ph, x2: margin.left + pw, y2: margin.top + ph, stroke: "#dee2e6" }));
+    gAxis.appendChild(svgEl("line", {
+      x1: margin.left, y1: margin.top + ph,
+      x2: margin.left + pw, y2: margin.top + ph, stroke: "#dee2e6"
+    }));
     var xTicks = niceRange(mzMin, mzMax, 10);
     for (var xi = 0; xi < xTicks.length; xi++) {
       var tx = xScale(xTicks[xi]);
-      gAxis.appendChild(svgEl("line", { x1: tx, y1: margin.top + ph, x2: tx, y2: margin.top + ph + 5, stroke: "#dee2e6" }));
+      gAxis.appendChild(svgEl("line", {
+        x1: tx, y1: margin.top + ph, x2: tx, y2: margin.top + ph + 5, stroke: "#dee2e6"
+      }));
       var tl = svgEl("text", { x: tx, y: margin.top + ph + 18, "text-anchor": "middle" });
       tl.textContent = xTicks[xi];
       gAxis.appendChild(tl);
     }
-    var xLabel = svgEl("text", { x: margin.left + pw / 2, y: H - 6, "text-anchor": "middle", "class": "axis-label" });
+    var xLabel = svgEl("text", {
+      x: margin.left + pw / 2, y: H - 6,
+      "text-anchor": "middle", "class": "axis-label"
+    });
     xLabel.textContent = "m/z";
     gAxis.appendChild(xLabel);
 
     // y-axis
-    gAxis.appendChild(svgEl("line", { x1: margin.left, y1: margin.top, x2: margin.left, y2: margin.top + ph, stroke: "#dee2e6" }));
+    gAxis.appendChild(svgEl("line", {
+      x1: margin.left, y1: margin.top,
+      x2: margin.left, y2: margin.top + ph, stroke: "#dee2e6"
+    }));
     var yTicks = [0, 25, 50, 75, 100];
     for (var yi = 0; yi < yTicks.length; yi++) {
       var pct = yTicks[yi];
       var ty = yScale(pct / 100 * intMax);
-      gAxis.appendChild(svgEl("line", { x1: margin.left - 5, y1: ty, x2: margin.left, y2: ty, stroke: "#dee2e6" }));
+      gAxis.appendChild(svgEl("line", {
+        x1: margin.left - 5, y1: ty, x2: margin.left, y2: ty, stroke: "#dee2e6"
+      }));
       var yl = svgEl("text", { x: margin.left - 8, y: ty + 4, "text-anchor": "end" });
       yl.textContent = pct + "%";
       gAxis.appendChild(yl);
     }
-    var yLabelEl = svgEl("text", { x: 14, y: margin.top + ph / 2, "text-anchor": "middle", "class": "axis-label", transform: "rotate(-90,14," + (margin.top + ph / 2) + ")" });
+    var yLabelEl = svgEl("text", {
+      x: 16, y: margin.top + ph / 2,
+      "text-anchor": "middle", "class": "axis-label",
+      transform: "rotate(-90,16," + (margin.top + ph / 2) + ")"
+    });
     yLabelEl.textContent = "Relative Intensity";
     gAxis.appendChild(yLabelEl);
-
     svg.appendChild(gAxis);
 
-    // Collect annotated peak positions for overlap detection
-    var labelPositions = [];
-    var annotatedPeaks = [];
-    for (var ap = 0; ap < peaks.length; ap++) {
-      if (peaks[ap].annotation) {
-        annotatedPeaks.push({ idx: ap, x: xScale(peaks[ap].mz), y: yScale(peaks[ap].intensity) });
-      }
-    }
-    // Sort by x for overlap detection
-    annotatedPeaks.sort(function (a, b) { return a.x - b.x; });
+    // Separate peaks into layers: noise → unmatched → matched (draw order)
+    var baseline = margin.top + ph;
+    var gNoise = svgEl("g");
+    var gUnmatched = svgEl("g");
+    var gMatched = svgEl("g");
+    var gLabels = svgEl("g");
+    var gHitboxes = svgEl("g");
 
-    // peaks
-    var gPeaks = svgEl("g");
+    // Collect label positions for overlap staggering
+    var labelPositions = [];
+
     for (var p = 0; p < peaks.length; p++) {
       var pk = peaks[p];
+      var relInt = pk.intensity / intMax;
       var x = xScale(pk.mz);
-      var y1 = yScale(0);
-      var y2 = yScale(pk.intensity);
       var ann = pk.annotation;
-      var cls, col;
+
       if (ann) {
-        if (ann.ion_type === "B") { cls = "b-ion"; col = "#d63031"; }
-        else { cls = "y-ion"; col = "#0984e3"; }
-      } else {
-        cls = "unmatched"; col = "#e0e0e0";
-      }
+        // Matched peak: 3px stroke, vivid color, minimum height enforced
+        var peakH = relInt * ph;
+        if (peakH < minMatchedH) peakH = minMatchedH;
+        var y2m = baseline - peakH;
+        var col = ann.ion_type === "B" ? "#d63031" : "#0984e3";
 
-      // peak line
-      gPeaks.appendChild(svgEl("line", { x1: x, y1: y1, x2: x, y2: y2, "class": "peak-line " + cls }));
+        gMatched.appendChild(svgEl("line", {
+          x1: x, y1: baseline, x2: x, y2: y2m,
+          stroke: col, "stroke-width": "3", "stroke-linecap": "round"
+        }));
 
-      // triangle marker and label for annotated peaks
-      if (ann) {
-        // Triangle marker (▼) at peak top
-        var triSize = 3;
-        var triPoints = (x - triSize) + "," + y2 + " " + (x + triSize) + "," + y2 + " " + x + "," + (y2 + triSize * 2);
-        gPeaks.appendChild(svgEl("polygon", { points: triPoints, fill: col }));
+        // Label with subscript digits
+        var ionPrefix = ann.ion_type === "B" ? "b" : "y";
+        var labelText = ionPrefix + subscript(ann.ion_number);
+        var labelY = y2m - 6;
 
-        // Determine label offset — stagger to avoid overlap
-        var labelText = (ann.ion_type === "B" ? "b" : "y") + ann.ion_number;
-        var labelY = y2 - 6;
-        // Check if too close to another label: alternate offset
-        var stagger = false;
+        // Stagger to avoid overlap
         for (var li = 0; li < labelPositions.length; li++) {
-          if (Math.abs(labelPositions[li].x - x) < 30 && Math.abs(labelPositions[li].y - labelY) < 14) {
-            stagger = true;
-            break;
+          if (Math.abs(labelPositions[li].x - x) < 20) {
+            var diff = Math.abs(labelPositions[li].y - labelY);
+            if (diff < 16) {
+              labelY = labelPositions[li].y - 18;
+            }
           }
         }
-        if (stagger) { labelY = y2 - 18; }
+        if (labelY < margin.top + 4) labelY = margin.top + 4;
         labelPositions.push({ x: x, y: labelY });
 
-        // Horizontal label (no rotation)
-        var lt = svgEl("text", { x: x, y: labelY, "text-anchor": "middle", fill: col, "class": "peak-label" });
+        var lt = svgEl("text", {
+          x: x, y: labelY, "text-anchor": "middle",
+          fill: col, "font-size": "14", "font-weight": "700"
+        });
         lt.textContent = labelText;
-        gPeaks.appendChild(lt);
+        gLabels.appendChild(lt);
+
+      } else if (relInt < 0.05) {
+        // Noise peak: very thin, very light
+        var y2n = yScale(pk.intensity);
+        gNoise.appendChild(svgEl("line", {
+          x1: x, y1: baseline, x2: x, y2: y2n,
+          stroke: "#f0f0f0", "stroke-width": "0.5"
+        }));
+      } else {
+        // Unmatched peak above 5%: thin, light gray
+        var y2u = yScale(pk.intensity);
+        gUnmatched.appendChild(svgEl("line", {
+          x1: x, y1: baseline, x2: x, y2: y2u,
+          stroke: "#d0d0d0", "stroke-width": "1"
+        }));
       }
 
-      // invisible hitbox for tooltip
-      (function (peak) {
-        var hitbox = svgEl("line", { x1: x, y1: y1, x2: x, y2: y2, "class": "peak-hitbox" });
+      // Hitbox for all peaks (wider for easier hovering)
+      (function (peak, px, ann2) {
+        var peakTop = ann2
+          ? baseline - Math.max((peak.intensity / intMax) * ph, minMatchedH)
+          : yScale(peak.intensity);
+        var hitbox = svgEl("line", {
+          x1: px, y1: baseline, x2: px, y2: peakTop,
+          stroke: "transparent", "stroke-width": "12", fill: "none",
+          cursor: "pointer"
+        });
+
+        var ionId = ann2 ? ((ann2.ion_type === "B" ? "b" : "y") + ann2.ion_number) : null;
+
         hitbox.addEventListener("mouseenter", function () {
-          var relInt = (peak.intensity / intMax * 100);
-          var html = "<div class=\"tip-row\"><span class=\"tip-label\">m/z:</span><span class=\"tip-val\">" + fmt(peak.mz, 4) + "</span></div>";
-          html += "<div class=\"tip-row\"><span class=\"tip-label\">Intensity:</span><span class=\"tip-val\">" + fmt(peak.intensity, 1) + " (" + fmt(relInt, 1) + "%)</span></div>";
-          if (peak.annotation) {
+          var relI = (peak.intensity / intMax * 100);
+          var html = "<div class=\"tip-row\"><span class=\"tip-label\">m/z</span><span class=\"tip-val\">" + fmt(peak.mz, 4) + "</span></div>";
+          html += "<div class=\"tip-row\"><span class=\"tip-label\">Intensity</span><span class=\"tip-val\">" + fmt(peak.intensity, 1) + " (" + fmt(relI, 1) + "%)</span></div>";
+          if (ann2) {
             html += "<hr class=\"tip-sep\">";
-            var a = peak.annotation;
-            var ionLabel = (a.ion_type === "B" ? "b" : "y") + "<sub>" + a.ion_number + "</sub>";
-            html += "<div class=\"tip-row\"><span class=\"tip-label\">Ion:</span><span class=\"tip-val\">" + ionLabel + "</span></div>";
-            html += "<div class=\"tip-row\"><span class=\"tip-label\">\u0394 ppm:</span><span class=\"tip-val\">" + fmt(a.delta_ppm, 2) + "</span></div>";
+            var lbl = (ann2.ion_type === "B" ? "b" : "y") + "<sub>" + ann2.ion_number + "</sub>";
+            html += "<div class=\"tip-row\"><span class=\"tip-label\">Ion</span><span class=\"tip-val\">" + lbl + "</span></div>";
+            html += "<div class=\"tip-row\"><span class=\"tip-label\">\u0394 ppm</span><span class=\"tip-val\">" + fmt(ann2.delta_ppm, 2) + "</span></div>";
           }
           tooltip.innerHTML = html;
           tooltip.style.display = "block";
+
+          // Highlight corresponding bracket in coverage diagram
+          if (ionId) {
+            var brackets = document.querySelectorAll(".cov-bracket[data-ion='" + ionId + "']");
+            for (var bi = 0; bi < brackets.length; bi++) {
+              brackets[bi].classList.add("highlight");
+            }
+          }
         });
         hitbox.addEventListener("mousemove", function (ev) {
           tooltip.style.left = (ev.clientX + 14) + "px";
@@ -390,11 +468,22 @@
         });
         hitbox.addEventListener("mouseleave", function () {
           tooltip.style.display = "none";
+          if (ionId) {
+            var brackets = document.querySelectorAll(".cov-bracket[data-ion='" + ionId + "']");
+            for (var bi2 = 0; bi2 < brackets.length; bi2++) {
+              brackets[bi2].classList.remove("highlight");
+            }
+          }
         });
-        gPeaks.appendChild(hitbox);
-      })(pk);
+        gHitboxes.appendChild(hitbox);
+      })(pk, x, ann);
     }
-    svg.appendChild(gPeaks);
+
+    svg.appendChild(gNoise);
+    svg.appendChild(gUnmatched);
+    svg.appendChild(gMatched);
+    svg.appendChild(gLabels);
+    svg.appendChild(gHitboxes);
     container.appendChild(svg);
   })();
 
