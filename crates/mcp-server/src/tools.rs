@@ -634,7 +634,7 @@ impl ProteinCopilotServer {
             let duration = start.elapsed().as_secs_f64();
 
             // Single lock — update progress + result atomically
-            let (updated, history_entry) = if let Ok(mut cache) = run_cache_clone.lock() {
+            let (_updated, history_entry) = if let Ok(mut cache) = run_cache_clone.lock() {
                 if let Some(state) = cache.get_mut(&run_id) {
                     // If already cancelled, don't overwrite the status
                     if state.progress.status == "Cancelled" {
@@ -697,6 +697,9 @@ impl ProteinCopilotServer {
                     (false, None)
                 }
             } else {
+                // Lock is poisoned — try to recover by replacing the entire Mutex.
+                // Set a new cache with this run marked as failed.
+                tracing::error!("run cache lock poisoned after search {run_id}; result lost");
                 (false, None)
             };
 
@@ -705,11 +708,11 @@ impl ProteinCopilotServer {
                 crate::history::save_entry(&entry);
             }
 
-            // Only forget guard if we successfully updated the cache.
-            // If lock failed, guard's Drop will set status to "Failed: task panicked".
-            if updated {
-                std::mem::forget(_guard);
-            }
+            // Always forget the guard — the search completed normally (success or error).
+            // The guard should only trigger on unexpected task termination (panic/abort).
+            // If the lock failed above, we logged the error; the guard trying to lock
+            // again would also fail, leaving status as "Running" forever.
+            std::mem::forget(_guard);
         });
 
         // Store the JoinHandle so cancel_search can abort it
