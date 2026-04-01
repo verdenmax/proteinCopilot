@@ -582,7 +582,7 @@ mod tests {
 
         let b = generate_b_ions(seq);
         // Add noise peaks that don't match any theoretical ion
-        let noise_peaks = vec![50.0, 150.5, 850.0, 1200.0];
+        let noise_peaks = [50.0, 150.5, 850.0, 1200.0];
         let mut peaks: Vec<f64> = b
             .iter()
             .copied()
