@@ -160,15 +160,16 @@
     var cellW = 44;
     var totalW = n * cellW + 40;
     var seqY = 70;
-    // b-bracket: horizontal over RIGHT residue, above sequence
-    var bHorizY = seqY - 20;       // horizontal bar height (above sequence)
-    var bLabelY = bHorizY - 5;     // label above horizontal bar
-    // y-bracket: horizontal over LEFT residue, below sequence
-    var yHorizY = seqY + 20;       // horizontal bar height (below sequence)
-    var yLabelY = yHorizY + 16;    // label below horizontal bar
-    // Single vertical line from bHorizY to yHorizY at each cleavage position
-    var vertTop = bHorizY;
-    var vertBot = yHorizY;
+    // b-bracket: short vertical stub above sequence + horizontal right
+    var bHorizY = seqY - 20;       // horizontal bar height
+    var bVertTop = bHorizY;        // vertical top = horizontal bar
+    var bVertBot = seqY - 6;       // vertical bottom = just above letters
+    var bLabelY = bHorizY - 5;     // label above horizontal
+    // y-bracket: short vertical stub below sequence + horizontal left
+    var yHorizY = seqY + 20;       // horizontal bar height
+    var yVertTop = seqY + 10;      // vertical top = just below letters
+    var yVertBot = yHorizY;        // vertical bottom = horizontal bar
+    var yLabelY = yHorizY + 16;    // label below horizontal
     var svgH = yLabelY + 10;
     var xOff = 20;
 
@@ -219,14 +220,11 @@
       var yColor = yMatched[ci2] ? "#0984e3" : "#e0e0e0";
       var yStroke = yMatched[ci2] ? 2.5 : 1.2;
 
-      // Single vertical line at cleavage position (from bHorizY to yHorizY)
-      // Use the more prominent color if one is matched
-      var vertColor = bMatched[ci2] ? bColor : (yMatched[ci2] ? yColor : "#e0e0e0");
-      var vertStroke = (bMatched[ci2] || yMatched[ci2]) ? 2 : 1;
+      // b-ion: short vertical stub (above sequence) at cleavage x
       covSvg.appendChild(svgEl("line", {
-        x1: cleavX, y1: vertTop, x2: cleavX, y2: vertBot,
-        stroke: vertColor, "stroke-width": vertStroke,
-        "stroke-linecap": "round"
+        x1: cleavX, y1: bVertTop, x2: cleavX, y2: bVertBot,
+        stroke: bColor, "stroke-width": bStroke, "stroke-linecap": "round",
+        "class": "cov-bracket", "data-ion": "b" + bNumbers[ci2]
       }));
 
       // b-ion horizontal: from cleavage RIGHT over next residue
@@ -245,6 +243,13 @@
       });
       bLbl.textContent = "b" + subscript(bNumbers[ci2]);
       covSvg.appendChild(bLbl);
+
+      // y-ion: short vertical stub (below sequence) at cleavage x
+      covSvg.appendChild(svgEl("line", {
+        x1: cleavX, y1: yVertTop, x2: cleavX, y2: yVertBot,
+        stroke: yColor, "stroke-width": yStroke, "stroke-linecap": "round",
+        "class": "cov-bracket", "data-ion": "y" + yNumbers[ci2]
+      }));
 
       // y-ion horizontal: from cleavage LEFT over previous residue
       covSvg.appendChild(svgEl("line", {
