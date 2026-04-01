@@ -182,6 +182,44 @@ struct ListSearchesInput {
     limit: Option<u32>,
 }
 
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct AnnotateSpectrumInput {
+    /// Run ID — use to annotate an existing PSM from a search result.
+    #[serde(default)]
+    run_id: Option<String>,
+    /// Spectrum file path — use for manual annotation mode.
+    #[serde(default)]
+    file_path: Option<String>,
+    /// Scan number (1-based) to annotate.
+    scan_number: u32,
+    /// Peptide sequence — required for manual mode.
+    #[serde(default)]
+    peptide_sequence: Option<String>,
+    /// Charge state — required for manual mode.
+    #[serde(default)]
+    charge: Option<i32>,
+    /// Output HTML file path. Default: ./annotation_scan{N}.html
+    #[serde(default)]
+    output_path: Option<String>,
+    /// Fragment mass tolerance. Default: 0.02 Da.
+    #[serde(default)]
+    fragment_tolerance: Option<protein_copilot_core::search_params::MassTolerance>,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct AnnotateResult {
+    output_path: String,
+    scan_number: u32,
+    peptide_sequence: String,
+    charge: i32,
+    score: f64,
+    matched_ions: u32,
+    total_ions: u32,
+    delta_mass_ppm: f64,
+    protein_accessions: Vec<String>,
+    message: String,
+}
+
 /// Presets list response
 #[derive(Debug, Serialize, schemars::JsonSchema)]
 struct PresetsResponse {
@@ -844,5 +882,119 @@ impl ProteinCopilotServer {
         entries.sort_by(|a, b| b.created_at.cmp(&a.created_at));
         entries.truncate(limit);
         Json(entries)
+    }
+
+    /// Annotate a single spectrum with peptide fragment ion matching.
+    #[rmcp::tool(
+        name = "annotate_spectrum",
+        description = "Annotate a single spectrum with peptide fragment ion matching. Generates an interactive HTML file showing matched b/y ions. Two modes: (1) provide run_id + scan_number to annotate an existing PSM, or (2) provide file_path + scan_number + peptide_sequence + charge for manual annotation."
+    )]
+    fn annotate_spectrum(
+        &self,
+        Parameters(input): Parameters<AnnotateSpectrumInput>,
+    ) -> Result<Json<AnnotateResult>, ErrorData> {
+        use protein_copilot_core::search_params::{MassTolerance, Modification, ToleranceUnit};
+
+        // Resolve mode and gather PSM info + spectrum file path
+        let (spectrum_file, peptide_seq, charge, modifications, protein_accs) = if let Some(
+            ref rid,
+        ) = input.run_id
+        {
+            // Mode 1: from cached search result
+            let result = self.get_result(&None, &Some(rid.clone()))?;
+            let psm = result
+                .psms
+                .iter()
+                .find(|p| p.spectrum_scan == input.scan_number)
+                .ok_or_else(|| {
+                    mcp_err(
+                        ErrorCode::INVALID_PARAMS,
+                        format!("no PSM found for scan {} in run {}", input.scan_number, rid),
+                    )
+                })?;
+            let file = result
+                .metadata
+                .input_files
+                .first()
+                .ok_or_else(|| {
+                    mcp_err(ErrorCode::INTERNAL_ERROR, "no input files in search result")
+                })?
+                .clone();
+            (
+                file,
+                psm.peptide_sequence.clone(),
+                psm.charge,
+                psm.modifications.clone(),
+                psm.protein_accessions.clone(),
+            )
+        } else if let (Some(ref fp), Some(ref pep), Some(ch)) =
+            (&input.file_path, &input.peptide_sequence, input.charge)
+        {
+            // Mode 2: manual annotation
+            (
+                PathBuf::from(fp),
+                pep.clone(),
+                ch,
+                Vec::<Modification>::new(),
+                Vec::<String>::new(),
+            )
+        } else {
+            return Err(mcp_err(
+                    ErrorCode::INVALID_PARAMS,
+                    "provide either 'run_id' (mode 1) or 'file_path' + 'peptide_sequence' + 'charge' (mode 2)",
+                ));
+        };
+
+        // Read the spectrum
+        let info = protein_copilot_spectrum_io::detect_format(&spectrum_file)
+            .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
+        let reader = protein_copilot_spectrum_io::create_reader(&info);
+        let spectrum = reader
+            .read_spectrum(&spectrum_file, input.scan_number)
+            .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
+
+        let frag_tol = input.fragment_tolerance.unwrap_or(MassTolerance {
+            value: 0.02,
+            unit: ToleranceUnit::Da,
+        });
+
+        // Perform annotation
+        let annotation = protein_copilot_search_engine::annotate::annotate_spectrum(
+            &spectrum,
+            &peptide_seq,
+            charge,
+            &frag_tol,
+            &modifications,
+            protein_accs.clone(),
+        )
+        .map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, e))?;
+
+        // Render HTML
+        let out_path = input
+            .output_path
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(format!("annotation_scan{}.html", input.scan_number)));
+
+        ReportGenerator::render_annotation(&annotation, &out_path)
+            .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
+
+        Ok(Json(AnnotateResult {
+            output_path: out_path.display().to_string(),
+            scan_number: annotation.scan_number,
+            peptide_sequence: annotation.peptide_sequence,
+            charge: annotation.charge,
+            score: annotation.score,
+            matched_ions: annotation.matched_ions,
+            total_ions: annotation.total_ions,
+            delta_mass_ppm: annotation.delta_mass_ppm,
+            protein_accessions: annotation.protein_accessions,
+            message: format!(
+                "Annotation saved to {}. Matched {}/{} ions (score: {:.3}). Open in browser to view.",
+                out_path.display(),
+                annotation.matched_ions,
+                annotation.total_ions,
+                annotation.score,
+            ),
+        }))
     }
 }
