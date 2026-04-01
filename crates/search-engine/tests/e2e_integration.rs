@@ -225,6 +225,66 @@ async fn scenario_phospho_with_hints() {
 }
 
 // ─────────────────────────────────────────────────────────
+// Scenario: Annotate PSM (search → annotate → render HTML)
+// ─────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn scenario_annotate_psm() {
+    use protein_copilot_search_engine::annotate;
+
+    // Step 1: Run a search
+    let file_info = detect_format(&mgf_path()).unwrap();
+    let summary = create_reader(&file_info).read_summary(&mgf_path()).unwrap();
+    let mut params = ParamRecommender.recommend(&summary, None).unwrap().decision;
+    params.database_path = fasta_path().to_string_lossy().to_string();
+
+    let engine = SimpleSearchEngine::new();
+    let result = engine
+        .search(&params, &[mgf_path()], noop_progress())
+        .await
+        .unwrap();
+
+    // Step 2: Pick first PSM and annotate
+    let psm = result.psms.first().expect("should have at least one PSM");
+    let spectrum = create_reader(&detect_format(&mgf_path()).unwrap())
+        .read_spectrum(&mgf_path(), psm.spectrum_scan)
+        .unwrap();
+
+    let tol = MassTolerance {
+        value: 0.02,
+        unit: ToleranceUnit::Da,
+    };
+
+    let annotation = annotate::annotate_spectrum(
+        &spectrum,
+        &psm.peptide_sequence,
+        psm.charge,
+        &tol,
+        &psm.modifications,
+        psm.protein_accessions.clone(),
+    )
+    .unwrap();
+
+    // Step 3: Verify annotation
+    assert_eq!(annotation.scan_number, psm.spectrum_scan);
+    assert_eq!(annotation.peptide_sequence, psm.peptide_sequence);
+    assert!(annotation.matched_ions > 0, "should match some ions");
+    assert!(!annotation.peaks.is_empty(), "should have peaks");
+    assert!(!annotation.b_ions.is_empty(), "should have b-ions");
+    assert!(!annotation.y_ions.is_empty(), "should have y-ions");
+
+    // Step 4: Render to HTML
+    let dir = tempfile::tempdir().unwrap();
+    let html_path = dir.path().join("annotation.html");
+    ReportGenerator::render_annotation(&annotation, &html_path).unwrap();
+    assert!(html_path.exists());
+
+    let content = std::fs::read_to_string(&html_path).unwrap();
+    assert!(content.contains("__ANNOTATION_DATA__"));
+    assert!(content.contains(&psm.peptide_sequence));
+}
+
+// ─────────────────────────────────────────────────────────
 // Error scenarios
 // ─────────────────────────────────────────────────────────
 
