@@ -11,6 +11,7 @@
 pub mod error;
 pub mod export;
 pub mod summary;
+pub mod visualize;
 
 pub use error::ReportError;
 
@@ -44,5 +45,13 @@ impl ReportGenerator {
     /// Exports run metadata as JSON.
     pub fn export_metadata(metadata: &RunMetadata, output_path: &Path) -> Result<(), ReportError> {
         export::export_metadata(metadata, output_path)
+    }
+
+    /// Renders a spectrum annotation as a self-contained HTML file.
+    pub fn render_annotation(
+        annotation: &protein_copilot_search_engine::annotate::SpectrumAnnotation,
+        output_path: &Path,
+    ) -> Result<(), ReportError> {
+        visualize::render_annotation_html(annotation, output_path)
     }
 }

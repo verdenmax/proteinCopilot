@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Spectrum Annotation — ProteinCopilot</title>
+<style>
+  :root {
+    --b-color: #e74c3c;
+    --y-color: #3498db;
+    --unmatched: #bdc3c7;
+    --bg: #f8f9fa;
+    --card-bg: #ffffff;
+    --text: #2c3e50;
+    --text-muted: #7f8c8d;
+    --border: #dee2e6;
+    --font: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: var(--font); background: var(--bg); color: var(--text); padding: 20px; }
+
+  /* ── Info Card ────────────────────────────────────────── */
+  .info-card {
+    background: var(--card-bg); border: 1px solid var(--border);
+    border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;
+    box-shadow: 0 1px 3px rgba(0,0,0,.06);
+  }
+  .info-card h2 { font-size: 16px; font-weight: 600; margin-bottom: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px; }
+  .info-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px 24px; }
+  .info-item { display: flex; flex-direction: column; }
+  .info-label { font-size: 11px; text-transform: uppercase; letter-spacing: .4px; color: var(--text-muted); margin-bottom: 2px; }
+  .info-value { font-size: 14px; font-weight: 500; }
+  .info-value.peptide { font-family: 'Courier New', Courier, monospace; font-size: 16px; letter-spacing: 1px; font-weight: 700; }
+
+  /* ── Coverage Diagram ────────────────────────────────── */
+  .coverage-card {
+    background: var(--card-bg); border: 1px solid var(--border);
+    border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;
+    box-shadow: 0 1px 3px rgba(0,0,0,.06); overflow-x: auto;
+  }
+  .coverage-card h2 { font-size: 16px; font-weight: 600; margin-bottom: 16px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px; }
+  .coverage-wrap { display: inline-flex; flex-direction: column; align-items: flex-start; min-width: min-content; }
+  .cov-row { display: flex; align-items: center; height: 22px; }
+  .cov-cell { width: 38px; text-align: center; font-size: 11px; font-weight: 600; position: relative; }
+  .cov-cell.matched-b { color: var(--b-color); }
+  .cov-cell.matched-y { color: var(--y-color); }
+  .cov-cell.unmatched { color: var(--unmatched); }
+  .cov-cell.spacer { width: 10px; }
+  .seq-row { display: flex; align-items: center; height: 30px; }
+  .seq-cell { width: 38px; text-align: center; font-size: 16px; font-family: 'Courier New', Courier, monospace; font-weight: 700; }
+  .seq-sep { width: 10px; display: flex; justify-content: center; }
+  .seq-sep .cleavage { width: 1px; height: 30px; background: var(--border); }
+
+  /* ── Spectrum Plot ───────────────────────────────────── */
+  .spectrum-card {
+    background: var(--card-bg); border: 1px solid var(--border);
+    border-radius: 8px; padding: 20px 24px;
+    box-shadow: 0 1px 3px rgba(0,0,0,.06);
+  }
+  .spectrum-card h2 { font-size: 16px; font-weight: 600; margin-bottom: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px; }
+  svg text { font-family: var(--font); }
+  .axis text { font-size: 11px; fill: var(--text-muted); }
+  .axis line, .axis path { stroke: var(--border); }
+  .axis-label { font-size: 12px; fill: var(--text); font-weight: 500; }
+  .peak-label { font-size: 10px; font-weight: 600; }
+  .peak-line { stroke-width: 1.5; }
+  .peak-line.unmatched { stroke: var(--unmatched); stroke-width: 1; }
+  .peak-line.b-ion { stroke: var(--b-color); }
+  .peak-line.y-ion { stroke: var(--y-color); }
+  .peak-hitbox { stroke: transparent; stroke-width: 6; fill: none; cursor: pointer; }
+
+  /* ── Tooltip ─────────────────────────────────────────── */
+  #tooltip {
+    position: fixed; pointer-events: none; display: none;
+    background: rgba(44,62,80,.92); color: #fff; padding: 8px 12px;
+    border-radius: 5px; font-size: 12px; line-height: 1.5;
+    white-space: nowrap; z-index: 1000;
+    box-shadow: 0 2px 8px rgba(0,0,0,.25);
+  }
+</style>
+</head>
+<body>
+
+<div id="info-panel" class="info-card"></div>
+<div id="coverage-panel" class="coverage-card"></div>
+<div class="spectrum-card">
+  <h2>Spectrum</h2>
+  <div id="spectrum-container"></div>
+</div>
+<div id="tooltip"></div>
+
+<script>
+/*__ANNOTATION_JSON__*/
+</script>
+<script>
+(function () {
+  "use strict";
+  var D = window.__ANNOTATION_DATA__;
+  if (!D) return;
+
+  /* ── helpers ──────────────────────────────────────────── */
+  function fmt(n, d) { return Number(n).toFixed(d === undefined ? 2 : d); }
+  function el(tag, attrs, children) {
+    var e = document.createElement(tag);
+    if (attrs) Object.keys(attrs).forEach(function (k) { e.setAttribute(k, attrs[k]); });
+    if (typeof children === "string") e.textContent = children;
+    else if (Array.isArray(children)) children.forEach(function (c) { if (c) e.appendChild(c); });
+    return e;
+  }
+  function svgEl(tag, attrs) {
+    var e = document.createElementNS("http://www.w3.org/2000/svg", tag);
+    if (attrs) Object.keys(attrs).forEach(function (k) { e.setAttribute(k, attrs[k]); });
+    return e;
+  }
+
+  /* ── 1. Info Panel ────────────────────────────────────── */
+  (function renderInfo() {
+    var panel = document.getElementById("info-panel");
+    panel.appendChild(el("h2", null, "Identification"));
+    var grid = el("div", { "class": "info-grid" });
+    function add(label, value, cls) {
+      var item = el("div", { "class": "info-item" });
+      item.appendChild(el("span", { "class": "info-label" }, label));
+      var v = el("span", { "class": "info-value" + (cls ? " " + cls : "") }, value);
+      item.appendChild(v);
+      grid.appendChild(item);
+    }
+    add("Scan", String(D.scan_number));
+    add("RT", fmt(D.retention_time_sec / 60, 2) + " min");
+    add("Charge", D.charge + "+");
+    add("Peptide", D.peptide_sequence, "peptide");
+    add("Protein(s)", D.protein_accessions.join(", ") || "—");
+    add("Score", fmt(D.score, 3) + "  (" + D.matched_ions + "/" + D.total_ions + " ions)");
+    add("Precursor m/z", fmt(D.precursor_mz, 4));
+    add("\u0394 mass", fmt(D.delta_mass_ppm, 2) + " ppm");
+    panel.appendChild(grid);
+  })();
+
+  /* ── 2. Peptide Coverage ──────────────────────────────── */
+  (function renderCoverage() {
+    var panel = document.getElementById("coverage-panel");
+    panel.appendChild(el("h2", null, "Fragment Ion Coverage"));
+    var wrap = el("div", { "class": "coverage-wrap" });
+    var seq = D.peptide_sequence;
+    var n = seq.length;
+
+    // b-ion row (n-1 ions, between residues)
+    var bRow = el("div", { "class": "cov-row" });
+    bRow.appendChild(el("div", { "class": "cov-cell" })); // leading spacer for first residue
+    for (var i = 0; i < n - 1; i++) {
+      var bIon = D.b_ions[i];
+      var bClass = "cov-cell " + (bIon && bIon.matched ? "matched-b" : "unmatched");
+      bRow.appendChild(el("div", { "class": "cov-cell spacer" }));
+      bRow.appendChild(el("div", { "class": bClass }, bIon ? "b" + bIon.number : ""));
+    }
+    wrap.appendChild(bRow);
+
+    // sequence row
+    var sRow = el("div", { "class": "seq-row" });
+    for (var j = 0; j < n; j++) {
+      sRow.appendChild(el("div", { "class": "seq-cell" }, seq[j]));
+      if (j < n - 1) {
+        var sep = el("div", { "class": "seq-sep" });
+        sep.appendChild(el("div", { "class": "cleavage" }));
+        sRow.appendChild(sep);
+      }
+    }
+    wrap.appendChild(sRow);
+
+    // y-ion row
+    var yRow = el("div", { "class": "cov-row" });
+    yRow.appendChild(el("div", { "class": "cov-cell" }));
+    for (var k = 0; k < n - 1; k++) {
+      var yIon = D.y_ions[n - 2 - k]; // y-ions go in reverse
+      var yClass = "cov-cell " + (yIon && yIon.matched ? "matched-y" : "unmatched");
+      yRow.appendChild(el("div", { "class": "cov-cell spacer" }));
+      yRow.appendChild(el("div", { "class": yClass }, yIon ? "y" + yIon.number : ""));
+    }
+    wrap.appendChild(yRow);
+
+    panel.appendChild(wrap);
+  })();
+
+  /* ── 3. Interactive Spectrum ──────────────────────────── */
+  (function renderSpectrum() {
+    var container = document.getElementById("spectrum-container");
+    var tooltip = document.getElementById("tooltip");
+
+    var W = 900, H = 420;
+    var margin = { top: 30, right: 30, bottom: 50, left: 60 };
+    var pw = W - margin.left - margin.right;
+    var ph = H - margin.top - margin.bottom;
+
+    // data ranges
+    var peaks = D.peaks;
+    if (!peaks.length) return;
+    var maxMz = 0, maxInt = 0;
+    for (var i = 0; i < peaks.length; i++) {
+      if (peaks[i].mz > maxMz) maxMz = peaks[i].mz;
+      if (peaks[i].intensity > maxInt) maxInt = peaks[i].intensity;
+    }
+    var mzMin = 0;
+    var mzMax = maxMz * 1.05;
+    var intMax = maxInt;
+
+    function xScale(v) { return margin.left + (v - mzMin) / (mzMax - mzMin) * pw; }
+    function yScale(v) { return margin.top + ph - (v / intMax) * ph; }
+
+    var svg = svgEl("svg", { width: W, height: H, viewBox: "0 0 " + W + " " + H, style: "max-width:100%;height:auto;" });
+
+    // axes group
+    var gAxis = svgEl("g", { "class": "axis" });
+
+    // x-axis
+    gAxis.appendChild(svgEl("line", { x1: margin.left, y1: margin.top + ph, x2: margin.left + pw, y2: margin.top + ph, stroke: "#dee2e6" }));
+    var xTicks = niceRange(mzMin, mzMax, 8);
+    for (var xi = 0; xi < xTicks.length; xi++) {
+      var tx = xScale(xTicks[xi]);
+      gAxis.appendChild(svgEl("line", { x1: tx, y1: margin.top + ph, x2: tx, y2: margin.top + ph + 5, stroke: "#dee2e6" }));
+      var tl = svgEl("text", { x: tx, y: margin.top + ph + 18, "text-anchor": "middle" });
+      tl.textContent = xTicks[xi];
+      gAxis.appendChild(tl);
+    }
+    var xLabel = svgEl("text", { x: margin.left + pw / 2, y: H - 6, "text-anchor": "middle", "class": "axis-label" });
+    xLabel.textContent = "m/z";
+    gAxis.appendChild(xLabel);
+
+    // y-axis
+    gAxis.appendChild(svgEl("line", { x1: margin.left, y1: margin.top, x2: margin.left, y2: margin.top + ph, stroke: "#dee2e6" }));
+    var yTicks = [0, 25, 50, 75, 100];
+    for (var yi = 0; yi < yTicks.length; yi++) {
+      var pct = yTicks[yi];
+      var ty = yScale(pct / 100 * intMax);
+      gAxis.appendChild(svgEl("line", { x1: margin.left - 5, y1: ty, x2: margin.left, y2: ty, stroke: "#dee2e6" }));
+      var yl = svgEl("text", { x: margin.left - 8, y: ty + 4, "text-anchor": "end" });
+      yl.textContent = pct + "%";
+      gAxis.appendChild(yl);
+    }
+    var yLabel = svgEl("text", { x: 14, y: margin.top + ph / 2, "text-anchor": "middle", "class": "axis-label", transform: "rotate(-90,14," + (margin.top + ph / 2) + ")" });
+    yLabel.textContent = "Relative Intensity";
+    gAxis.appendChild(yLabel);
+
+    svg.appendChild(gAxis);
+
+    // peaks
+    var gPeaks = svgEl("g");
+    for (var p = 0; p < peaks.length; p++) {
+      var pk = peaks[p];
+      var x = xScale(pk.mz);
+      var y1 = yScale(0);
+      var y2 = yScale(pk.intensity);
+      var ann = pk.annotation;
+      var cls, col;
+      if (ann) {
+        if (ann.ion_type === "B") { cls = "b-ion"; col = "#e74c3c"; }
+        else { cls = "y-ion"; col = "#3498db"; }
+      } else {
+        cls = "unmatched"; col = "#bdc3c7";
+      }
+
+      // peak line
+      gPeaks.appendChild(svgEl("line", { x1: x, y1: y1, x2: x, y2: y2, "class": "peak-line " + cls }));
+
+      // label for annotated peaks
+      if (ann) {
+        var label = (ann.ion_type === "B" ? "b" : "y") + ann.ion_number;
+        var lt = svgEl("text", { x: x, y: y2 - 5, "text-anchor": "middle", fill: col, "class": "peak-label", transform: "rotate(-45," + x + "," + (y2 - 5) + ")" });
+        lt.textContent = label;
+        gPeaks.appendChild(lt);
+      }
+
+      // invisible hitbox for tooltip
+      (function (peak) {
+        var hitbox = svgEl("line", { x1: x, y1: y1, x2: x, y2: y2, "class": "peak-hitbox" });
+        hitbox.addEventListener("mouseenter", function (ev) {
+          var relInt = (peak.intensity / intMax * 100);
+          var lines = ["m/z: " + fmt(peak.mz, 4), "Intensity: " + fmt(peak.intensity, 1) + "  (" + fmt(relInt, 1) + "%)"];
+          if (peak.annotation) {
+            var a = peak.annotation;
+            lines.push("Ion: " + (a.ion_type === "B" ? "b" : "y") + a.ion_number);
+            lines.push("\u0394 ppm: " + fmt(a.delta_ppm, 2));
+          }
+          tooltip.innerHTML = lines.join("<br>");
+          tooltip.style.display = "block";
+        });
+        hitbox.addEventListener("mousemove", function (ev) {
+          tooltip.style.left = (ev.clientX + 14) + "px";
+          tooltip.style.top = (ev.clientY - 10) + "px";
+        });
+        hitbox.addEventListener("mouseleave", function () {
+          tooltip.style.display = "none";
+        });
+        gPeaks.appendChild(hitbox);
+      })(pk);
+    }
+    svg.appendChild(gPeaks);
+    container.appendChild(svg);
+  })();
+
+  /* nice tick generation */
+  function niceRange(lo, hi, count) {
+    var span = hi - lo;
+    if (span <= 0) return [lo];
+    var rough = span / count;
+    var mag = Math.pow(10, Math.floor(Math.log10(rough)));
+    var res = rough / mag;
+    var step;
+    if (res <= 1.5) step = mag;
+    else if (res <= 3) step = 2 * mag;
+    else if (res <= 7) step = 5 * mag;
+    else step = 10 * mag;
+    var start = Math.ceil(lo / step) * step;
+    var ticks = [];
+    for (var v = start; v <= hi; v += step) {
+      ticks.push(Math.round(v * 1e6) / 1e6);
+    }
+    return ticks;
+  }
+})();
+</script>
+</body>
+</html>

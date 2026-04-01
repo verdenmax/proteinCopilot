@@ -553,6 +553,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "protein-copilot-core",
+ "protein-copilot-search-engine",
  "serde",
  "serde_json",
  "tempfile",
