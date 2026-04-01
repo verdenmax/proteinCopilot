@@ -306,7 +306,6 @@ pub fn annotate_spectrum(
 
     // --- Match theoretical ions against experimental peaks ---
     let mut peak_annotations: Vec<Option<IonAnnotation>> = vec![None; exp_mz.len()];
-    let mut matched_count = 0u32;
 
     // Build TheoreticalIon lists
     let mut b_ions_out: Vec<TheoreticalIon> = Vec::with_capacity(b_ion_mzs.len());
@@ -315,7 +314,6 @@ pub fn annotate_spectrum(
         let (_, best_idx) = find_best_match(theo_mz, exp_mz, fragment_tolerance);
 
         if let Some(idx) = best_idx {
-            matched_count += 1;
             let obs_mz = exp_mz[idx];
             let dppm = (obs_mz - theo_mz) / theo_mz * 1e6;
 
@@ -362,7 +360,6 @@ pub fn annotate_spectrum(
         let (_, best_idx) = find_best_match(theo_mz, exp_mz, fragment_tolerance);
 
         if let Some(idx) = best_idx {
-            matched_count += 1;
             let obs_mz = exp_mz[idx];
             let dppm = (obs_mz - theo_mz) / theo_mz * 1e6;
 
@@ -412,6 +409,11 @@ pub fn annotate_spectrum(
         })
         .collect();
 
+    // Count matched ions from the TheoreticalIon lists (avoids double-counting
+    // when both a b-ion and y-ion match the same experimental peak).
+    let matched_b = b_ions_out.iter().filter(|i| i.matched).count() as u32;
+    let matched_y = y_ions_out.iter().filter(|i| i.matched).count() as u32;
+    let matched_count = matched_b + matched_y;
     let total_ions = (b_ion_mzs.len() + y_ion_mzs.len()) as u32;
     let score = if total_ions > 0 {
         matched_count as f64 / total_ions as f64
