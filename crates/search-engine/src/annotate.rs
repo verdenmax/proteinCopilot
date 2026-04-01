@@ -193,19 +193,49 @@ fn generate_b_ions_with_mods(sequence: &str, fixed_mods: &[Modification]) -> Opt
         let mass = crate::chemistry::residue_mass(aa)?;
         cumulative += mass;
         ions.push(
-            cumulative + mod_delta_prefix(&chars[..ions.len() + 1], fixed_mods) + PROTON_MASS,
+            cumulative
+                + mod_delta_fragment(&chars[..ions.len() + 1], fixed_mods, true)
+                + PROTON_MASS,
         );
     }
     Some(ions)
 }
 
-/// Cumulative fixed-mod delta for a prefix of residues.
-fn mod_delta_prefix(prefix: &[char], fixed_mods: &[Modification]) -> f64 {
+/// Cumulative fixed-mod delta for a fragment prefix/suffix.
+///
+/// For residue-specific mods: adds mass_delta for each matching residue.
+/// For N-term mods: adds mass_delta to b-ions (which contain the N-terminus).
+/// For C-term mods: adds mass_delta to y-ions (which contain the C-terminus).
+fn mod_delta_fragment(residues: &[char], fixed_mods: &[Modification], is_b_ion: bool) -> f64 {
+    use protein_copilot_core::search_params::ModPosition;
     let mut delta = 0.0;
-    for &ch in prefix {
-        for m in fixed_mods {
-            if m.residues.contains(&ch) {
-                delta += m.mass_delta;
+    for m in fixed_mods {
+        if m.residues.is_empty() {
+            // Terminal modification: apply based on ion type
+            match m.position {
+                ModPosition::AnyNTerm | ModPosition::ProteinNTerm => {
+                    // N-term mod applies to all b-ions (they contain the N-terminus)
+                    if is_b_ion {
+                        delta += m.mass_delta;
+                    }
+                }
+                ModPosition::AnyCTerm | ModPosition::ProteinCTerm => {
+                    // C-term mod applies to all y-ions (they contain the C-terminus)
+                    if !is_b_ion {
+                        delta += m.mass_delta;
+                    }
+                }
+                ModPosition::Anywhere => {
+                    // Global mod with no specific residue — add once per fragment
+                    delta += m.mass_delta;
+                }
+            }
+        } else {
+            // Residue-specific mod
+            for &ch in residues {
+                if m.residues.contains(&ch) {
+                    delta += m.mass_delta;
+                }
             }
         }
     }
@@ -229,7 +259,7 @@ fn generate_y_ions_with_mods(sequence: &str, fixed_mods: &[Modification]) -> Opt
         let mass = crate::chemistry::residue_mass(aa)?;
         cumulative += mass;
         let suffix_start = n - 1 - i;
-        let mod_delta = mod_delta_prefix(&chars[suffix_start..], fixed_mods);
+        let mod_delta = mod_delta_fragment(&chars[suffix_start..], fixed_mods, false);
         ions.push(cumulative + mod_delta + PROTON_MASS);
     }
     Some(ions)
@@ -673,5 +703,46 @@ mod tests {
             assert!(result.is_err());
         }
         // Also test missing precursor
+    }
+
+    #[test]
+    fn nterm_modification_affects_b_ions_not_y_ions() {
+        use protein_copilot_core::search_params::ModPosition;
+
+        let seq = "PEPTIDE";
+        // TMT6plex-like N-term modification (229.163 Da)
+        let tmt_mod = Modification {
+            name: "TMT6plex".to_string(),
+            mass_delta: 229.162932,
+            residues: vec![],
+            position: ModPosition::AnyNTerm,
+        };
+
+        // Generate b-ions WITH and WITHOUT the N-term mod
+        let b_no_mod = generate_b_ions_with_mods(seq, &[]).unwrap();
+        let b_with_mod = generate_b_ions_with_mods(seq, &[tmt_mod.clone()]).unwrap();
+
+        // All b-ions should be shifted by the TMT mass
+        assert_eq!(b_no_mod.len(), b_with_mod.len());
+        for (no_mod, with_mod) in b_no_mod.iter().zip(b_with_mod.iter()) {
+            let diff = with_mod - no_mod;
+            assert!(
+                (diff - 229.162932).abs() < 0.001,
+                "b-ion should be shifted by TMT mass, got diff {diff:.4}"
+            );
+        }
+
+        // y-ions should NOT be affected by N-term mod
+        let y_no_mod = generate_y_ions_with_mods(seq, &[]).unwrap();
+        let y_with_mod = generate_y_ions_with_mods(seq, &[tmt_mod]).unwrap();
+
+        assert_eq!(y_no_mod.len(), y_with_mod.len());
+        for (no_mod, with_mod) in y_no_mod.iter().zip(y_with_mod.iter()) {
+            let diff = (with_mod - no_mod).abs();
+            assert!(
+                diff < 0.001,
+                "y-ion should NOT be shifted by N-term mod, got diff {diff:.4}"
+            );
+        }
     }
 }
