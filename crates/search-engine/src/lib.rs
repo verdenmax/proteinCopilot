@@ -22,6 +22,7 @@
 //! ```
 
 pub mod adapters;
+pub mod annotate;
 pub mod chemistry;
 pub mod digest;
 pub mod error;
