@@ -39,7 +39,7 @@ crates/
 ├── param-recommend/   参数推荐规则引擎（确定性，不调 LLM）
 ├── search-engine/     搜索引擎（SimpleSearch + pFind adapter 预留）
 ├── report/            报告生成（摘要 + TSV/JSON 导出）
-└── mcp-server/        MCP Server 二进制（8 tools，stdio transport）
+└── mcp-server/        MCP Server 二进制（12 tools，stdio transport）
 
 .github/
 ├── agents/proteomics-search.agent.md   蛋白搜索助手 Agent
@@ -47,7 +47,7 @@ crates/
 └── prompts/result-interpretation.prompt.md  结果解读 Skill
 ```
 
-## MCP Tools（9 个）
+## MCP Tools（12 个）
 
 | Tool | 功能 |
 |------|------|
@@ -56,16 +56,19 @@ crates/
 | `recommend_params` | 推荐搜索参数 + 解释 |
 | `list_presets` | 列出内置预设 |
 | `run_search` | 异步执行数据库搜索（立即返回 run_id） |
-| `get_search_status` | 查询搜索进度 |
+| `get_search_status` | 查询搜索进度（阶段 + 百分比） |
+| `cancel_search` | 取消正在运行的搜索 |
 | `check_engine` | 检查引擎状态 |
 | `generate_summary` | FDR 过滤统计摘要 |
 | `export_results` | 导出 TSV/JSON 文件 |
+| `list_searches` | 列出搜索历史（活跃 + 持久化） |
+| `annotate_spectrum` | 单张谱图 b/y 离子注释 + HTML 可视化 |
 
 ## 架构原则
 
 - **确定性/LLM 分层**：Rust 做所有计算，LLM 做意图理解和结果解释
 - **MCP 协议**：所有能力通过 MCP tools 暴露给 LLM（M1.6 实现中）
-- **可测试**：299 个单元/集成测试，0 clippy warnings
+- **可测试**：324 个单元/集成测试，0 clippy warnings
 - **可审计**：每次搜索生成 run_id + 完整参数 + 引擎版本记录
 
 ## 当前进度
@@ -77,8 +80,9 @@ crates/
 | M1.3 param-recommend | ✅ 规则引擎 + 5 个预设 |
 | M1.4 search-engine | ✅ SimpleSearch + pFind 预留 |
 | M1.5 report | ✅ 摘要 + TSV/JSON 导出 |
-| M1.6 mcp-server | ✅ 9 MCP tools + Agent + Skill |
+| M1.6 mcp-server | ✅ 12 MCP tools + Agent + Skill |
 | M1.7 integration | ✅ 端到端测试 + 文档 |
+| Post-MVP | ✅ 异步搜索优化（阶段进度 + 取消 + 历史持久化）+ 谱图注释可视化 |
 
 详细计划：`tasks/001-mvp-proteomics-search-platform.md`
 架构设计：`docs/architecture.md`

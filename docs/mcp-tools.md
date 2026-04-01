@@ -1,6 +1,6 @@
 # MCP Tools 参考
 
-ProteinCopilot MCP Server 提供 8 个工具，通过 JSON-RPC over stdio 暴露给 LLM。
+ProteinCopilot MCP Server 提供 12 个工具，通过 JSON-RPC over stdio 暴露给 LLM。
 
 > **当前搜索引擎**：MVP 使用内置的 **SimpleSearchEngine**（基于 b/y 离子匹配的简化搜索），
 > 后续将接入 pFind 作为生产级搜索引擎。SimpleSearch 足以验证完整流程，但搜索质量和性能不如专业引擎。
@@ -128,7 +128,32 @@ cargo run --release -p protein-copilot-mcp-server
 }
 ```
 
-status 值：`Running` / `Completed` / `Failed: <reason>`
+status 值：`Running` / `Completed` / `Failed: <reason>` / `Cancelled`
+
+---
+
+## cancel_search
+
+取消正在运行的搜索任务。
+
+**输入**：
+```json
+{
+  "run_id": "9f71e493-..."
+}
+```
+
+**输出**：`SearchProgress`
+```json
+{
+  "run_id": "...",
+  "status": "Cancelled",
+  "progress_pct": 0.45,
+  "elapsed_sec": 3.1
+}
+```
+
+> 内部通过 `JoinHandle::abort()` 终止搜索任务。已完成或已失败的搜索无法取消。
 
 ---
 
@@ -172,6 +197,71 @@ status 值：`Running` / `Completed` / `Failed: <reason>`
 ```
 
 **输出**：导出文件列表
+
+---
+
+## list_searches
+
+列出搜索历史，包括当前活跃的搜索和持久化到磁盘的历史记录（`~/.protein-copilot/history/`）。
+
+**输入**：
+```json
+{
+  "status_filter": "Completed",
+  "limit": 10
+}
+```
+
+所有参数可选。`status_filter` 按状态过滤（`Running` / `Completed` / `Failed` / `Cancelled`），`limit` 限制返回数量。
+
+**输出**：`Vec<SearchHistoryEntry>`
+```json
+[
+  {
+    "run_id": "...",
+    "status": "Completed",
+    "input_files": ["/data/sample.mgf"],
+    "started_at": "2026-04-15T10:30:00Z",
+    "elapsed_sec": 12.5
+  }
+]
+```
+
+---
+
+## annotate_spectrum
+
+对单张谱图进行 b/y 离子匹配注释，生成交互式 HTML 可视化（SVG 谱图 + 肽段覆盖图 + hover 工具提示）。
+
+**模式一：基于搜索结果**
+```json
+{
+  "run_id": "9f71e493-...",
+  "scan_number": 42
+}
+```
+
+**模式二：直接指定肽段**
+```json
+{
+  "file_path": "/data/sample.mgf",
+  "peptide": "PEPTIDEK",
+  "charge": 2,
+  "scan_number": 42
+}
+```
+
+**输出**：`AnnotateResult`
+```json
+{
+  "score": 0.85,
+  "matched_ions": 12,
+  "total_ions": 18,
+  "html_path": "./output/annotated_scan42.html"
+}
+```
+
+> HTML 文件包含交互式 SVG 谱图（b 离子蓝色、y 离子红色）、肽段序列覆盖图和匹配离子详情表。
 
 ---
 
