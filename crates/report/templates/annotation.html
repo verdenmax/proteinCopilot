@@ -160,12 +160,16 @@
     var cellW = 44;
     var totalW = n * cellW + 40;
     var seqY = 70;
-    var bBracketTop = 14;
-    var bBracketBot = seqY - 12;
-    var bLabelY = bBracketTop - 3;
-    var yBracketTop = seqY + 24;
-    var yBracketBot = seqY + 56;
-    var yLabelY = yBracketBot + 14;
+    // b-bracket: short vertical between residues just above sequence, horizontal over RIGHT residue
+    var bHorizY = seqY - 20;       // horizontal bar height (above sequence)
+    var bVertTop = bHorizY;        // vertical starts at horizontal bar
+    var bVertBot = seqY - 6;       // vertical ends just above sequence letters
+    var bLabelY = bHorizY - 5;     // label above horizontal bar
+    // y-bracket: short vertical between residues just below sequence, horizontal over LEFT residue
+    var yHorizY = seqY + 20;       // horizontal bar height (below sequence)
+    var yVertTop = seqY + 10;      // vertical starts just below sequence letters
+    var yVertBot = yHorizY;        // vertical ends at horizontal bar
+    var yLabelY = yHorizY + 16;    // label below horizontal bar
     var svgH = yLabelY + 10;
     var xOff = 20;
 
@@ -208,22 +212,29 @@
     // Draw brackets at each cleavage position
     for (var ci2 = 0; ci2 < n - 1; ci2++) {
       var cleavX = xOff + (ci2 + 1) * cellW;
-      var bracketLen = cellW * 0.65;
+      // Horizontal bar spans from cleavage point to the CENTER of the adjacent amino acid
+      var rightCenterX = cleavX + cellW / 2;  // center of right residue (for b-ion)
+      var leftCenterX = cleavX - cellW / 2;   // center of left residue (for y-ion)
 
-      // b-ion bracket: vertical line down from top, then horizontal to the right
+      // b-ion bracket: short vertical down at cleavage, then horizontal RIGHT over next residue
       var bColor = bMatched[ci2] ? "#d63031" : "#e0e0e0";
       var bStroke = bMatched[ci2] ? 2.5 : 1.2;
-      var bPath = "M" + cleavX + "," + bBracketTop +
-                  " L" + cleavX + "," + bBracketBot +
-                  " L" + (cleavX + bracketLen) + "," + bBracketBot;
-      var bBr = svgEl("path", {
+      var bPath = "M" + cleavX + "," + bVertTop +
+                  " L" + cleavX + "," + bVertBot;
+      var bHoriz = "M" + cleavX + "," + bHorizY +
+                   " L" + rightCenterX + "," + bHorizY;
+      covSvg.appendChild(svgEl("path", {
         d: bPath, fill: "none", stroke: bColor,
-        "stroke-width": bStroke, "stroke-linecap": "round", "stroke-linejoin": "round",
+        "stroke-width": bStroke, "stroke-linecap": "round",
         "class": "cov-bracket", "data-ion": "b" + bNumbers[ci2]
-      });
-      covSvg.appendChild(bBr);
+      }));
+      covSvg.appendChild(svgEl("path", {
+        d: bHoriz, fill: "none", stroke: bColor,
+        "stroke-width": bStroke, "stroke-linecap": "round",
+        "class": "cov-bracket", "data-ion": "b" + bNumbers[ci2]
+      }));
 
-      // b-ion label
+      // b-ion label (above the horizontal bar, near cleavage)
       var bLbl = svgEl("text", {
         x: cleavX + 2, y: bLabelY,
         "font-size": "10", "font-weight": "600",
@@ -233,20 +244,25 @@
       bLbl.textContent = "b" + subscript(bNumbers[ci2]);
       covSvg.appendChild(bLbl);
 
-      // y-ion bracket: vertical line up from bottom, then horizontal to the left
+      // y-ion bracket: short vertical up at cleavage, then horizontal LEFT over previous residue
       var yColor = yMatched[ci2] ? "#0984e3" : "#e0e0e0";
       var yStroke = yMatched[ci2] ? 2.5 : 1.2;
-      var yPath = "M" + cleavX + "," + yBracketBot +
-                  " L" + cleavX + "," + yBracketTop +
-                  " L" + (cleavX - bracketLen) + "," + yBracketTop;
-      var yBr = svgEl("path", {
-        d: yPath, fill: "none", stroke: yColor,
-        "stroke-width": yStroke, "stroke-linecap": "round", "stroke-linejoin": "round",
+      var yVertPath = "M" + cleavX + "," + yVertTop +
+                      " L" + cleavX + "," + yVertBot;
+      var yHorizPath = "M" + cleavX + "," + yHorizY +
+                       " L" + leftCenterX + "," + yHorizY;
+      covSvg.appendChild(svgEl("path", {
+        d: yVertPath, fill: "none", stroke: yColor,
+        "stroke-width": yStroke, "stroke-linecap": "round",
         "class": "cov-bracket", "data-ion": "y" + yNumbers[ci2]
-      });
-      covSvg.appendChild(yBr);
+      }));
+      covSvg.appendChild(svgEl("path", {
+        d: yHorizPath, fill: "none", stroke: yColor,
+        "stroke-width": yStroke, "stroke-linecap": "round",
+        "class": "cov-bracket", "data-ion": "y" + yNumbers[ci2]
+      }));
 
-      // y-ion label
+      // y-ion label (below the horizontal bar, near cleavage)
       var yLbl = svgEl("text", {
         x: cleavX - 2, y: yLabelY,
         "font-size": "10", "font-weight": "600",
