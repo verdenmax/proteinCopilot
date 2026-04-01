@@ -601,56 +601,63 @@ impl ProteinCopilotServer {
             // Single lock — update progress + result atomically
             let (updated, history_entry) = if let Ok(mut cache) = run_cache_clone.lock() {
                 if let Some(state) = cache.get_mut(&run_id) {
-                    let entry = match search_result {
-                        Ok(mut result) => {
-                            result.run_id = run_id;
-                            result.metadata.run_id = run_id;
-                            let entry = crate::history::SearchHistoryEntry {
-                                run_id,
-                                status: "Completed".to_string(),
-                                created_at: result.metadata.created_at,
-                                elapsed_sec: duration,
-                                engine_info: result.engine_info.clone(),
-                                input_files: result.metadata.input_files.clone(),
-                                params_used: result.params_used.clone(),
-                                total_psms: Some(result.summary.total_psms),
-                                psms_at_1pct_fdr: Some(result.summary.psms_at_1pct_fdr),
-                                identification_rate: Some(result.summary.identification_rate),
-                                protein_groups: Some(result.summary.protein_groups_at_1pct_fdr),
-                            };
-                            state.result = Some(result);
-                            state.progress.status = "Completed".to_string();
-                            state.progress.stage = None;
-                            state.progress.progress_pct = Some(1.0);
-                            state.progress.elapsed_sec = duration;
-                            state.progress.estimated_remaining_sec = Some(0.0);
-                            Some(entry)
-                        }
-                        Err(e) => {
-                            let entry = crate::history::SearchHistoryEntry {
-                                run_id,
-                                status: format!("Failed: {e}"),
-                                created_at: chrono::Utc::now(),
-                                elapsed_sec: duration,
-                                engine_info: protein_copilot_core::engine::EngineInfo {
-                                    name: "SimpleSearch".into(),
-                                    version: "0.1.0".into(),
-                                    supported_features: vec![],
-                                },
-                                input_files: files.clone(),
-                                params_used: params.clone(),
-                                total_psms: None,
-                                psms_at_1pct_fdr: None,
-                                identification_rate: None,
-                                protein_groups: None,
-                            };
-                            state.progress.status = format!("Failed: {e}");
-                            state.progress.progress_pct = None;
-                            state.progress.elapsed_sec = duration;
-                            Some(entry)
-                        }
-                    };
-                    (true, entry)
+                    // If already cancelled, don't overwrite the status
+                    if state.progress.status == "Cancelled" {
+                        (true, None)
+                    } else {
+                        // Clear the JoinHandle — task is finishing
+                        state.handle = None;
+                        let entry = match search_result {
+                            Ok(mut result) => {
+                                result.run_id = run_id;
+                                result.metadata.run_id = run_id;
+                                let entry = crate::history::SearchHistoryEntry {
+                                    run_id,
+                                    status: "Completed".to_string(),
+                                    created_at: result.metadata.created_at,
+                                    elapsed_sec: duration,
+                                    engine_info: result.engine_info.clone(),
+                                    input_files: result.metadata.input_files.clone(),
+                                    params_used: result.params_used.clone(),
+                                    total_psms: Some(result.summary.total_psms),
+                                    psms_at_1pct_fdr: Some(result.summary.psms_at_1pct_fdr),
+                                    identification_rate: Some(result.summary.identification_rate),
+                                    protein_groups: Some(result.summary.protein_groups_at_1pct_fdr),
+                                };
+                                state.result = Some(result);
+                                state.progress.status = "Completed".to_string();
+                                state.progress.stage = None;
+                                state.progress.progress_pct = Some(1.0);
+                                state.progress.elapsed_sec = duration;
+                                state.progress.estimated_remaining_sec = Some(0.0);
+                                Some(entry)
+                            }
+                            Err(e) => {
+                                let entry = crate::history::SearchHistoryEntry {
+                                    run_id,
+                                    status: format!("Failed: {e}"),
+                                    created_at: chrono::Utc::now(),
+                                    elapsed_sec: duration,
+                                    engine_info: protein_copilot_core::engine::EngineInfo {
+                                        name: "SimpleSearch".into(),
+                                        version: "0.1.0".into(),
+                                        supported_features: vec![],
+                                    },
+                                    input_files: files.clone(),
+                                    params_used: params.clone(),
+                                    total_psms: None,
+                                    psms_at_1pct_fdr: None,
+                                    identification_rate: None,
+                                    protein_groups: None,
+                                };
+                                state.progress.status = format!("Failed: {e}");
+                                state.progress.progress_pct = None;
+                                state.progress.elapsed_sec = duration;
+                                Some(entry)
+                            }
+                        };
+                        (true, entry)
+                    }
                 } else {
                     (false, None)
                 }

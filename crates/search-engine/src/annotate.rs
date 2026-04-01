@@ -312,11 +312,10 @@ pub fn annotate_spectrum(
     let mut b_ions_out: Vec<TheoreticalIon> = Vec::with_capacity(b_ion_mzs.len());
     for (i, &theo_mz) in b_ion_mzs.iter().enumerate() {
         let ion_number = (i + 1) as u32;
-        let (matched, best_idx) = find_best_match(theo_mz, exp_mz, fragment_tolerance);
+        let (_, best_idx) = find_best_match(theo_mz, exp_mz, fragment_tolerance);
 
-        if matched {
+        if let Some(idx) = best_idx {
             matched_count += 1;
-            let idx = best_idx.expect("matched implies Some index");
             let obs_mz = exp_mz[idx];
             let dppm = (obs_mz - theo_mz) / theo_mz * 1e6;
 
@@ -360,11 +359,10 @@ pub fn annotate_spectrum(
     let mut y_ions_out: Vec<TheoreticalIon> = Vec::with_capacity(y_ion_mzs.len());
     for (i, &theo_mz) in y_ion_mzs.iter().enumerate() {
         let ion_number = (i + 1) as u32;
-        let (matched, best_idx) = find_best_match(theo_mz, exp_mz, fragment_tolerance);
+        let (_, best_idx) = find_best_match(theo_mz, exp_mz, fragment_tolerance);
 
-        if matched {
+        if let Some(idx) = best_idx {
             matched_count += 1;
-            let idx = best_idx.expect("matched implies Some index");
             let obs_mz = exp_mz[idx];
             let dppm = (obs_mz - theo_mz) / theo_mz * 1e6;
 
