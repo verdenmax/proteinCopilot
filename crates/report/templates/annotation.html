@@ -160,17 +160,17 @@
     var cellW = 44;
     var totalW = n * cellW + 40;
     var seqY = 70;
-    // b-bracket: short vertical stub above sequence + horizontal right
-    var bHorizY = seqY - 20;       // horizontal bar height
-    var bVertTop = bHorizY;        // vertical top = horizontal bar
-    var bVertBot = seqY - 6;       // vertical bottom = just above letters
-    var bLabelY = bHorizY - 5;     // label above horizontal
-    // y-bracket: short vertical stub below sequence + horizontal left
-    var yHorizY = seqY + 20;       // horizontal bar height
-    var yVertTop = seqY + 10;      // vertical top = just below letters
-    var yVertBot = yHorizY;        // vertical bottom = horizontal bar
-    var yLabelY = yHorizY + 16;    // label below horizontal
-    var svgH = yLabelY + 10;
+    // y-bracket (above): C-term fragment, horizontal RIGHT over right residue
+    var yHorizY = seqY - 20;
+    var yVertTop = yHorizY;
+    var yVertBot = seqY - 6;
+    var yLabelY = yHorizY - 5;
+    // b-bracket (below): N-term fragment, horizontal LEFT over left residue
+    var bHorizY = seqY + 20;
+    var bVertTop = seqY + 10;
+    var bVertBot = bHorizY;
+    var bLabelY = bHorizY + 16;
+    var svgH = bLabelY + 10;
     var xOff = 20;
 
     var covSvg = svgEl("svg", {
@@ -212,61 +212,53 @@
     // Draw brackets at each cleavage position
     for (var ci2 = 0; ci2 < n - 1; ci2++) {
       var cleavX = xOff + (ci2 + 1) * cellW;
-      var rightCenterX = cleavX + cellW / 2;  // center of right residue (for b-ion)
-      var leftCenterX = cleavX - cellW / 2;   // center of left residue (for y-ion)
+      var rightCenterX = cleavX + cellW / 2;  // center of right residue
+      var leftCenterX = cleavX - cellW / 2;   // center of left residue
 
       var bColor = bMatched[ci2] ? "#d63031" : "#e0e0e0";
       var bStroke = bMatched[ci2] ? 2.5 : 1.2;
       var yColor = yMatched[ci2] ? "#0984e3" : "#e0e0e0";
       var yStroke = yMatched[ci2] ? 2.5 : 1.2;
 
-      // b-ion: short vertical stub (above sequence) at cleavage x
-      covSvg.appendChild(svgEl("line", {
-        x1: cleavX, y1: bVertTop, x2: cleavX, y2: bVertBot,
-        stroke: bColor, "stroke-width": bStroke, "stroke-linecap": "round",
-        "class": "cov-bracket", "data-ion": "b" + bNumbers[ci2]
-      }));
-
-      // b-ion horizontal: from cleavage RIGHT over next residue
-      covSvg.appendChild(svgEl("line", {
-        x1: cleavX, y1: bHorizY, x2: rightCenterX, y2: bHorizY,
-        stroke: bColor, "stroke-width": bStroke, "stroke-linecap": "round",
-        "class": "cov-bracket", "data-ion": "b" + bNumbers[ci2]
-      }));
-
-      // b-ion label
-      var bLbl = svgEl("text", {
-        x: cleavX + 2, y: bLabelY,
-        "font-size": "10", "font-weight": "600",
-        fill: bColor, "text-anchor": "start",
-        "class": "cov-bracket", "data-ion": "b" + bNumbers[ci2]
-      });
-      bLbl.textContent = "b" + subscript(bNumbers[ci2]);
-      covSvg.appendChild(bLbl);
-
-      // y-ion: short vertical stub (below sequence) at cleavage x
+      // y-ion (ABOVE): C-term fragment — stub down + horizontal RIGHT
       covSvg.appendChild(svgEl("line", {
         x1: cleavX, y1: yVertTop, x2: cleavX, y2: yVertBot,
         stroke: yColor, "stroke-width": yStroke, "stroke-linecap": "round",
         "class": "cov-bracket", "data-ion": "y" + yNumbers[ci2]
       }));
-
-      // y-ion horizontal: from cleavage LEFT over previous residue
       covSvg.appendChild(svgEl("line", {
-        x1: cleavX, y1: yHorizY, x2: leftCenterX, y2: yHorizY,
+        x1: cleavX, y1: yHorizY, x2: rightCenterX, y2: yHorizY,
         stroke: yColor, "stroke-width": yStroke, "stroke-linecap": "round",
         "class": "cov-bracket", "data-ion": "y" + yNumbers[ci2]
       }));
-
-      // y-ion label
       var yLbl = svgEl("text", {
-        x: cleavX - 2, y: yLabelY,
+        x: cleavX + 2, y: yLabelY,
         "font-size": "10", "font-weight": "600",
-        fill: yColor, "text-anchor": "end",
+        fill: yColor, "text-anchor": "start",
         "class": "cov-bracket", "data-ion": "y" + yNumbers[ci2]
       });
       yLbl.textContent = "y" + subscript(yNumbers[ci2]);
       covSvg.appendChild(yLbl);
+
+      // b-ion (BELOW): N-term fragment — stub up + horizontal LEFT
+      covSvg.appendChild(svgEl("line", {
+        x1: cleavX, y1: bVertTop, x2: cleavX, y2: bVertBot,
+        stroke: bColor, "stroke-width": bStroke, "stroke-linecap": "round",
+        "class": "cov-bracket", "data-ion": "b" + bNumbers[ci2]
+      }));
+      covSvg.appendChild(svgEl("line", {
+        x1: cleavX, y1: bHorizY, x2: leftCenterX, y2: bHorizY,
+        stroke: bColor, "stroke-width": bStroke, "stroke-linecap": "round",
+        "class": "cov-bracket", "data-ion": "b" + bNumbers[ci2]
+      }));
+      var bLbl = svgEl("text", {
+        x: cleavX - 2, y: bLabelY,
+        "font-size": "10", "font-weight": "600",
+        fill: bColor, "text-anchor": "end",
+        "class": "cov-bracket", "data-ion": "b" + bNumbers[ci2]
+      });
+      bLbl.textContent = "b" + subscript(bNumbers[ci2]);
+      covSvg.appendChild(bLbl);
     }
 
     panel.appendChild(covSvg);
