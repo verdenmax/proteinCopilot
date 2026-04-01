@@ -1009,10 +1009,9 @@ impl ProteinCopilotServer {
         .map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, e))?;
 
         // Render HTML
-        let out_path = input
-            .output_path
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from(format!("annotation_scan{}.html", input.scan_number)));
+        let out_path = input.output_path.map(PathBuf::from).unwrap_or_else(|| {
+            PathBuf::from(format!("output/annotation_scan{}.html", input.scan_number))
+        });
 
         ReportGenerator::render_annotation(&annotation, &out_path)
             .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;

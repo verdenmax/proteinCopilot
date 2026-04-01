@@ -6,9 +6,9 @@
 <title>Spectrum Annotation — ProteinCopilot</title>
 <style>
   :root {
-    --b-color: #e74c3c;
-    --y-color: #3498db;
-    --unmatched: #bdc3c7;
+    --b-color: #d63031;
+    --y-color: #0984e3;
+    --unmatched: #e0e0e0;
     --bg: #f8f9fa;
     --card-bg: #ffffff;
     --text: #2c3e50;
@@ -31,6 +31,13 @@
   .info-label { font-size: 11px; text-transform: uppercase; letter-spacing: .4px; color: var(--text-muted); margin-bottom: 2px; }
   .info-value { font-size: 14px; font-weight: 500; }
   .info-value.peptide { font-family: 'Courier New', Courier, monospace; font-size: 16px; letter-spacing: 1px; font-weight: 700; }
+  .score-badge {
+    display: inline-block; padding: 2px 10px; border-radius: 10px;
+    color: #fff; font-weight: 700; font-size: 13px;
+  }
+  .score-badge.good { background: #27ae60; }
+  .score-badge.mid  { background: #f39c12; }
+  .score-badge.low  { background: #e74c3c; }
 
   /* ── Coverage Diagram ────────────────────────────────── */
   .coverage-card {
@@ -46,10 +53,18 @@
   .cov-cell.matched-y { color: var(--y-color); }
   .cov-cell.unmatched { color: var(--unmatched); }
   .cov-cell.spacer { width: 10px; }
+  .cov-pill {
+    display: inline-block; padding: 1px 5px; border-radius: 6px; font-size: 10px; font-weight: 700;
+  }
+  .cov-pill.b-pill { background: rgba(214,48,49,.12); color: var(--b-color); }
+  .cov-pill.y-pill { background: rgba(9,132,227,.12); color: var(--y-color); }
   .seq-row { display: flex; align-items: center; height: 30px; }
   .seq-cell { width: 38px; text-align: center; font-size: 16px; font-family: 'Courier New', Courier, monospace; font-weight: 700; }
   .seq-sep { width: 10px; display: flex; justify-content: center; }
   .seq-sep .cleavage { width: 1px; height: 30px; background: var(--border); }
+  .seq-sep .cleavage.both-matched { width: 3px; background: linear-gradient(to right, var(--b-color), var(--y-color)); border-radius: 1px; }
+  .seq-sep .cleavage.b-matched { width: 2px; background: var(--b-color); border-radius: 1px; }
+  .seq-sep .cleavage.y-matched { width: 2px; background: var(--y-color); border-radius: 1px; }
 
   /* ── Spectrum Plot ───────────────────────────────────── */
   .spectrum-card {
@@ -62,21 +77,29 @@
   .axis text { font-size: 11px; fill: var(--text-muted); }
   .axis line, .axis path { stroke: var(--border); }
   .axis-label { font-size: 12px; fill: var(--text); font-weight: 500; }
-  .peak-label { font-size: 10px; font-weight: 600; }
-  .peak-line { stroke-width: 1.5; }
+  .peak-label { font-size: 12px; font-weight: 700; }
+  .peak-line { stroke-width: 2.5; }
   .peak-line.unmatched { stroke: var(--unmatched); stroke-width: 1; }
   .peak-line.b-ion { stroke: var(--b-color); }
   .peak-line.y-ion { stroke: var(--y-color); }
-  .peak-hitbox { stroke: transparent; stroke-width: 6; fill: none; cursor: pointer; }
+  .peak-hitbox { stroke: transparent; stroke-width: 8; fill: none; cursor: pointer; }
 
   /* ── Tooltip ─────────────────────────────────────────── */
   #tooltip {
     position: fixed; pointer-events: none; display: none;
-    background: rgba(44,62,80,.92); color: #fff; padding: 8px 12px;
-    border-radius: 5px; font-size: 12px; line-height: 1.5;
+    background: rgba(44,62,80,.95); color: #fff; padding: 10px 14px;
+    border-radius: 6px; font-size: 12px; line-height: 1.6;
     white-space: nowrap; z-index: 1000;
-    box-shadow: 0 2px 8px rgba(0,0,0,.25);
+    box-shadow: 0 4px 12px rgba(0,0,0,.3);
   }
+  #tooltip::after {
+    content: ''; position: absolute; top: 100%; left: 16px;
+    border: 6px solid transparent; border-top-color: rgba(44,62,80,.95);
+  }
+  .tip-row { display: flex; justify-content: space-between; gap: 16px; }
+  .tip-label { color: #95a5a6; font-size: 11px; }
+  .tip-val { font-weight: 600; text-align: right; }
+  .tip-sep { border: none; border-top: 1px solid rgba(255,255,255,.15); margin: 4px 0; }
 </style>
 </head>
 <body>
@@ -112,6 +135,11 @@
     if (attrs) Object.keys(attrs).forEach(function (k) { e.setAttribute(k, attrs[k]); });
     return e;
   }
+  function ionSub(type, num) {
+    var span = document.createElement("span");
+    span.innerHTML = type + "<sub>" + num + "</sub>";
+    return span;
+  }
 
   /* ── 1. Info Panel ────────────────────────────────────── */
   (function renderInfo() {
@@ -121,16 +149,27 @@
     function add(label, value, cls) {
       var item = el("div", { "class": "info-item" });
       item.appendChild(el("span", { "class": "info-label" }, label));
-      var v = el("span", { "class": "info-value" + (cls ? " " + cls : "") }, value);
+      var v = el("span", { "class": "info-value" + (cls ? " " + cls : "") });
+      if (typeof value === "string") { v.textContent = value; }
+      else { v.appendChild(value); }
       item.appendChild(v);
       grid.appendChild(item);
     }
+
+    // Score badge with color
+    var scoreVal = D.score;
+    var badgeCls = "score-badge " + (scoreVal > 0.5 ? "good" : scoreVal >= 0.2 ? "mid" : "low");
+    var badge = el("span", { "class": badgeCls }, fmt(scoreVal, 3));
+    var scoreWrap = document.createElement("span");
+    scoreWrap.appendChild(badge);
+    scoreWrap.appendChild(document.createTextNode("  (" + D.matched_ions + "/" + D.total_ions + " ions)"));
+
     add("Scan", String(D.scan_number));
     add("RT", fmt(D.retention_time_sec / 60, 2) + " min");
     add("Charge", D.charge + "+");
     add("Peptide", D.peptide_sequence, "peptide");
-    add("Protein(s)", D.protein_accessions.join(", ") || "—");
-    add("Score", fmt(D.score, 3) + "  (" + D.matched_ions + "/" + D.total_ions + " ions)");
+    add("Protein(s)", D.protein_accessions.join(", ") || "\u2014");
+    add("Score", scoreWrap);
     add("Precursor m/z", fmt(D.precursor_mz, 4));
     add("\u0394 mass", fmt(D.delta_mass_ppm, 2) + " ppm");
     panel.appendChild(grid);
@@ -144,24 +183,44 @@
     var seq = D.peptide_sequence;
     var n = seq.length;
 
-    // b-ion row (n-1 ions, between residues)
+    // Build lookup: is b_i or y_i matched at cleavage position i (0-based, between residue i and i+1)
+    var bMatched = [];
+    var yMatched = [];
+    for (var ci = 0; ci < n - 1; ci++) {
+      var bIon = D.b_ions[ci];
+      bMatched[ci] = !!(bIon && bIon.matched);
+      var yIon = D.y_ions[n - 2 - ci];
+      yMatched[ci] = !!(yIon && yIon.matched);
+    }
+
+    // b-ion row
     var bRow = el("div", { "class": "cov-row" });
-    bRow.appendChild(el("div", { "class": "cov-cell" })); // leading spacer for first residue
+    bRow.appendChild(el("div", { "class": "cov-cell" }));
     for (var i = 0; i < n - 1; i++) {
-      var bIon = D.b_ions[i];
-      var bClass = "cov-cell " + (bIon && bIon.matched ? "matched-b" : "unmatched");
+      var bI = D.b_ions[i];
       bRow.appendChild(el("div", { "class": "cov-cell spacer" }));
-      bRow.appendChild(el("div", { "class": bClass }, bIon ? "b" + bIon.number : ""));
+      var bCell = el("div", { "class": "cov-cell " + (bMatched[i] ? "matched-b" : "unmatched") });
+      if (bI && bMatched[i]) {
+        var bp = el("span", { "class": "cov-pill b-pill" }, "b" + bI.number);
+        bCell.appendChild(bp);
+      } else if (bI) {
+        bCell.textContent = "b" + bI.number;
+      }
+      bRow.appendChild(bCell);
     }
     wrap.appendChild(bRow);
 
-    // sequence row
+    // sequence row with cleavage coloring
     var sRow = el("div", { "class": "seq-row" });
     for (var j = 0; j < n; j++) {
       sRow.appendChild(el("div", { "class": "seq-cell" }, seq[j]));
       if (j < n - 1) {
         var sep = el("div", { "class": "seq-sep" });
-        sep.appendChild(el("div", { "class": "cleavage" }));
+        var clvCls = "cleavage";
+        if (bMatched[j] && yMatched[j]) { clvCls += " both-matched"; }
+        else if (bMatched[j]) { clvCls += " b-matched"; }
+        else if (yMatched[j]) { clvCls += " y-matched"; }
+        sep.appendChild(el("div", { "class": clvCls }));
         sRow.appendChild(sep);
       }
     }
@@ -171,10 +230,16 @@
     var yRow = el("div", { "class": "cov-row" });
     yRow.appendChild(el("div", { "class": "cov-cell" }));
     for (var k = 0; k < n - 1; k++) {
-      var yIon = D.y_ions[n - 2 - k]; // y-ions go in reverse
-      var yClass = "cov-cell " + (yIon && yIon.matched ? "matched-y" : "unmatched");
+      var yI = D.y_ions[n - 2 - k];
       yRow.appendChild(el("div", { "class": "cov-cell spacer" }));
-      yRow.appendChild(el("div", { "class": yClass }, yIon ? "y" + yIon.number : ""));
+      var yCell = el("div", { "class": "cov-cell " + (yMatched[k] ? "matched-y" : "unmatched") });
+      if (yI && yMatched[k]) {
+        var yp = el("span", { "class": "cov-pill y-pill" }, "y" + yI.number);
+        yCell.appendChild(yp);
+      } else if (yI) {
+        yCell.textContent = "y" + yI.number;
+      }
+      yRow.appendChild(yCell);
     }
     wrap.appendChild(yRow);
 
@@ -186,12 +251,11 @@
     var container = document.getElementById("spectrum-container");
     var tooltip = document.getElementById("tooltip");
 
-    var W = 900, H = 420;
-    var margin = { top: 30, right: 30, bottom: 50, left: 60 };
+    var W = 1200, H = 450;
+    var margin = { top: 40, right: 30, bottom: 50, left: 60 };
     var pw = W - margin.left - margin.right;
     var ph = H - margin.top - margin.bottom;
 
-    // data ranges
     var peaks = D.peaks;
     if (!peaks.length) return;
     var maxMz = 0, maxInt = 0;
@@ -206,14 +270,18 @@
     function xScale(v) { return margin.left + (v - mzMin) / (mzMax - mzMin) * pw; }
     function yScale(v) { return margin.top + ph - (v / intMax) * ph; }
 
-    var svg = svgEl("svg", { width: W, height: H, viewBox: "0 0 " + W + " " + H, style: "max-width:100%;height:auto;" });
+    var svg = svgEl("svg", {
+      width: "100%", height: "auto",
+      viewBox: "0 0 " + W + " " + H,
+      preserveAspectRatio: "xMidYMid meet"
+    });
 
     // axes group
     var gAxis = svgEl("g", { "class": "axis" });
 
     // x-axis
     gAxis.appendChild(svgEl("line", { x1: margin.left, y1: margin.top + ph, x2: margin.left + pw, y2: margin.top + ph, stroke: "#dee2e6" }));
-    var xTicks = niceRange(mzMin, mzMax, 8);
+    var xTicks = niceRange(mzMin, mzMax, 10);
     for (var xi = 0; xi < xTicks.length; xi++) {
       var tx = xScale(xTicks[xi]);
       gAxis.appendChild(svgEl("line", { x1: tx, y1: margin.top + ph, x2: tx, y2: margin.top + ph + 5, stroke: "#dee2e6" }));
@@ -236,11 +304,22 @@
       yl.textContent = pct + "%";
       gAxis.appendChild(yl);
     }
-    var yLabel = svgEl("text", { x: 14, y: margin.top + ph / 2, "text-anchor": "middle", "class": "axis-label", transform: "rotate(-90,14," + (margin.top + ph / 2) + ")" });
-    yLabel.textContent = "Relative Intensity";
-    gAxis.appendChild(yLabel);
+    var yLabelEl = svgEl("text", { x: 14, y: margin.top + ph / 2, "text-anchor": "middle", "class": "axis-label", transform: "rotate(-90,14," + (margin.top + ph / 2) + ")" });
+    yLabelEl.textContent = "Relative Intensity";
+    gAxis.appendChild(yLabelEl);
 
     svg.appendChild(gAxis);
+
+    // Collect annotated peak positions for overlap detection
+    var labelPositions = [];
+    var annotatedPeaks = [];
+    for (var ap = 0; ap < peaks.length; ap++) {
+      if (peaks[ap].annotation) {
+        annotatedPeaks.push({ idx: ap, x: xScale(peaks[ap].mz), y: yScale(peaks[ap].intensity) });
+      }
+    }
+    // Sort by x for overlap detection
+    annotatedPeaks.sort(function (a, b) { return a.x - b.x; });
 
     // peaks
     var gPeaks = svgEl("g");
@@ -252,40 +331,62 @@
       var ann = pk.annotation;
       var cls, col;
       if (ann) {
-        if (ann.ion_type === "B") { cls = "b-ion"; col = "#e74c3c"; }
-        else { cls = "y-ion"; col = "#3498db"; }
+        if (ann.ion_type === "B") { cls = "b-ion"; col = "#d63031"; }
+        else { cls = "y-ion"; col = "#0984e3"; }
       } else {
-        cls = "unmatched"; col = "#bdc3c7";
+        cls = "unmatched"; col = "#e0e0e0";
       }
 
       // peak line
       gPeaks.appendChild(svgEl("line", { x1: x, y1: y1, x2: x, y2: y2, "class": "peak-line " + cls }));
 
-      // label for annotated peaks
+      // triangle marker and label for annotated peaks
       if (ann) {
-        var label = (ann.ion_type === "B" ? "b" : "y") + ann.ion_number;
-        var lt = svgEl("text", { x: x, y: y2 - 5, "text-anchor": "middle", fill: col, "class": "peak-label", transform: "rotate(-45," + x + "," + (y2 - 5) + ")" });
-        lt.textContent = label;
+        // Triangle marker (▼) at peak top
+        var triSize = 3;
+        var triPoints = (x - triSize) + "," + y2 + " " + (x + triSize) + "," + y2 + " " + x + "," + (y2 + triSize * 2);
+        gPeaks.appendChild(svgEl("polygon", { points: triPoints, fill: col }));
+
+        // Determine label offset — stagger to avoid overlap
+        var labelText = (ann.ion_type === "B" ? "b" : "y") + ann.ion_number;
+        var labelY = y2 - 6;
+        // Check if too close to another label: alternate offset
+        var stagger = false;
+        for (var li = 0; li < labelPositions.length; li++) {
+          if (Math.abs(labelPositions[li].x - x) < 30 && Math.abs(labelPositions[li].y - labelY) < 14) {
+            stagger = true;
+            break;
+          }
+        }
+        if (stagger) { labelY = y2 - 18; }
+        labelPositions.push({ x: x, y: labelY });
+
+        // Horizontal label (no rotation)
+        var lt = svgEl("text", { x: x, y: labelY, "text-anchor": "middle", fill: col, "class": "peak-label" });
+        lt.textContent = labelText;
         gPeaks.appendChild(lt);
       }
 
       // invisible hitbox for tooltip
       (function (peak) {
         var hitbox = svgEl("line", { x1: x, y1: y1, x2: x, y2: y2, "class": "peak-hitbox" });
-        hitbox.addEventListener("mouseenter", function (ev) {
+        hitbox.addEventListener("mouseenter", function () {
           var relInt = (peak.intensity / intMax * 100);
-          var lines = ["m/z: " + fmt(peak.mz, 4), "Intensity: " + fmt(peak.intensity, 1) + "  (" + fmt(relInt, 1) + "%)"];
+          var html = "<div class=\"tip-row\"><span class=\"tip-label\">m/z:</span><span class=\"tip-val\">" + fmt(peak.mz, 4) + "</span></div>";
+          html += "<div class=\"tip-row\"><span class=\"tip-label\">Intensity:</span><span class=\"tip-val\">" + fmt(peak.intensity, 1) + " (" + fmt(relInt, 1) + "%)</span></div>";
           if (peak.annotation) {
+            html += "<hr class=\"tip-sep\">";
             var a = peak.annotation;
-            lines.push("Ion: " + (a.ion_type === "B" ? "b" : "y") + a.ion_number);
-            lines.push("\u0394 ppm: " + fmt(a.delta_ppm, 2));
+            var ionLabel = (a.ion_type === "B" ? "b" : "y") + "<sub>" + a.ion_number + "</sub>";
+            html += "<div class=\"tip-row\"><span class=\"tip-label\">Ion:</span><span class=\"tip-val\">" + ionLabel + "</span></div>";
+            html += "<div class=\"tip-row\"><span class=\"tip-label\">\u0394 ppm:</span><span class=\"tip-val\">" + fmt(a.delta_ppm, 2) + "</span></div>";
           }
-          tooltip.innerHTML = lines.join("<br>");
+          tooltip.innerHTML = html;
           tooltip.style.display = "block";
         });
         hitbox.addEventListener("mousemove", function (ev) {
           tooltip.style.left = (ev.clientX + 14) + "px";
-          tooltip.style.top = (ev.clientY - 10) + "px";
+          tooltip.style.top = (ev.clientY - 28) + "px";
         });
         hitbox.addEventListener("mouseleave", function () {
           tooltip.style.display = "none";
