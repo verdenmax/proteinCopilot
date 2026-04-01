@@ -43,7 +43,7 @@ pub struct PeptideMatch {
 // ---------------------------------------------------------------------------
 
 /// Checks if observed and theoretical m/z are within tolerance.
-fn within_tolerance(observed: f64, theoretical: f64, tolerance: &MassTolerance) -> bool {
+pub fn within_tolerance(observed: f64, theoretical: f64, tolerance: &MassTolerance) -> bool {
     match tolerance.unit {
         ToleranceUnit::Ppm => {
             let ppm_diff = ((observed - theoretical) / theoretical).abs() * 1e6;
@@ -63,7 +63,7 @@ fn calc_delta_ppm(observed: f64, theoretical: f64) -> f64 {
 // ---------------------------------------------------------------------------
 
 /// Generates theoretical singly-charged b-ion m/z values for a peptide.
-fn generate_b_ions(sequence: &str) -> Vec<f64> {
+pub fn generate_b_ions(sequence: &str) -> Vec<f64> {
     let chars: Vec<char> = sequence.chars().collect();
     let mut ions = Vec::with_capacity(chars.len().saturating_sub(1));
     let mut cumulative = 0.0;
@@ -83,7 +83,7 @@ fn generate_b_ions(sequence: &str) -> Vec<f64> {
 }
 
 /// Generates theoretical singly-charged y-ion m/z values for a peptide.
-fn generate_y_ions(sequence: &str) -> Vec<f64> {
+pub fn generate_y_ions(sequence: &str) -> Vec<f64> {
     let chars: Vec<char> = sequence.chars().collect();
     let mut ions = Vec::with_capacity(chars.len().saturating_sub(1));
     let mut cumulative = WATER_MASS;
