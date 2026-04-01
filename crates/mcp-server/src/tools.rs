@@ -182,6 +182,11 @@ struct ListSearchesInput {
     limit: Option<u32>,
 }
 
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct ListSearchesResponse {
+    searches: Vec<crate::history::SearchHistoryEntry>,
+}
+
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct AnnotateSpectrumInput {
     /// Run ID — use to annotate an existing PSM from a search result.
@@ -836,7 +841,7 @@ impl ProteinCopilotServer {
     fn list_searches(
         &self,
         Parameters(input): Parameters<ListSearchesInput>,
-    ) -> Json<Vec<crate::history::SearchHistoryEntry>> {
+    ) -> Json<ListSearchesResponse> {
         let limit = input.limit.unwrap_or(20) as usize;
         let mut entries = crate::history::load_all();
 
@@ -888,7 +893,7 @@ impl ProteinCopilotServer {
         }
         entries.sort_by(|a, b| b.created_at.cmp(&a.created_at));
         entries.truncate(limit);
-        Json(entries)
+        Json(ListSearchesResponse { searches: entries })
     }
 
     /// Annotate a single spectrum with peptide fragment ion matching.
