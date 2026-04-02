@@ -22,7 +22,10 @@ use protein_copilot_core::ai_decision::AiDecision;
 use protein_copilot_core::engine::{HealthStatus, SearchEngineAdapter};
 use protein_copilot_core::search_params::SearchParams;
 use protein_copilot_core::search_result::{SearchResult, SearchResultSummary};
-use protein_copilot_core::spectrum::{Spectrum, SpectrumSummary};
+use protein_copilot_core::spectrum::{AcquisitionMode, Spectrum, SpectrumSummary};
+use protein_copilot_dia_extraction::{
+    extract_dia_precursors as run_dia_extraction, DiaExtractionConfig, IsotopePatternExtractor,
+};
 use protein_copilot_param_recommend::{ParamRecommender, SearchPreset, UserHints};
 use protein_copilot_report::ReportGenerator;
 use protein_copilot_search_engine::{SearchProgress, SimpleSearchEngine};
@@ -255,6 +258,38 @@ struct AnnotateResult {
     message: String,
 }
 
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct ExtractDiaPrecursorsInput {
+    /// Path to the spectrum file (.mzML)
+    file_path: String,
+    /// Output mode: "multi" (multiple precursors per spectrum) or "pseudo" (one precursor per spectrum). Default: "pseudo"
+    #[serde(default = "default_output_mode")]
+    output_mode: String,
+    /// Minimum charge state to consider (default: 2)
+    min_charge: Option<i32>,
+    /// Maximum charge state to consider (default: 5)
+    max_charge: Option<i32>,
+    /// Override acquisition mode detection: "DDA" or "DIA". If not set, auto-detects.
+    acquisition_mode: Option<String>,
+}
+
+fn default_output_mode() -> String {
+    "pseudo".to_string()
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct DiaExtractionOutput {
+    detected_mode: String,
+    ms1_count: u32,
+    ms2_count: u32,
+    total_precursors_extracted: u32,
+    avg_precursors_per_ms2: f64,
+    charge_distribution: std::collections::HashMap<i32, u32>,
+    output_spectra_count: u32,
+    run_id: String,
+    message: String,
+}
+
 /// Presets list response
 #[derive(Debug, Serialize, schemars::JsonSchema)]
 struct PresetsResponse {
@@ -282,6 +317,9 @@ struct RunState {
 
 /// Maximum number of cached runs before eviction.
 const MAX_CACHE_SIZE: usize = 100;
+
+/// Maximum number of cached DIA extraction runs before eviction.
+const MAX_DIA_CACHE_SIZE: usize = 10;
 
 /// Ordered run cache — insertion order tracked for FIFO eviction.
 struct OrderedRunCache {
@@ -370,6 +408,8 @@ pub struct ProteinCopilotServer {
     registry: protein_copilot_search_engine::EngineRegistry,
     /// Unified cache for all search runs (progress + result in one lock).
     run_cache: RunCache,
+    /// Cache of DIA-extracted spectra, keyed by run_id from extract_dia_precursors.
+    dia_cache: Arc<Mutex<HashMap<Uuid, Vec<Spectrum>>>>,
 }
 
 impl ProteinCopilotServer {
@@ -380,6 +420,7 @@ impl ProteinCopilotServer {
             tool_router: Self::tool_router(),
             registry,
             run_cache: Arc::new(Mutex::new(OrderedRunCache::new())),
+            dia_cache: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -1041,5 +1082,85 @@ impl ProteinCopilotServer {
                 annotation.score,
             ),
         }))
+    }
+
+    /// Extract candidate precursor ions from DIA mass spectrometry data.
+    #[rmcp::tool(
+        name = "extract_dia_precursors",
+        description = "Extract candidate precursor ions from DIA mass spectrometry data. Reads mzML file, detects DIA mode from isolation window widths, extracts precursor candidates from MS1 isotope patterns, and caches enhanced spectra for use with run_search. Returns extraction statistics."
+    )]
+    fn extract_dia_precursors(
+        &self,
+        Parameters(input): Parameters<ExtractDiaPrecursorsInput>,
+    ) -> Result<Json<DiaExtractionOutput>, ErrorData> {
+        let path = Path::new(&input.file_path);
+        let info = protein_copilot_spectrum_io::detect_format(path)
+            .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
+        let reader = protein_copilot_spectrum_io::create_reader(&info);
+        let spectra = reader
+            .read_all(path)
+            .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
+
+        // Configure extractor
+        let mut extractor = IsotopePatternExtractor::default();
+        if let Some(min_c) = input.min_charge {
+            extractor.min_charge = min_c;
+        }
+        if let Some(max_c) = input.max_charge {
+            extractor.max_charge = max_c;
+        }
+
+        // Configure extraction
+        let acq_mode = input.acquisition_mode.as_deref().and_then(|m| match m {
+            "DDA" | "dda" => Some(AcquisitionMode::DDA),
+            "DIA" | "dia" => Some(AcquisitionMode::DIA),
+            _ => None,
+        });
+        let config = DiaExtractionConfig {
+            acquisition_mode: acq_mode,
+            ..DiaExtractionConfig::default()
+        };
+
+        let result = run_dia_extraction(&spectra, &extractor, &config)
+            .map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, e.to_string()))?;
+
+        let output_spectra = if input.output_mode == "multi" {
+            result.enhanced_spectra.clone()
+        } else {
+            result.expand_to_pseudo_spectra()
+        };
+
+        let output_count = output_spectra.len() as u32;
+        let run_id = Uuid::new_v4();
+
+        // Cache for future use
+        let mut cache = self.dia_cache.lock()
+            .map_err(|_| mcp_err(ErrorCode::INTERNAL_ERROR, "DIA cache lock is poisoned"))?;
+        if cache.len() >= MAX_DIA_CACHE_SIZE {
+            if let Some(&oldest_id) = cache.keys().next() {
+                cache.remove(&oldest_id);
+            }
+        }
+        cache.insert(run_id, output_spectra);
+
+        let output = DiaExtractionOutput {
+            detected_mode: format!("{}", result.detected_mode),
+            ms1_count: result.stats.ms1_count,
+            ms2_count: result.stats.ms2_count,
+            total_precursors_extracted: result.stats.total_precursors_extracted,
+            avg_precursors_per_ms2: result.stats.avg_precursors_per_ms2,
+            charge_distribution: result.stats.charge_distribution,
+            output_spectra_count: output_count,
+            run_id: run_id.to_string(),
+            message: format!(
+                "DIA extraction complete. {} precursors extracted from {} MS2 spectra. \
+                 Results cached as run_id '{}'.",
+                result.stats.total_precursors_extracted,
+                result.stats.ms2_count,
+                run_id
+            ),
+        };
+
+        Ok(Json(output))
     }
 }
