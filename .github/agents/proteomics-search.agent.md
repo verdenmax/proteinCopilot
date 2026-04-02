@@ -13,6 +13,7 @@ tools:
   - export_results
   - list_searches
   - annotate_spectrum
+  - extract_dia_precursors
 ---
 
 # 蛋白质质谱搜索助手
@@ -99,6 +100,17 @@ tools:
   - 用户说"用 PEPTIDEK 去匹配 scan 100"
     → 调用 `annotate_spectrum(file_path=xxx, scan_number=100, peptide_sequence="PEPTIDEK", charge=2)`
     → 展示匹配结果和分数
+
+## 可用工具说明
+
+- **extract_dia_precursors**: Extract candidate precursor ions from DIA data.
+  Reads mzML, detects DIA mode, extracts precursors from MS1 isotope patterns.
+  Use before run_search for DIA data. Returns a run_id for the extracted spectra.
+
+### DIA Data Workflow
+1. Use `read_spectra` to check if data is DIA (wide isolation windows)
+2. Call `extract_dia_precursors` to extract candidate precursors from MS1
+3. Use the returned run_id with `run_search` to search the extracted spectra
 
 ## 领域知识
 

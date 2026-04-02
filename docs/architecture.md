@@ -128,6 +128,7 @@ proteinCopilot/
 │   ├── param-recommend/               ← [lib] 参数推荐规则引擎
 │   ├── search-engine/                 ← [lib] 搜索引擎 adapter 层
 │   ├── report/                        ← [lib] 结果摘要与导出
+│   ├── dia-extraction/                ← [lib] DIA 前体离子提取
 │   └── mcp-server/                    ← [bin] MCP Server（组装所有 tool）
 ```
 
@@ -361,11 +362,40 @@ report/src/
 
 ---
 
-### 3.6 `mcp-server`（bin crate）— 组装层
+### 3.6 `dia-extraction`（lib crate）
+
+**职责**：从 DIA（Data-Independent Acquisition）MS1 谱图中提取候选前体离子。通过同位素模式检测识别肽段前体，将 DIA 宽隔离窗口数据转换为类 DDA 格式供搜索引擎使用。
+
+**核心组件**：
+
+- **IsotopePatternExtractor**：检测 MS1 谱图中的同位素包络模式（isotope envelope），基于 averagine 模型估计电荷态和单同位素质量
+- **MS1↔MS2 关联**：通过保留时间窗口将 MS1 提取的前体与对应 MS2 谱图关联
+- **DDA/DIA 自动检测**：根据隔离窗口宽度自动判断采集模式（窄窗口 → DDA，宽窗口 → DIA）
+
+**数据流**：
+```text
+mzML 输入
+  → spectrum-io 读取所有谱图
+  → 分离 MS1 / MS2
+  → MS1 同位素模式提取 → 候选前体列表 (mz, charge, intensity)
+  → 按保留时间窗口关联 MS1 前体 → MS2 谱图
+  → 输出增强谱图：每张 MS2 携带多个候选前体
+```
+
+**集成方式**：
+- 通过 `extract_dia_precursors` MCP Tool 暴露
+- 提取结果写入缓存，返回 `run_id` 供后续 `run_search` 使用
+- 搜索引擎的 `match_spectrum_all()` 支持多前体匹配，与 DIA 提取结果无缝衔接
+
+**依赖**：`core`
+
+---
+
+### 3.7 `mcp-server`（bin crate）— 组装层
 
 **职责**：唯一的二进制入口。组装所有 library，注册为 MCP Tools，启动 stdio server。
 
-**注册的 9 个 MCP Tools**：
+**注册的 13 个 MCP Tools**：
 
 | Tool | 功能 | 对应 Library |
 |------|------|-------------|
@@ -375,15 +405,19 @@ report/src/
 | `list_presets` | 列出内置预设 | param-recommend |
 | `run_search` | 异步执行搜索（立即返回 run_id） | search-engine |
 | `get_search_status` | 查询搜索进度 | mcp-server (cache) |
+| `cancel_search` | 取消正在运行的搜索 | mcp-server (cache) |
 | `check_engine` | 检查引擎状态 | search-engine |
 | `generate_summary` | FDR 过滤统计摘要 | report |
 | `export_results` | 导出 TSV/JSON 文件 | report |
+| `list_searches` | 列出历史搜索记录 | mcp-server (cache) |
+| `annotate_spectrum` | 谱图碎片离子注释 | report |
+| `extract_dia_precursors` | DIA MS1 前体提取 | dia-extraction |
 
 **内部结构**：
 ```text
 mcp-server/src/
 ├── main.rs       ← 入口：tracing 初始化 + ProteinCopilotServer + serve(stdio)
-└── tools.rs      ← 8 个 tool 定义 + EngineRegistry 初始化
+└── tools.rs      ← 13 个 tool 定义 + EngineRegistry 初始化
                      使用 #[rmcp::tool_router] + #[rmcp::tool_handler] 宏
 ```
 
@@ -698,20 +732,20 @@ Layer 0: 用户
 ## 6. 依赖图
 
 ```text
-                    ┌──────────┐
-                    │   core   │  (serde, schemars, thiserror, uuid, chrono)
-                    └────┬─────┘
-              ┌──────────┼──────────┬──────────┐
-              ▼          ▼          ▼          ▼
-        ┌───────────┐ ┌──────────┐ ┌────────┐ ┌────────┐
-        │spectrum-io│ │  param-  │ │search- │ │ report │
-        │           │ │recommend │ │ engine │ │        │
-        │(quick-xml │ │          │ │(tokio) │ │ (csv)  │
-        │ base64    │ │          │ │        │ │        │
-        │ flate2)   │ │          │ │        │ │        │
-        └─────┬─────┘ └────┬─────┘ └───┬────┘ └───┬────┘
-              │            │           │           │
-              └────────────┴───────┬───┴───────────┘
+                          ┌──────────┐
+                          │   core   │  (serde, schemars, thiserror, uuid, chrono)
+                          └────┬─────┘
+              ┌──────────┬─────┼──────────┬──────────┐
+              ▼          ▼     ▼          ▼          ▼
+        ┌───────────┐ ┌──────────┐ ┌────────┐ ┌────────┐ ┌───────────┐
+        │spectrum-io│ │  param-  │ │search- │ │ report │ │   dia-    │
+        │           │ │recommend │ │ engine │ │        │ │extraction │
+        │(quick-xml │ │          │ │(tokio) │ │ (csv)  │ │           │
+        │ base64    │ │          │ │        │ │        │ │           │
+        │ flate2)   │ │          │ │        │ │        │ │           │
+        └─────┬─────┘ └────┬─────┘ └───┬────┘ └───┬────┘ └─────┬─────┘
+              │            │           │           │            │
+              └────────────┴───────┬───┴───────────┴────────────┘
                                    ▼
                             ┌────────────┐
                             │ mcp-server │  (rmcp, tokio, tracing, clap)
@@ -736,6 +770,7 @@ Layer 0: 用户
 | `check_engine` | search-engine | (无) | Vec\<(EngineInfo, HealthStatus)\> | 检查引擎可用性 |
 | `generate_summary` | report | search_result | SearchResultSummary | 生成结果摘要 |
 | `export_results` | report | search_result, format, output_path | ExportResult | 导出结果文件 |
+| `extract_dia_precursors` | dia-extraction | file_path, params? | RunId + ExtractionSummary | DIA 前体提取 |
 
 ---
 

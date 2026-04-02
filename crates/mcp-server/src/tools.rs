@@ -1134,7 +1134,9 @@ impl ProteinCopilotServer {
         let run_id = Uuid::new_v4();
 
         // Cache for future use
-        let mut cache = self.dia_cache.lock()
+        let mut cache = self
+            .dia_cache
+            .lock()
             .map_err(|_| mcp_err(ErrorCode::INTERNAL_ERROR, "DIA cache lock is poisoned"))?;
         if cache.len() >= MAX_DIA_CACHE_SIZE {
             if let Some(&oldest_id) = cache.keys().next() {
@@ -1155,9 +1157,7 @@ impl ProteinCopilotServer {
             message: format!(
                 "DIA extraction complete. {} precursors extracted from {} MS2 spectra. \
                  Results cached as run_id '{}'.",
-                result.stats.total_precursors_extracted,
-                result.stats.ms2_count,
-                run_id
+                result.stats.total_precursors_extracted, result.stats.ms2_count, run_id
             ),
         };
 
