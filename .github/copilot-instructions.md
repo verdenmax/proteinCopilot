@@ -290,7 +290,20 @@ proteinCopilot/
 
 ---
 
-## 8. 参考资料
+## 8. 开发流程规范
+
+### 8.1 新功能开发流程
+
+每次生成新的开发计划或新功能目标时，**必须**按照以下流程执行：
+
+1. **头脑风暴（Brainstorming）**：调用 `brainstorming` skill，使用 Visual Companion 在浏览器中展示架构图、数据流和设计方案，与用户充分讨论并确认设计。
+2. **编写设计文档**：将确认后的设计写入 `docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md`。
+3. **编写实施计划**：调用 `writing-plans` skill，基于设计文档生成详细的实施计划。
+4. **执行实施**：按计划逐步实施，每个任务完成后进行代码审查。
+
+---
+
+## 9. 参考资料
 
 - [MCP 协议规范](https://modelcontextprotocol.io/)
 - [Rust API Guidelines](https://rust-lang.github.io/api-guidelines/)
