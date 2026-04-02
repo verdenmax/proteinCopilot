@@ -18,13 +18,13 @@ use protein_copilot_core::search_params::SearchParams;
 use protein_copilot_core::search_result::{
     PeptideResult, ProteinResult, Psm, SearchResult, SearchResultSummary,
 };
-use protein_copilot_core::spectrum::Spectrum;
+use protein_copilot_core::spectrum::{MsLevel, Spectrum};
 use uuid::Uuid;
 
 use crate::digest::{digest, DigestedPeptide};
 use crate::error::SearchEngineError;
 use crate::fasta::parse_fasta;
-use crate::matching::{match_spectrum, PeptideMatch};
+use crate::matching::{match_spectrum, match_spectrum_all, PeptideMatch};
 
 /// A simplified search engine that runs entirely in-process.
 ///
@@ -121,11 +121,18 @@ impl SimpleSearchEngine {
         }
 
         // Step 4: Match each spectrum against peptide candidates
-        let total_spectra = all_spectra.len();
+        // Filter to MS2 only (MS1 survey scans have no precursors to match)
+        let ms2_spectra: Vec<&Spectrum> = all_spectra
+            .iter()
+            .filter(|s| s.ms_level == MsLevel::MS2)
+            .collect();
+        if ms2_spectra.is_empty() {
+            return Err(SearchEngineError::NoInputSpectra);
+        }
+        let total_spectra = ms2_spectra.len();
         let mut psms: Vec<Psm> = Vec::new();
 
-        for (i, spectrum) in all_spectra.iter().enumerate() {
-            // Report matching progress every 50 spectra or at the last one
+        for (i, spectrum) in ms2_spectra.iter().enumerate() {
             if i % 50 == 0 || i + 1 == total_spectra {
                 let pct = 0.15 + 0.75 * (i as f64 / total_spectra.max(1) as f64);
                 report(
@@ -133,14 +140,30 @@ impl SimpleSearchEngine {
                     pct,
                 );
             }
-            if let Some(m) = match_spectrum(
-                spectrum,
-                &all_peptides,
-                &params.precursor_tolerance,
-                &params.fragment_tolerance,
-                &params.fixed_modifications,
-            ) {
-                psms.push(build_psm(spectrum, &m, &params.fixed_modifications));
+
+            if spectrum.precursors.len() > 1 {
+                // DIA mode: multiple precursors, collect all matches
+                let matches = match_spectrum_all(
+                    spectrum,
+                    &all_peptides,
+                    &params.precursor_tolerance,
+                    &params.fragment_tolerance,
+                    &params.fixed_modifications,
+                );
+                for m in &matches {
+                    psms.push(build_psm(spectrum, m, &params.fixed_modifications));
+                }
+            } else {
+                // DDA mode: single precursor, use original function
+                if let Some(m) = match_spectrum(
+                    spectrum,
+                    &all_peptides,
+                    &params.precursor_tolerance,
+                    &params.fragment_tolerance,
+                    &params.fixed_modifications,
+                ) {
+                    psms.push(build_psm(spectrum, &m, &params.fixed_modifications));
+                }
             }
         }
 
@@ -151,7 +174,7 @@ impl SimpleSearchEngine {
 
         // Step 6: Build summary
         let duration = start.elapsed().as_secs_f64();
-        let summary = build_summary(&psms, all_spectra.len() as u64, duration);
+        let summary = build_summary(&psms, ms2_spectra.len() as u64, duration);
 
         // Step 7: Build metadata
         let engine_info = self.engine_info();
