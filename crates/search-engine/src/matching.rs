@@ -244,6 +244,93 @@ pub fn match_spectrum(
     best_match
 }
 
+/// Matches a spectrum against candidate peptides using ALL precursors.
+///
+/// Unlike [`match_spectrum`] which only uses the first precursor,
+/// this function iterates over every precursor in `spectrum.precursors`
+/// and returns the best match for each precursor that produces a hit.
+///
+/// Designed for DIA data where a spectrum can have multiple candidate
+/// precursors after extraction.
+pub fn match_spectrum_all(
+    spectrum: &Spectrum,
+    candidates: &[DigestedPeptide],
+    precursor_tolerance: &MassTolerance,
+    fragment_tolerance: &MassTolerance,
+    fixed_mods: &[Modification],
+) -> Vec<PeptideMatch> {
+    let mut results = Vec::new();
+
+    for precursor in &spectrum.precursors {
+        let observed_mz = precursor.mz;
+
+        let charge_states: Vec<i32> = if let Some(c) = precursor.charge {
+            vec![c]
+        } else {
+            vec![2, 3, 1, 4]
+        };
+
+        let mut best_match: Option<PeptideMatch> = None;
+
+        for peptide in candidates {
+            let modified_mass =
+                peptide.neutral_mass + apply_fixed_mods(&peptide.sequence, fixed_mods);
+
+            for &charge in &charge_states {
+                if charge == 0 {
+                    continue;
+                }
+                let theoretical_mz = peptide_mz(modified_mass, charge);
+
+                if within_tolerance(observed_mz, theoretical_mz, precursor_tolerance) {
+                    let b_ions = generate_b_ions(&peptide.sequence);
+                    let y_ions = generate_y_ions(&peptide.sequence);
+
+                    let total_theoretical = (b_ions.len() + y_ions.len()) as u32;
+                    if total_theoretical == 0 {
+                        continue;
+                    }
+
+                    let all_ions: Vec<f64> = b_ions.into_iter().chain(y_ions).collect();
+                    let matched =
+                        count_matched_ions(&all_ions, &spectrum.mz_array, fragment_tolerance);
+
+                    let score = matched as f64 / total_theoretical as f64;
+                    let delta_ppm = calc_delta_ppm(observed_mz, theoretical_mz);
+
+                    if !score.is_finite() || !delta_ppm.is_finite() {
+                        continue;
+                    }
+
+                    let is_better = match &best_match {
+                        None => true,
+                        Some(prev) => score > prev.score,
+                    };
+
+                    if is_better {
+                        best_match = Some(PeptideMatch {
+                            peptide: peptide.clone(),
+                            charge,
+                            observed_mz,
+                            theoretical_mz,
+                            delta_mass_ppm: delta_ppm,
+                            score,
+                            matched_ions: matched,
+                            total_ions: total_theoretical,
+                        });
+                    }
+                }
+            }
+        }
+
+        if let Some(m) = best_match {
+            results.push(m);
+        }
+    }
+
+    results
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -434,5 +521,79 @@ mod tests {
 
         assert!(result.is_some());
         assert_eq!(result.unwrap().peptide.sequence, "PEPTIDER");
+    }
+
+    #[test]
+    fn test_match_spectrum_multiple_precursors() {
+        let spectrum = Spectrum::new(
+            1,
+            MsLevel::MS2,
+            100.0,
+            vec![
+                PrecursorInfo {
+                    mz: 500.0,
+                    charge: Some(2),
+                    intensity: None,
+                    isolation_window: None,
+                    source_scan: None,
+                },
+                PrecursorInfo {
+                    mz: 600.0,
+                    charge: Some(2),
+                    intensity: None,
+                    isolation_window: None,
+                    source_scan: None,
+                },
+            ],
+            vec![175.119, 262.151, 276.134, 363.166],
+            vec![100.0, 80.0, 90.0, 70.0],
+        )
+        .unwrap();
+
+        let peptides = vec![DigestedPeptide {
+            sequence: "PEPTIDE".to_string(),
+            protein_accession: "test".to_string(),
+            neutral_mass: 1197.985448, // (600.0 - 1.007276) * 2
+        }];
+
+        let tol = MassTolerance {
+            value: 20.0,
+            unit: ToleranceUnit::Ppm,
+        };
+        let frag_tol = MassTolerance {
+            value: 0.02,
+            unit: ToleranceUnit::Da,
+        };
+
+        let results = match_spectrum_all(&spectrum, &peptides, &tol, &frag_tol, &[]);
+        assert!(!results.is_empty());
+    }
+
+    #[test]
+    fn test_match_spectrum_all_empty_precursors() {
+        let spectrum = Spectrum::new(
+            1,
+            MsLevel::MS2,
+            100.0,
+            vec![],
+            vec![100.0, 200.0],
+            vec![50.0, 50.0],
+        )
+        .unwrap();
+
+        let results = match_spectrum_all(
+            &spectrum,
+            &[],
+            &MassTolerance {
+                value: 10.0,
+                unit: ToleranceUnit::Ppm,
+            },
+            &MassTolerance {
+                value: 0.02,
+                unit: ToleranceUnit::Da,
+            },
+            &[],
+        );
+        assert!(results.is_empty());
     }
 }

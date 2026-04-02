@@ -17,6 +17,7 @@ pub mod isotope;
 pub use config::{DiaExtractionConfig, DiaExtractionResult, ExtractionStats};
 pub use error::DiaExtractionError;
 pub use extractor::PrecursorExtractor;
+pub use isotope::IsotopePatternExtractor;
 
 use protein_copilot_core::spectrum::{AcquisitionMode, Spectrum};
 use std::collections::HashMap;
