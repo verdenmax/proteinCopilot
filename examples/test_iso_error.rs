@@ -14,6 +14,7 @@ fn main() {
                 lower_offset: -1.0,
                 upper_offset: 12.5,
             }),
+            source_scan: None,
         }],
         vec![100.0],
         vec![1000.0],

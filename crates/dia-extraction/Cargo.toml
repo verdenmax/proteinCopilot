@@ -1,0 +1,16 @@
+[package]
+name = "protein-copilot-dia-extraction"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "DIA precursor extraction for ProteinCopilot — isotope pattern detection from MS1 spectra"
+
+[dependencies]
+protein-copilot-core = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+schemars = { workspace = true }
+
+[dev-dependencies]
+protein-copilot-core = { workspace = true }

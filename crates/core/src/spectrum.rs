@@ -2,6 +2,7 @@
 //!
 //! This module defines the core types for representing mass spectrometry data:
 //! - [`MsLevel`] — MS acquisition level (MS1, MS2, etc.)
+//! - [`AcquisitionMode`] — Data acquisition mode (DDA, DIA, Unknown)
 //! - [`PrecursorInfo`] — Precursor ion information
 //! - [`Spectrum`] — A single mass spectrum with peak data
 //! - [`SpectrumSummary`] — Statistical summary of a spectrum file
@@ -97,6 +98,32 @@ impl std::fmt::Display for MsLevel {
 }
 
 // ---------------------------------------------------------------------------
+// AcquisitionMode
+// ---------------------------------------------------------------------------
+
+/// Data acquisition mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[allow(clippy::upper_case_acronyms)]
+pub enum AcquisitionMode {
+    /// Data-Dependent Acquisition — narrow isolation window, single precursor.
+    DDA,
+    /// Data-Independent Acquisition — wide isolation window, multiple co-fragmented precursors.
+    DIA,
+    /// Acquisition mode could not be determined.
+    Unknown,
+}
+
+impl std::fmt::Display for AcquisitionMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AcquisitionMode::DDA => write!(f, "DDA"),
+            AcquisitionMode::DIA => write!(f, "DIA"),
+            AcquisitionMode::Unknown => write!(f, "Unknown"),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // IsolationWindow
 // ---------------------------------------------------------------------------
 
@@ -134,6 +161,9 @@ pub struct PrecursorInfo {
     pub intensity: Option<f64>,
     /// Isolation window (`None` if not recorded).
     pub isolation_window: Option<IsolationWindow>,
+    /// MS1 scan number referenced by this precursor (from mzML `spectrumRef`).
+    #[serde(default)]
+    pub source_scan: Option<u32>,
 }
 
 // ---------------------------------------------------------------------------
@@ -421,6 +451,7 @@ mod tests {
             charge: Some(2),
             intensity: Some(1.5e6),
             isolation_window: None,
+            source_scan: None,
         }
     }
 
@@ -490,6 +521,7 @@ mod tests {
             charge: None,
             intensity: None,
             isolation_window: None,
+            source_scan: None,
         };
         let json = serde_json::to_string(&info).unwrap();
         let back: PrecursorInfo = serde_json::from_str(&json).unwrap();
@@ -774,6 +806,7 @@ mod tests {
                 charge: Some(2),
                 intensity: None,
                 isolation_window: None,
+                source_scan: None,
             }],
             vec![100.0],
             vec![1000.0],
@@ -793,6 +826,7 @@ mod tests {
                 charge: Some(2),
                 intensity: Some(f64::INFINITY),
                 isolation_window: None,
+                source_scan: None,
             }],
             vec![100.0],
             vec![1000.0],
@@ -860,6 +894,7 @@ mod tests {
                     lower_offset: 12.5,
                     upper_offset: 12.5, // 25 Da window
                 }),
+                source_scan: None,
             }],
             vec![100.0, 200.0, 300.0],
             vec![500.0, 1000.0, 750.0],
@@ -881,6 +916,7 @@ mod tests {
                 lower_offset: 1.0,
                 upper_offset: 1.0,
             }),
+            source_scan: None,
         };
         let json = serde_json::to_string_pretty(&p).unwrap();
         let back: PrecursorInfo = serde_json::from_str(&json).unwrap();
@@ -902,6 +938,7 @@ mod tests {
                     lower_offset: -1.0, // invalid
                     upper_offset: 12.5,
                 }),
+                source_scan: None,
             }],
             vec![100.0],
             vec![1000.0],
@@ -924,6 +961,7 @@ mod tests {
                     lower_offset: 12.5,
                     upper_offset: 12.5,
                 }),
+                source_scan: None,
             }],
             vec![100.0],
             vec![1000.0],
@@ -999,6 +1037,7 @@ mod tests {
                 charge: Some(2),
                 intensity: None,
                 isolation_window: None,
+                source_scan: None,
             }],
             vec![100.0],
             vec![1000.0],
@@ -1018,6 +1057,7 @@ mod tests {
                 charge: Some(2),
                 intensity: Some(-1.0),
                 isolation_window: None,
+                source_scan: None,
             }],
             vec![100.0],
             vec![1000.0],
@@ -1041,6 +1081,7 @@ mod tests {
                     lower_offset: 12.5,
                     upper_offset: 12.5,
                 }),
+                source_scan: None,
             }],
             vec![100.0],
             vec![1000.0],
@@ -1062,12 +1103,14 @@ mod tests {
                     charge: Some(2),
                     intensity: Some(1e6),
                     isolation_window: None,
+                    source_scan: None,
                 },
                 PrecursorInfo {
                     mz: 401.5,
                     charge: Some(3),
                     intensity: Some(5e5),
                     isolation_window: None,
+                    source_scan: None,
                 },
             ],
             vec![100.0, 200.0],

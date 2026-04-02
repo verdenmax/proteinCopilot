@@ -515,6 +515,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "protein-copilot-dia-extraction"
+version = "0.1.0"
+dependencies = [
+ "protein-copilot-core",
+ "schemars",
+ "serde",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "protein-copilot-mcp-server"
 version = "0.1.0"
 dependencies = [

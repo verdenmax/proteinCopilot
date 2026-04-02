@@ -61,6 +61,7 @@ struct SpectrumBuilder {
     isolation_target_mz: Option<f64>,
     isolation_lower: Option<f64>,
     isolation_upper: Option<f64>,
+    precursor_source_scan: Option<u32>,
     mz_array: Vec<f64>,
     intensity_array: Vec<f64>,
 }
@@ -93,6 +94,7 @@ impl SpectrumBuilder {
                 charge: self.precursor_charge,
                 intensity: self.precursor_intensity,
                 isolation_window,
+                source_scan: self.precursor_source_scan,
             });
         }
 
@@ -210,6 +212,22 @@ fn parse_scan_from_id(id: &str) -> Option<u32> {
         .and_then(|s| s.parse().ok())
 }
 
+/// Extract scan number from a precursor `spectrumRef` attribute.
+///
+/// Typical format: `"controllerType=0 controllerNumber=1 scan=1234"`.
+/// Falls back to parsing the whole string as a plain number.
+fn parse_scan_from_spectrum_ref(spectrum_ref: &str) -> Option<u32> {
+    if let Some(after) = spectrum_ref.split("scan=").nth(1) {
+        // Take only leading digits after "scan="
+        let digits: String = after.chars().take_while(|c| c.is_ascii_digit()).collect();
+        if !digits.is_empty() {
+            return digits.parse().ok();
+        }
+    }
+    // Fallback: try parsing the entire string as a plain number
+    spectrum_ref.trim().parse().ok()
+}
+
 // ---------------------------------------------------------------------------
 // Core streaming parser
 // ---------------------------------------------------------------------------
@@ -264,6 +282,10 @@ where
                     }
                     b"precursor" if in_spectrum => {
                         in_precursor = true;
+                        if let Some(spectrum_ref) = get_attr(e, b"spectrumRef") {
+                            builder.precursor_source_scan =
+                                parse_scan_from_spectrum_ref(&spectrum_ref);
+                        }
                     }
                     b"isolationWindow" if in_precursor => {
                         in_isolation_window = true;
@@ -642,5 +664,43 @@ mod tests {
             .read_all(Path::new("/nonexistent/file.mzml"))
             .unwrap_err();
         assert!(err.to_string().contains("not found"));
+    }
+
+    // -- parse_scan_from_spectrum_ref -----------------------------------
+
+    #[test]
+    fn spectrum_ref_full_format() {
+        assert_eq!(
+            parse_scan_from_spectrum_ref("controllerType=0 controllerNumber=1 scan=1234"),
+            Some(1234)
+        );
+    }
+
+    #[test]
+    fn spectrum_ref_scan_only() {
+        assert_eq!(parse_scan_from_spectrum_ref("scan=42"), Some(42));
+    }
+
+    #[test]
+    fn spectrum_ref_scan_after_other_key() {
+        assert_eq!(
+            parse_scan_from_spectrum_ref("spectrum=5 scan=100"),
+            Some(100)
+        );
+    }
+
+    #[test]
+    fn spectrum_ref_empty() {
+        assert_eq!(parse_scan_from_spectrum_ref(""), None);
+    }
+
+    #[test]
+    fn spectrum_ref_no_scan() {
+        assert_eq!(parse_scan_from_spectrum_ref("noscanhere"), None);
+    }
+
+    #[test]
+    fn spectrum_ref_plain_number() {
+        assert_eq!(parse_scan_from_spectrum_ref("5678"), Some(5678));
     }
 }

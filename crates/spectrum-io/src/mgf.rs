@@ -56,6 +56,7 @@ impl MgfBlock {
             charge: self.charge,
             intensity: self.pepmass_intensity,
             isolation_window: None, // mgf does not carry isolation window
+            source_scan: None,
         }];
 
         // Sort m/z + intensity arrays together by m/z ascending.

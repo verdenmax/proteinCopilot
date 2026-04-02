@@ -261,6 +261,7 @@ mod tests {
                 charge,
                 intensity: None,
                 isolation_window: None,
+                source_scan: None,
             }],
             peaks_mz,
             intensities,
