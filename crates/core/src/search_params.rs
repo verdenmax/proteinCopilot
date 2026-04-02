@@ -12,6 +12,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::spectrum::AcquisitionMode;
+
 // ---------------------------------------------------------------------------
 // Errors
 // ---------------------------------------------------------------------------
@@ -218,6 +220,9 @@ pub struct SearchParams {
     pub database_path: String,
     /// Target-decoy strategy for FDR estimation.
     pub decoy_strategy: DecoyStrategy,
+    /// Data acquisition mode. `None` = auto-detect or not applicable.
+    #[serde(default)]
+    pub acquisition_mode: Option<AcquisitionMode>,
 }
 
 impl SearchParams {
@@ -307,6 +312,7 @@ mod tests {
             },
             database_path: "/data/uniprot_human.fasta".to_string(),
             decoy_strategy: DecoyStrategy::Reverse,
+            acquisition_mode: None,
         }
     }
 

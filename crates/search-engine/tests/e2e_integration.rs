@@ -133,6 +133,7 @@ async fn scenario_b_direct_params() {
             unit: ToleranceUnit::Da,
         },
         decoy_strategy: DecoyStrategy::Reverse,
+        acquisition_mode: None,
     };
 
     assert!(params.validate().is_ok());
@@ -311,6 +312,7 @@ async fn error_invalid_params() {
             unit: ToleranceUnit::Da,
         },
         decoy_strategy: DecoyStrategy::Reverse,
+        acquisition_mode: None,
     };
 
     let engine = SimpleSearchEngine::new();

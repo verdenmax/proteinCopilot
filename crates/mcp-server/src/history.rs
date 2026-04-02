@@ -142,6 +142,7 @@ mod tests {
                 },
                 database_path: "/data/test.fasta".to_string(),
                 decoy_strategy: DecoyStrategy::Reverse,
+                acquisition_mode: None,
             },
             total_psms: Some(100),
             psms_at_1pct_fdr: Some(80),

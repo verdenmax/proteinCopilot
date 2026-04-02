@@ -154,6 +154,7 @@ mod tests {
                     unit: ToleranceUnit::Da,
                 },
                 decoy_strategy: DecoyStrategy::Reverse,
+                acquisition_mode: None,
             },
             confidence: 0.85,
             explanation: "Based on HeLa cell line data characteristics".to_string(),

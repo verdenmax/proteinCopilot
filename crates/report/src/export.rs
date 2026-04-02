@@ -174,6 +174,7 @@ mod tests {
                 unit: ToleranceUnit::Da,
             },
             decoy_strategy: DecoyStrategy::Reverse,
+            acquisition_mode: None,
         };
         let engine_info = EngineInfo {
             name: "Test".to_string(),

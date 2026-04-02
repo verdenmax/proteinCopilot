@@ -101,6 +101,7 @@ pub fn standard_preset() -> SearchPreset {
             precursor_tolerance: MassTolerance { value: 10.0, unit: ToleranceUnit::Ppm },
             fragment_tolerance: MassTolerance { value: 0.02, unit: ToleranceUnit::Da },
             decoy_strategy: DecoyStrategy::Reverse,
+            acquisition_mode: None,
         },
         applicable_scenarios: vec![
             "General protein identification".to_string(),
@@ -130,6 +131,7 @@ pub fn phospho_preset() -> SearchPreset {
                 unit: ToleranceUnit::Da,
             },
             decoy_strategy: DecoyStrategy::Reverse,
+            acquisition_mode: None,
         },
         applicable_scenarios: vec![
             "Phosphoproteomics".to_string(),
@@ -160,6 +162,7 @@ pub fn tmt_preset() -> SearchPreset {
                 unit: ToleranceUnit::Da,
             },
             decoy_strategy: DecoyStrategy::Reverse,
+            acquisition_mode: None,
         },
         applicable_scenarios: vec![
             "TMT labeling quantification".to_string(),
@@ -189,6 +192,7 @@ pub fn open_search_preset() -> SearchPreset {
                 unit: ToleranceUnit::Da,
             },
             decoy_strategy: DecoyStrategy::Reverse,
+            acquisition_mode: None,
         },
         applicable_scenarios: vec![
             "Unknown modification discovery".to_string(),
@@ -230,6 +234,7 @@ pub fn silac_preset() -> SearchPreset {
             precursor_tolerance: MassTolerance { value: 10.0, unit: ToleranceUnit::Ppm },
             fragment_tolerance: MassTolerance { value: 0.02, unit: ToleranceUnit::Da },
             decoy_strategy: DecoyStrategy::Reverse,
+            acquisition_mode: None,
         },
         applicable_scenarios: vec![
             "SILAC quantification".to_string(),

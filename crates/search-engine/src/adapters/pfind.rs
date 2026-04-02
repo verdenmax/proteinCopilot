@@ -164,6 +164,7 @@ mod tests {
                 unit: protein_copilot_core::search_params::ToleranceUnit::Da,
             },
             decoy_strategy: protein_copilot_core::search_params::DecoyStrategy::Reverse,
+            acquisition_mode: None,
         };
         let result = adapter.search(&params, &[], noop_progress()).await;
         assert!(result.is_err());

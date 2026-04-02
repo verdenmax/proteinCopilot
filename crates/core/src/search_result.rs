@@ -613,6 +613,7 @@ mod tests {
                 unit: ToleranceUnit::Da,
             },
             decoy_strategy: DecoyStrategy::Reverse,
+            acquisition_mode: None,
         }
     }
 

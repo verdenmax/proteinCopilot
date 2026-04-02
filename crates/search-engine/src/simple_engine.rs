@@ -422,6 +422,7 @@ mod tests {
                 unit: ToleranceUnit::Da,
             },
             decoy_strategy: DecoyStrategy::Reverse,
+            acquisition_mode: None,
         }
     }
 
@@ -466,6 +467,7 @@ mod tests {
                 unit: ToleranceUnit::Da,
             },
             decoy_strategy: DecoyStrategy::Reverse,
+            acquisition_mode: None,
         };
         let engine = SimpleSearchEngine::new();
         let result = engine.run_search(&params, &[PathBuf::from("test.mgf")], &|_| {});

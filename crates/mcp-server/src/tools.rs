@@ -911,6 +911,7 @@ impl ProteinCopilotServer {
                             database_path: String::new(),
                             decoy_strategy:
                                 protein_copilot_core::search_params::DecoyStrategy::Reverse,
+                            acquisition_mode: None,
                         },
                         total_psms: None,
                         psms_at_1pct_fdr: None,
