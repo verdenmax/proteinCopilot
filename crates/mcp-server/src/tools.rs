@@ -319,7 +319,33 @@ struct RunState {
 const MAX_CACHE_SIZE: usize = 100;
 
 /// Maximum number of cached DIA extraction runs before eviction.
+/// Ordered DIA cache — insertion order tracked for FIFO eviction.
+struct OrderedDiaCache {
+    entries: HashMap<Uuid, Vec<Spectrum>>,
+    order: Vec<Uuid>,
+}
+
 const MAX_DIA_CACHE_SIZE: usize = 10;
+
+impl OrderedDiaCache {
+    fn new() -> Self {
+        Self {
+            entries: HashMap::new(),
+            order: Vec::new(),
+        }
+    }
+
+    fn insert(&mut self, id: Uuid, spectra: Vec<Spectrum>) {
+        while self.order.len() >= MAX_DIA_CACHE_SIZE {
+            if let Some(oldest) = self.order.first().copied() {
+                self.order.remove(0);
+                self.entries.remove(&oldest);
+            }
+        }
+        self.entries.insert(id, spectra);
+        self.order.push(id);
+    }
+}
 
 /// Ordered run cache — insertion order tracked for FIFO eviction.
 struct OrderedRunCache {
@@ -409,7 +435,7 @@ pub struct ProteinCopilotServer {
     /// Unified cache for all search runs (progress + result in one lock).
     run_cache: RunCache,
     /// Cache of DIA-extracted spectra, keyed by run_id from extract_dia_precursors.
-    dia_cache: Arc<Mutex<HashMap<Uuid, Vec<Spectrum>>>>,
+    dia_cache: Arc<Mutex<OrderedDiaCache>>,
 }
 
 impl ProteinCopilotServer {
@@ -420,7 +446,7 @@ impl ProteinCopilotServer {
             tool_router: Self::tool_router(),
             registry,
             run_cache: Arc::new(Mutex::new(OrderedRunCache::new())),
-            dia_cache: Arc::new(Mutex::new(HashMap::new())),
+            dia_cache: Arc::new(Mutex::new(OrderedDiaCache::new())),
         }
     }
 
@@ -1138,11 +1164,6 @@ impl ProteinCopilotServer {
             .dia_cache
             .lock()
             .map_err(|_| mcp_err(ErrorCode::INTERNAL_ERROR, "DIA cache lock is poisoned"))?;
-        if cache.len() >= MAX_DIA_CACHE_SIZE {
-            if let Some(&oldest_id) = cache.keys().next() {
-                cache.remove(&oldest_id);
-            }
-        }
         cache.insert(run_id, output_spectra);
 
         let output = DiaExtractionOutput {
