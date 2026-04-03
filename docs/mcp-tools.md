@@ -1,6 +1,6 @@
 # MCP Tools 参考
 
-ProteinCopilot MCP Server 提供 12 个工具，通过 JSON-RPC over stdio 暴露给 LLM。
+ProteinCopilot MCP Server 提供 13 个工具，通过 JSON-RPC over stdio 暴露给 LLM。
 
 > **当前搜索引擎**：MVP 使用内置的 **SimpleSearchEngine**（基于 b/y 离子匹配的简化搜索），
 > 后续将接入 pFind 作为生产级搜索引擎。SimpleSearch 足以验证完整流程，但搜索质量和性能不如专业引擎。
@@ -98,6 +98,17 @@ cargo run --release -p protein-copilot-mcp-server
   "input_files": ["/data/sample.mgf"]
 }
 ```
+
+**DIA 模式** — 使用 `extract_dia_precursors` 提取的结果：
+```json
+{
+  "input_files": ["/data/sample.mzML"],
+  "database_path": "/data/human.fasta",
+  "dia_run_id": "a1b2c3d4-..."
+}
+```
+
+> 当提供 `dia_run_id` 时，搜索引擎从 DIA 缓存中获取已提取前体的谱图，通过 `search_with_spectra()` 执行搜索。
 
 结果自动缓存，后续用 `run_id` 引用。
 
@@ -265,6 +276,33 @@ status 值：`Running` / `Completed` / `Failed: <reason>` / `Cancelled`
 
 ---
 
+## extract_dia_precursors
+
+从 DIA mzML 文件中提取候选前体离子。自动检测 DDA/DIA 采集模式，对 DIA 数据执行 MS1 同位素模式检测和 MS1↔MS2 关联。
+
+**输入**：
+```json
+{
+  "file_path": "/data/dia_sample.mzML"
+}
+```
+
+**输出**：`ExtractionResult`
+```json
+{
+  "dia_run_id": "a1b2c3d4-...",
+  "acquisition_mode": "DIA",
+  "total_ms1": 500,
+  "total_ms2": 5000,
+  "precursors_extracted": 12345,
+  "charge_distribution": {"2": 6000, "3": 4500, "4": 1500, "5": 345}
+}
+```
+
+> 提取结果缓存在 `OrderedDiaCache` 中，通过 `dia_run_id` 传给 `run_search` 使用。
+
+---
+
 ## LLM 完整工作流
 
 **最简模式（一步搜索）：**
@@ -287,3 +325,12 @@ status 值：`Running` / `Completed` / `Failed: <reason>` / `Cancelled`
 
 LLM 全程只需传简单参数（路径、run_id），无需构造复杂 JSON。
 搜索不会阻塞 — LLM 可以在等待期间与用户交互。
+
+**DIA 模式（两步搜索）：**
+```
+① extract_dia_precursors(file_path)                →  {dia_run_id, summary}
+② run_search(input_files, database_path, dia_run_id) →  {run_id, "Running"}
+③ get_search_status(run_id)                        →  轮询直到 "Completed"
+④ generate_summary(run_id)                         →  统计摘要
+⑤ export_results(run_id, output_dir)               →  导出文件
+```

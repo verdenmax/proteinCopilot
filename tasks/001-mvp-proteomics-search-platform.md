@@ -3,7 +3,7 @@
 > **文件名**：`prd-mvp-proteomics-search.md`
 > **版本**：1.0
 > **创建日期**：2026-03-27
-> **状态**：In Progress — M1.1 ✅ M1.2 ✅ M1.3 ✅ M1.4 ✅ M1.5 ✅ M1.6 ✅ M1.7 ✅（324 tests, 0 warnings）— MVP 完成 + Post-MVP 功能（异步搜索优化、搜索历史持久化、谱图注释可视化）
+> **状态**：In Progress — M1.1 ✅ M1.2 ✅ M1.3 ✅ M1.4 ✅ M1.5 ✅ M1.6 ✅ M1.7 ✅（357 tests, 0 warnings）— MVP 完成 + Post-MVP 功能（异步搜索优化、搜索历史持久化、谱图注释可视化）+ DIA 数据支持（前体提取 + 搜索集成 + 端到端工作流）
 
 ---
 
@@ -962,3 +962,36 @@ M1.7 (集成验证)    ← 需要所有 MVP Milestone
   get_search_status()   → {status: "Completed"}           （完成）
   generate_summary()    → SearchResultSummary              （结果）
 ```
+
+---
+
+## DIA 数据支持
+
+### Phase 1: DIA 前体离子提取 ✅
+
+**状态**: 完成（357 tests, 0 warnings）
+
+新增 `dia-extraction` crate:
+- DDA/DIA 自动检测（基于隔离窗口宽度中位数）
+- MS1↔MS2 三级关联（spectrumRef → 扫描顺序 → RT 近邻）
+- 同位素峰模式检测（¹³C-¹²C 间距，z=2-5）
+- 伪谱图展开模式（兼容外部搜索引擎）
+
+### Phase 2: 搜索引擎集成 ✅
+
+**状态**: 完成
+
+- `SearchParams` 增加 `acquisition_mode: Option<AcquisitionMode>`
+- `match_spectrum_all()` 多母离子匹配
+- 搜索引擎 MS2 过滤 + DIA/DDA 自动分流
+- `extract_dia_precursors` MCP Tool（13号工具）
+- `OrderedDiaCache` FIFO 缓存管理
+
+### Phase 3: run_search 端到端集成 ✅
+
+**状态**: 完成
+
+- `SearchEngineAdapter` 增加 `search_with_spectra()` trait 方法
+- `SimpleSearchEngine` 重构：`run_search_on_spectra()` 提取核心逻辑
+- `RunSearchInput` 增加 `dia_run_id` 参数
+- 完整 DIA 工作流：`extract_dia_precursors` → `run_search(dia_run_id=...)`

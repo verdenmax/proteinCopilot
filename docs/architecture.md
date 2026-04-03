@@ -240,6 +240,9 @@ pub struct SearchPreset {
 pub trait SearchEngineAdapter: Send + Sync {
     async fn search(&self, params: &SearchParams, input_files: &[PathBuf])
         -> Result<SearchResult, CoreError>;
+    /// DIA 模式：直接接收已提取前体的谱图，跳过文件读取
+    async fn search_with_spectra(&self, params: &SearchParams, spectra: Vec<Spectrum>)
+        -> Result<SearchResult, CoreError>;
     fn engine_info(&self) -> EngineInfo;
     async fn health_check(&self) -> Result<HealthStatus, CoreError>;
 }
@@ -248,6 +251,7 @@ pub trait SearchEngineAdapter: Send + Sync {
 pub struct SimpleSearchEngine;
 impl SearchEngineAdapter for SimpleSearchEngine { ... }
 // 完整流程: FASTA→酶切→precursor匹配→b/y离子打分→SearchResult
+// 内部重构: run_search_on_spectra() 提取核心搜索逻辑，供 search() 和 search_with_spectra() 复用
 
 // pFind adapter（预留桩，待对接真实 pFind）
 pub struct PFindAdapter { ssh_config: SshConfig }
@@ -384,8 +388,22 @@ mzML 输入
 
 **集成方式**：
 - 通过 `extract_dia_precursors` MCP Tool 暴露
-- 提取结果写入缓存，返回 `run_id` 供后续 `run_search` 使用
+- 提取结果写入 `OrderedDiaCache`（FIFO 缓存），返回 `run_id` 供后续 `run_search` 使用
 - 搜索引擎的 `match_spectrum_all()` 支持多前体匹配，与 DIA 提取结果无缝衔接
+
+**DIA 端到端工作流**：
+```text
+① extract_dia_precursors(file_path)
+   → spectrum-io 读取 → DDA/DIA 自动检测
+   → MS1 同位素模式提取 → MS1↔MS2 关联
+   → 缓存增强谱图 → 返回 {dia_run_id, summary}
+
+② run_search(input_files, database_path, dia_run_id=...)
+   → 从 OrderedDiaCache 取出已提取的谱图
+   → search_with_spectra(params, spectra)
+   → run_search_on_spectra() 核心逻辑
+   → SearchResult
+```
 
 **依赖**：`core`
 
@@ -403,7 +421,7 @@ mzML 输入
 | `get_spectrum` | 按 scan 读取单张谱图 | spectrum-io |
 | `recommend_params` | 推荐搜索参数 → AiDecision | param-recommend |
 | `list_presets` | 列出内置预设 | param-recommend |
-| `run_search` | 异步执行搜索（立即返回 run_id） | search-engine |
+| `run_search` | 异步执行搜索（立即返回 run_id，支持 `dia_run_id` 参数接收 DIA 提取结果） | search-engine |
 | `get_search_status` | 查询搜索进度 | mcp-server (cache) |
 | `cancel_search` | 取消正在运行的搜索 | mcp-server (cache) |
 | `check_engine` | 检查引擎状态 | search-engine |
@@ -608,6 +626,8 @@ pub struct AiDecision<T> {
 
 pub trait SearchEngineAdapter: Send + Sync {
     async fn search(&self, params: &SearchParams, input_files: &[PathBuf])
+        -> Result<SearchResult, CoreError>;
+    async fn search_with_spectra(&self, params: &SearchParams, spectra: Vec<Spectrum>)
         -> Result<SearchResult, CoreError>;
     fn engine_info(&self) -> EngineInfo;
     async fn health_check(&self) -> Result<HealthStatus, CoreError>;
