@@ -219,12 +219,14 @@ fn mgf_corrupt_file_returns_zero_spectra() {
 
 #[test]
 fn mgf_truncated_file_missing_end_ions() {
-    // Truncated file missing END IONS — the incomplete block is dropped
+    // Truncated file missing END IONS — the incomplete block is still parsed
     let reader = protein_copilot_spectrum_io::mgf::MgfReader;
     let spectra = reader
         .read_all(&fixtures_dir().join("truncated.mgf"))
         .unwrap();
-    assert_eq!(spectra.len(), 0); // no complete spectrum
+    assert_eq!(spectra.len(), 1); // truncated block recovered
+    assert!((spectra[0].precursors[0].mz - 500.0).abs() < 0.01);
+    assert_eq!(spectra[0].num_peaks(), 2);
 }
 
 #[test]

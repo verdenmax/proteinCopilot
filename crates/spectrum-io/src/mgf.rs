@@ -178,6 +178,14 @@ where
         }
     }
 
+    // Handle truncated file: if a block was opened but never closed with
+    // END IONS, attempt to build the spectrum from what we have.
+    if let Some(b) = block.take() {
+        let spectrum = b.into_spectrum(fallback_scan, path, block_start_line)?;
+        handler(spectrum)?;
+        count += 1;
+    }
+
     Ok(count)
 }
 
@@ -393,5 +401,29 @@ mod tests {
             .read_all(Path::new("/nonexistent/file.mgf"))
             .unwrap_err();
         assert!(err.to_string().contains("not found"));
+    }
+
+    #[test]
+    fn parse_truncated_mgf_without_end_ions() {
+        use std::io::Write;
+        let dir = std::env::temp_dir().join("mgf_truncated_test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("truncated.mgf");
+        {
+            let mut f = std::fs::File::create(&path).unwrap();
+            writeln!(f, "BEGIN IONS").unwrap();
+            writeln!(f, "PEPMASS=500.25 10000").unwrap();
+            writeln!(f, "CHARGE=2+").unwrap();
+            writeln!(f, "RTINSECONDS=60.0").unwrap();
+            writeln!(f, "100.0 500").unwrap();
+            writeln!(f, "200.0 1000").unwrap();
+            // No END IONS
+        }
+        let reader = MgfReader;
+        let spectra = reader.read_all(&path).unwrap();
+        assert_eq!(spectra.len(), 1, "truncated block should still be parsed");
+        assert!((spectra[0].precursors[0].mz - 500.25).abs() < 0.01);
+        assert_eq!(spectra[0].num_peaks(), 2);
+        std::fs::remove_dir_all(&dir).ok();
     }
 }
