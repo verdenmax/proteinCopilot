@@ -766,7 +766,7 @@ mod tests {
 
         // Generate b-ions WITH and WITHOUT the N-term mod
         let b_no_mod = generate_b_ions_with_mods(seq, &[]).unwrap();
-        let b_with_mod = generate_b_ions_with_mods(seq, &[tmt_mod.clone()]).unwrap();
+        let b_with_mod = generate_b_ions_with_mods(seq, std::slice::from_ref(&tmt_mod)).unwrap();
 
         // All b-ions should be shifted by the TMT mass
         assert_eq!(b_no_mod.len(), b_with_mod.len());

@@ -126,7 +126,7 @@ mod tests {
 
     #[test]
     fn test_detect_no_window() {
-        let spectra: Vec<Spectrum> = (1..=3).map(|i| make_ms2_no_window(i)).collect();
+        let spectra: Vec<Spectrum> = (1..=3).map(make_ms2_no_window).collect();
         assert_eq!(
             detect_acquisition_mode(&spectra, 5.0),
             AcquisitionMode::Unknown

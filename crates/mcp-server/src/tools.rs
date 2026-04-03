@@ -440,7 +440,6 @@ impl Drop for PanicGuard {
 // Server struct
 // ---------------------------------------------------------------------------
 
-#[allow(dead_code)]
 pub struct ProteinCopilotServer {
     tool_router: ToolRouter<Self>,
     registry: protein_copilot_search_engine::EngineRegistry,
