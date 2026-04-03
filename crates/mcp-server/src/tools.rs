@@ -103,7 +103,6 @@ struct RunSearchInput {
     hints: Option<UserHints>,
     /// Optional run_id from extract_dia_precursors. When provided, uses cached
     /// DIA-extracted spectra instead of reading from input_files.
-    #[allow(dead_code)] // Used by Task 3: DIA run_search integration
     dia_run_id: Option<String>,
 }
 
@@ -339,7 +338,6 @@ impl OrderedDiaCache {
         }
     }
 
-    #[allow(dead_code)] // Used by Task 3: DIA run_search integration
     fn remove(&mut self, id: &Uuid) -> Option<Vec<Spectrum>> {
         if let Some(spectra) = self.entries.remove(id) {
             self.order.retain(|x| x != id);
@@ -619,6 +617,221 @@ impl ProteinCopilotServer {
         &self,
         Parameters(input): Parameters<RunSearchInput>,
     ) -> Result<Json<SearchStarted>, ErrorData> {
+        // -------------------------------------------------------------------
+        // DIA branch: use cached spectra from extract_dia_precursors
+        // -------------------------------------------------------------------
+        if let Some(ref run_id_str) = input.dia_run_id {
+            let dia_uuid = Uuid::parse_str(run_id_str)
+                .map_err(|_| mcp_err(ErrorCode::INVALID_PARAMS, "invalid dia_run_id format"))?;
+
+            // Resolve and validate params BEFORE removing from cache,
+            // so that a validation failure doesn't consume cached spectra.
+            let mut params = if let Some(p) = input.params {
+                p
+            } else {
+                return Err(mcp_err(
+                    ErrorCode::INVALID_PARAMS,
+                    "params required when using dia_run_id \
+                     (cannot auto-recommend without input files)",
+                ));
+            };
+
+            if let Some(ref db_path) = input.database_path {
+                params.database_path = db_path.clone();
+            }
+
+            params
+                .validate()
+                .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
+
+            // Move spectra out of the DIA cache (frees the slot).
+            // This happens after validation so a param error won't lose cached spectra.
+            let dia_spectra = {
+                let mut cache = self.dia_cache.lock().map_err(|_| {
+                    mcp_err(ErrorCode::INTERNAL_ERROR, "DIA cache lock is poisoned")
+                })?;
+                cache.remove(&dia_uuid).ok_or_else(|| {
+                    mcp_err(
+                        ErrorCode::INVALID_PARAMS,
+                        format!(
+                            "dia_run_id '{}' not found in cache \
+                             (may have been evicted or already used)",
+                            run_id_str
+                        ),
+                    )
+                })?
+            };
+
+            let run_id = Uuid::new_v4();
+
+            // Evict + initialize in unified run cache
+            {
+                let mut cache = self.run_cache.lock().map_err(|_| {
+                    mcp_err(ErrorCode::INTERNAL_ERROR, "run cache lock is poisoned")
+                })?;
+                cache.evict_if_full();
+                cache.insert(
+                    run_id,
+                    RunState {
+                        progress: SearchProgress {
+                            run_id,
+                            status: "Running".to_string(),
+                            stage: None,
+                            progress_pct: Some(0.0),
+                            elapsed_sec: 0.0,
+                            estimated_remaining_sec: None,
+                        },
+                        result: None,
+                        handle: None,
+                    },
+                );
+            }
+
+            let run_cache_clone = Arc::clone(&self.run_cache);
+            let engine = SimpleSearchEngine::new();
+            let dia_source = vec![PathBuf::from(format!("dia:{}", run_id_str))];
+
+            let progress_cache = Arc::clone(&self.run_cache);
+            let progress_run_id = run_id;
+            let on_progress: protein_copilot_core::progress::ProgressCallback =
+                Box::new(move |p: SearchProgress| {
+                    if let Ok(mut cache) = progress_cache.lock() {
+                        if let Some(state) = cache.get_mut(&progress_run_id) {
+                            if state.progress.status == "Running" {
+                                state.progress.stage = p.stage;
+                                state.progress.progress_pct = p.progress_pct;
+                                state.progress.elapsed_sec = p.elapsed_sec;
+                                state.progress.estimated_remaining_sec = p.estimated_remaining_sec;
+                            }
+                        }
+                    }
+                });
+
+            let handle = tokio::spawn(async move {
+                let start = Instant::now();
+
+                // Panic guard: on abnormal exit, sets status to "Failed: task panicked"
+                let _guard = PanicGuard {
+                    run_id,
+                    cache: Arc::clone(&run_cache_clone),
+                    start,
+                };
+
+                let search_result = engine
+                    .search_with_spectra(&params, dia_spectra, on_progress)
+                    .await;
+                let duration = start.elapsed().as_secs_f64();
+
+                // Single lock — update progress + result atomically
+                let (_updated, history_entry) = if let Ok(mut cache) = run_cache_clone.lock() {
+                    if let Some(state) = cache.get_mut(&run_id) {
+                        // If already cancelled, don't overwrite the status
+                        if state.progress.status == "Cancelled" {
+                            (true, None)
+                        } else {
+                            // Clear the JoinHandle — task is finishing
+                            state.handle = None;
+                            let entry = match search_result {
+                                Ok(mut result) => {
+                                    result.run_id = run_id;
+                                    result.metadata.run_id = run_id;
+                                    let entry = crate::history::SearchHistoryEntry {
+                                        run_id,
+                                        status: "Completed".to_string(),
+                                        created_at: result.metadata.created_at,
+                                        elapsed_sec: duration,
+                                        engine_info: result.engine_info.clone(),
+                                        input_files: dia_source.clone(),
+                                        params_used: result.params_used.clone(),
+                                        total_psms: Some(result.summary.total_psms),
+                                        psms_at_1pct_fdr: Some(result.summary.psms_at_1pct_fdr),
+                                        identification_rate: Some(
+                                            result.summary.identification_rate,
+                                        ),
+                                        protein_groups: Some(
+                                            result.summary.protein_groups_at_1pct_fdr,
+                                        ),
+                                    };
+                                    state.result = Some(result);
+                                    state.progress.status = "Completed".to_string();
+                                    state.progress.stage = None;
+                                    state.progress.progress_pct = Some(1.0);
+                                    state.progress.elapsed_sec = duration;
+                                    state.progress.estimated_remaining_sec = Some(0.0);
+                                    Some(entry)
+                                }
+                                Err(e) => {
+                                    let entry = crate::history::SearchHistoryEntry {
+                                        run_id,
+                                        status: format!("Failed: {e}"),
+                                        created_at: chrono::Utc::now(),
+                                        elapsed_sec: duration,
+                                        engine_info: protein_copilot_core::engine::EngineInfo {
+                                            name: "SimpleSearch".into(),
+                                            version: "0.1.0".into(),
+                                            supported_features: vec![],
+                                        },
+                                        input_files: dia_source.clone(),
+                                        params_used: params.clone(),
+                                        total_psms: None,
+                                        psms_at_1pct_fdr: None,
+                                        identification_rate: None,
+                                        protein_groups: None,
+                                    };
+                                    state.progress.status = format!("Failed: {e}");
+                                    state.progress.progress_pct = None;
+                                    state.progress.elapsed_sec = duration;
+                                    Some(entry)
+                                }
+                            };
+                            (true, entry)
+                        }
+                    } else {
+                        (false, None)
+                    }
+                } else {
+                    tracing::error!("run cache lock poisoned after search {run_id}; result lost");
+                    (false, None)
+                };
+
+                // Persist history to disk (outside the lock)
+                if let Some(entry) = history_entry {
+                    crate::history::save_entry(&entry);
+                }
+
+                // Always forget the guard — the search completed normally (success or error).
+                // The guard should only trigger on unexpected task termination (panic/abort).
+                // If the lock failed above, we logged the error; the guard trying to lock
+                // again would also fail, leaving status as "Running" forever.
+                std::mem::forget(_guard);
+            });
+
+            if let Ok(mut cache) = self.run_cache.lock() {
+                if let Some(state) = cache.get_mut(&run_id) {
+                    state.handle = Some(handle);
+                }
+            }
+
+            return Ok(Json(SearchStarted {
+                run_id: run_id.to_string(),
+                status: "Running".to_string(),
+                message: "DIA search started from cached spectra. \
+                          Call get_search_status(run_id) to check progress."
+                    .to_string(),
+            }));
+        }
+
+        // -------------------------------------------------------------------
+        // File-based branch: read spectra from input_files
+        // -------------------------------------------------------------------
+        if input.input_files.is_empty() {
+            return Err(mcp_err(
+                ErrorCode::INVALID_PARAMS,
+                "input_files is empty — provide at least one spectrum file path, \
+                 or use dia_run_id",
+            ));
+        }
+
         let mut params = if let Some(p) = input.params {
             p
         } else {
@@ -646,13 +859,6 @@ impl ProteinCopilotServer {
         params
             .validate()
             .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
-
-        if input.input_files.is_empty() {
-            return Err(mcp_err(
-                ErrorCode::INVALID_PARAMS,
-                "input_files is empty — provide at least one spectrum file path",
-            ));
-        }
 
         let run_id = Uuid::new_v4();
         let files: Vec<PathBuf> = input.input_files.iter().map(PathBuf::from).collect();
