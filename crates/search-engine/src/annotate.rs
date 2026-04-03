@@ -288,13 +288,14 @@ pub fn annotate_spectrum(
             detail: "spectrum has no peaks".to_string(),
         });
     }
-    let precursor =
-        spectrum
-            .precursors
-            .first()
-            .ok_or_else(|| SearchEngineError::ExecutionError {
-                detail: "spectrum has no precursor information".to_string(),
-            })?;
+    let precursor = spectrum
+        .precursors
+        .iter()
+        .find(|p| p.charge == Some(charge))
+        .or(spectrum.precursors.first())
+        .ok_or_else(|| SearchEngineError::ExecutionError {
+            detail: "spectrum has no precursor information".to_string(),
+        })?;
 
     // --- Theoretical precursor m/z ---
     let neutral_mass =
@@ -673,6 +674,49 @@ mod tests {
         let deserialized: SpectrumAnnotation = serde_json::from_str(&json).unwrap();
 
         assert_eq!(ann, deserialized);
+    }
+
+    #[test]
+    fn annotate_selects_precursor_by_charge() {
+        // Two precursors: charge 2 at 500.0, charge 3 at 400.0
+        let spectrum = Spectrum::new(
+            1,
+            MsLevel::MS2,
+            10.0,
+            vec![
+                PrecursorInfo {
+                    mz: 500.0,
+                    charge: Some(2),
+                    intensity: None,
+                    isolation_window: None,
+                    source_scan: None,
+                },
+                PrecursorInfo {
+                    mz: 400.0,
+                    charge: Some(3),
+                    intensity: None,
+                    isolation_window: None,
+                    source_scan: None,
+                },
+            ],
+            vec![100.0, 200.0, 300.0],
+            vec![1000.0, 2000.0, 500.0],
+        )
+        .unwrap();
+
+        let tol = MassTolerance {
+            value: 0.5,
+            unit: ToleranceUnit::Da,
+        };
+        // Annotate with charge 3 — should pick precursor at 400.0, not 500.0
+        let result = annotate_spectrum(&spectrum, "GK", 3, &tol, &[], vec![]);
+        assert!(result.is_ok());
+        let ann = result.unwrap();
+        assert!(
+            (ann.precursor_mz - 400.0).abs() < 0.01,
+            "should select precursor with matching charge 3, got {}",
+            ann.precursor_mz
+        );
     }
 
     #[test]
