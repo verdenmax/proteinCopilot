@@ -120,7 +120,44 @@ impl SimpleSearchEngine {
             return Err(SearchEngineError::NoInputSpectra);
         }
 
-        // Step 4: Match each spectrum against peptide candidates
+        self.run_search_on_spectra(
+            params,
+            all_spectra,
+            all_peptides,
+            &proteins,
+            input_files,
+            run_id,
+            start,
+            on_progress,
+        )
+    }
+
+    /// Core search logic operating on pre-loaded spectra.
+    ///
+    /// Shared by `run_search` (file-based) and `search_with_spectra` (pre-loaded).
+    #[allow(clippy::too_many_arguments)]
+    fn run_search_on_spectra(
+        &self,
+        params: &SearchParams,
+        all_spectra: Vec<Spectrum>,
+        all_peptides: Vec<DigestedPeptide>,
+        proteins: &[crate::fasta::FastaEntry],
+        input_files: &[PathBuf],
+        run_id: Uuid,
+        start: Instant,
+        on_progress: &dyn Fn(SearchProgress),
+    ) -> Result<SearchResult, SearchEngineError> {
+        let report = |stage: &str, pct: f64| {
+            on_progress(SearchProgress {
+                run_id,
+                status: "Running".to_string(),
+                stage: Some(stage.to_string()),
+                progress_pct: Some(pct),
+                elapsed_sec: start.elapsed().as_secs_f64(),
+                estimated_remaining_sec: None,
+            });
+        };
+
         // Filter to MS2 only (MS1 survey scans have no precursors to match)
         let ms2_spectra: Vec<&Spectrum> = all_spectra
             .iter()
@@ -167,16 +204,16 @@ impl SimpleSearchEngine {
             }
         }
 
-        // Step 5: Aggregate peptide and protein level results
+        // Aggregate peptide and protein level results
         report("Aggregating results", 0.92);
         let peptides = aggregate_peptides(&psms);
-        let protein_results = aggregate_proteins(&psms, &proteins);
+        let protein_results = aggregate_proteins(&psms, proteins);
 
-        // Step 6: Build summary
+        // Build summary
         let duration = start.elapsed().as_secs_f64();
         let summary = build_summary(&psms, ms2_spectra.len() as u64, duration);
 
-        // Step 7: Build metadata
+        // Build metadata
         let engine_info = self.engine_info();
         let mut metadata =
             RunMetadata::new(params.clone(), engine_info.clone(), input_files.to_vec());
@@ -225,6 +262,82 @@ impl SearchEngineAdapter for SimpleSearchEngine {
 
     async fn health_check(&self) -> Result<HealthStatus, CoreError> {
         Ok(HealthStatus::Healthy)
+    }
+
+    async fn search_with_spectra(
+        &self,
+        params: &SearchParams,
+        spectra: Vec<Spectrum>,
+        on_progress: ProgressCallback,
+    ) -> Result<SearchResult, CoreError> {
+        let start = Instant::now();
+        let run_id = Uuid::new_v4();
+
+        let progress_fn = move |p: SearchProgress| {
+            on_progress(p);
+        };
+
+        let report = |stage: &str, pct: f64| {
+            progress_fn(SearchProgress {
+                run_id,
+                status: "Running".to_string(),
+                stage: Some(stage.to_string()),
+                progress_pct: Some(pct),
+                elapsed_sec: start.elapsed().as_secs_f64(),
+                estimated_remaining_sec: None,
+            });
+        };
+
+        // Validate params
+        params.validate().map_err(|e| {
+            CoreError::from(SearchEngineError::InvalidParams {
+                detail: e.to_string(),
+            })
+        })?;
+
+        if spectra.is_empty() {
+            return Err(CoreError::from(SearchEngineError::NoInputSpectra));
+        }
+
+        // Digest database (same as run_search)
+        report("Reading FASTA database", 0.02);
+        let fasta_path = Path::new(&params.database_path);
+        let proteins = parse_fasta(fasta_path).map_err(CoreError::from)?;
+
+        report("Digesting proteins", 0.08);
+        let mut all_peptides: Vec<DigestedPeptide> = Vec::new();
+        for protein in &proteins {
+            let peptides = digest(
+                &protein.sequence,
+                &protein.accession,
+                &params.enzyme,
+                params.missed_cleavages,
+            );
+            all_peptides.extend(peptides);
+        }
+
+        if all_peptides.is_empty() {
+            return Err(CoreError::from(SearchEngineError::ExecutionError {
+                detail: format!(
+                    "no candidate peptides generated from {} proteins \
+                     (all peptides may be shorter than 6 or longer than 50 residues)",
+                    proteins.len()
+                ),
+            }));
+        }
+
+        // Use the shared core logic (no input files for spectra-based search)
+        self.run_search_on_spectra(
+            params,
+            spectra,
+            all_peptides,
+            &proteins,
+            &[],
+            run_id,
+            start,
+            &progress_fn,
+        )
+        .map_err(CoreError::from)
     }
 }
 

@@ -21,6 +21,7 @@ use crate::error::CoreError;
 use crate::progress::ProgressCallback;
 use crate::search_params::SearchParams;
 use crate::search_result::SearchResult;
+use crate::spectrum::Spectrum;
 
 // ---------------------------------------------------------------------------
 // EngineInfo
@@ -98,6 +99,23 @@ pub trait SearchEngineAdapter: Send + Sync {
     /// For SSH-based engines, this verifies network connectivity and
     /// that the engine binary is accessible on the remote host.
     async fn health_check(&self) -> Result<HealthStatus, CoreError>;
+
+    /// Execute a search with pre-loaded spectra (e.g., from DIA extraction cache).
+    ///
+    /// Default implementation returns an error; engines must opt-in.
+    async fn search_with_spectra(
+        &self,
+        params: &SearchParams,
+        spectra: Vec<Spectrum>,
+        on_progress: ProgressCallback,
+    ) -> Result<SearchResult, CoreError> {
+        let _ = (params, spectra, on_progress);
+        Err(CoreError::SearchEngineError {
+            engine: "unknown".to_string(),
+            detail: "this engine does not support search_with_spectra".to_string(),
+            suggestion: "Use an engine that supports pre-loaded spectra search".to_string(),
+        })
+    }
 
     /// Cancel a running search identified by `run_id`.
     ///
