@@ -55,32 +55,29 @@ struct SpectrumBuilder {
     scan_number: Option<u32>,
     ms_level: Option<u8>,
     rt_sec: Option<f64>,
-    precursor_mz: Option<f64>,
-    precursor_charge: Option<i32>,
-    precursor_intensity: Option<f64>,
-    isolation_target_mz: Option<f64>,
-    isolation_lower: Option<f64>,
-    isolation_upper: Option<f64>,
-    precursor_source_scan: Option<u32>,
+    // Accumulated precursors (built at </precursor> end tag)
+    precursors: Vec<PrecursorInfo>,
+    // Temporary fields for the precursor currently being parsed
+    cur_precursor_mz: Option<f64>,
+    cur_precursor_charge: Option<i32>,
+    cur_precursor_intensity: Option<f64>,
+    cur_isolation_target_mz: Option<f64>,
+    cur_isolation_lower: Option<f64>,
+    cur_isolation_upper: Option<f64>,
+    cur_precursor_source_scan: Option<u32>,
     mz_array: Vec<f64>,
     intensity_array: Vec<f64>,
 }
 
 impl SpectrumBuilder {
-    fn build(self, _path: &Path) -> Result<Spectrum, SpectrumIoError> {
-        let scan = self.scan_number.unwrap_or(1);
-        let ms_level = match self.ms_level.unwrap_or(2) {
-            1 => MsLevel::MS1,
-            2 => MsLevel::MS2,
-            n => MsLevel::Other(n),
-        };
-
-        let mut precursors = Vec::new();
-        if let Some(mz) = self.precursor_mz {
+    /// Build a `PrecursorInfo` from the current `cur_*` temporary fields,
+    /// push it to `self.precursors`, then reset all temps.
+    fn flush_precursor(&mut self) {
+        if let Some(mz) = self.cur_precursor_mz.take() {
             let isolation_window = match (
-                self.isolation_target_mz,
-                self.isolation_lower,
-                self.isolation_upper,
+                self.cur_isolation_target_mz.take(),
+                self.cur_isolation_lower.take(),
+                self.cur_isolation_upper.take(),
             ) {
                 (Some(t), Some(l), Some(u)) => Some(IsolationWindow {
                     target_mz: t,
@@ -89,14 +86,31 @@ impl SpectrumBuilder {
                 }),
                 _ => None,
             };
-            precursors.push(PrecursorInfo {
+            self.precursors.push(PrecursorInfo {
                 mz,
-                charge: self.precursor_charge,
-                intensity: self.precursor_intensity,
+                charge: self.cur_precursor_charge.take(),
+                intensity: self.cur_precursor_intensity.take(),
                 isolation_window,
-                source_scan: self.precursor_source_scan,
+                source_scan: self.cur_precursor_source_scan.take(),
             });
+        } else {
+            // No m/z — discard partial precursor data
+            self.cur_precursor_charge = None;
+            self.cur_precursor_intensity = None;
+            self.cur_isolation_target_mz = None;
+            self.cur_isolation_lower = None;
+            self.cur_isolation_upper = None;
+            self.cur_precursor_source_scan = None;
         }
+    }
+
+    fn build(self, _path: &Path) -> Result<Spectrum, SpectrumIoError> {
+        let scan = self.scan_number.unwrap_or(1);
+        let ms_level = match self.ms_level.unwrap_or(2) {
+            1 => MsLevel::MS1,
+            2 => MsLevel::MS2,
+            n => MsLevel::Other(n),
+        };
 
         // Sort m/z + intensity arrays together by m/z ascending.
         let mut mz_array = self.mz_array;
@@ -107,7 +121,7 @@ impl SpectrumBuilder {
             scan,
             ms_level,
             self.rt_sec.unwrap_or(0.0),
-            precursors,
+            self.precursors,
             mz_array,
             intensity_array,
         )
@@ -283,7 +297,7 @@ where
                     b"precursor" if in_spectrum => {
                         in_precursor = true;
                         if let Some(spectrum_ref) = get_attr(e, b"spectrumRef") {
-                            builder.precursor_source_scan =
+                            builder.cur_precursor_source_scan =
                                 parse_scan_from_spectrum_ref(&spectrum_ref);
                         }
                     }
@@ -330,22 +344,22 @@ where
                             }
                         }
                         "MS:1000827" if in_isolation_window => {
-                            builder.isolation_target_mz = value.parse().ok();
+                            builder.cur_isolation_target_mz = value.parse().ok();
                         }
                         "MS:1000828" if in_isolation_window => {
-                            builder.isolation_lower = value.parse().ok();
+                            builder.cur_isolation_lower = value.parse().ok();
                         }
                         "MS:1000829" if in_isolation_window => {
-                            builder.isolation_upper = value.parse().ok();
+                            builder.cur_isolation_upper = value.parse().ok();
                         }
                         "MS:1000744" if in_selected_ion => {
-                            builder.precursor_mz = value.parse().ok();
+                            builder.cur_precursor_mz = value.parse().ok();
                         }
                         "MS:1000041" if in_selected_ion => {
-                            builder.precursor_charge = value.parse().ok();
+                            builder.cur_precursor_charge = value.parse().ok();
                         }
                         "MS:1000042" if in_selected_ion => {
-                            builder.precursor_intensity = value.parse().ok();
+                            builder.cur_precursor_intensity = value.parse().ok();
                         }
                         "MS:1000514" if in_binary_data_array => {
                             array_meta.is_mz = true;
@@ -389,6 +403,7 @@ where
                     }
                     b"precursor" => {
                         in_precursor = false;
+                        builder.flush_precursor();
                     }
                     b"isolationWindow" => {
                         in_isolation_window = false;
@@ -702,5 +717,131 @@ mod tests {
     #[test]
     fn spectrum_ref_plain_number() {
         assert_eq!(parse_scan_from_spectrum_ref("5678"), Some(5678));
+    }
+
+    // -- multiple precursors per spectrum (regression) ---------------------
+
+    /// Regression test: existing single-precursor fixture still produces
+    /// exactly one precursor per spectrum with correct values.
+    #[test]
+    fn single_precursor_per_spectrum_preserved() {
+        let reader = MzMLReader;
+        let spectra = reader.read_all(&fixture_path()).unwrap();
+        for s in &spectra {
+            assert_eq!(
+                s.precursors.len(),
+                1,
+                "scan {} should have exactly 1 precursor",
+                s.scan_number
+            );
+        }
+        // Spot-check first and last spectra
+        let first = &spectra[0].precursors[0];
+        assert!((first.mz - 471.2561).abs() < 1e-4);
+        assert_eq!(first.charge, Some(2));
+
+        let last = &spectra[9].precursors[0];
+        assert!((last.mz - 445.23).abs() < 1e-4);
+        assert_eq!(last.charge, Some(2));
+    }
+
+    /// Parsing an mzML with two <precursor> elements in one spectrum must
+    /// produce a Spectrum with two entries in the `precursors` Vec.
+    #[test]
+    fn multiple_precursors_per_spectrum() {
+        let mzml = r#"<?xml version="1.0" encoding="utf-8"?>
+<mzML xmlns="http://psi.hupo.org/ms/mzml">
+  <run>
+    <spectrumList count="1" defaultDataProcessingRef="dp">
+      <spectrum index="0" id="scan=1" defaultArrayLength="3">
+        <cvParam cvRef="MS" accession="MS:1000511" value="2"/>
+        <scanList count="1">
+          <scan>
+            <cvParam cvRef="MS" accession="MS:1000016" value="60.0" unitAccession="UO:0000010"/>
+          </scan>
+        </scanList>
+        <precursorList count="2">
+          <precursor spectrumRef="scan=100">
+            <isolationWindow>
+              <cvParam accession="MS:1000827" value="400.0"/>
+              <cvParam accession="MS:1000828" value="0.5"/>
+              <cvParam accession="MS:1000829" value="0.5"/>
+            </isolationWindow>
+            <selectedIonList count="1">
+              <selectedIon>
+                <cvParam accession="MS:1000744" value="400.1234"/>
+                <cvParam accession="MS:1000041" value="2"/>
+                <cvParam accession="MS:1000042" value="50000.0"/>
+              </selectedIon>
+            </selectedIonList>
+          </precursor>
+          <precursor spectrumRef="scan=101">
+            <isolationWindow>
+              <cvParam accession="MS:1000827" value="600.0"/>
+              <cvParam accession="MS:1000828" value="1.0"/>
+              <cvParam accession="MS:1000829" value="1.0"/>
+            </isolationWindow>
+            <selectedIonList count="1">
+              <selectedIon>
+                <cvParam accession="MS:1000744" value="600.5678"/>
+                <cvParam accession="MS:1000041" value="3"/>
+                <cvParam accession="MS:1000042" value="75000.0"/>
+              </selectedIon>
+            </selectedIonList>
+          </precursor>
+        </precursorList>
+        <binaryDataArrayList count="2">
+          <binaryDataArray>
+            <cvParam accession="MS:1000514"/>
+            <cvParam accession="MS:1000523"/>
+            <cvParam accession="MS:1000576"/>
+            <binary>AAAAAAAA+EAAAAAAAADwQAAAAAAAACRA</binary>
+          </binaryDataArray>
+          <binaryDataArray>
+            <cvParam accession="MS:1000515"/>
+            <cvParam accession="MS:1000523"/>
+            <cvParam accession="MS:1000576"/>
+            <binary>AAAAAAAA+EAAAAAAAADwQAAAAAAAACRA</binary>
+          </binaryDataArray>
+        </binaryDataArrayList>
+      </spectrum>
+    </spectrumList>
+  </run>
+</mzML>"#;
+
+        let path = Path::new("multi_precursor.mzml");
+        let mut xml_reader = Reader::from_str(mzml);
+        xml_reader.config_mut().trim_text(true);
+
+        let mut spectra = Vec::new();
+        parse_mzml_streaming(&mut xml_reader, path, |s| {
+            spectra.push(s);
+            Ok(true)
+        })
+        .unwrap();
+
+        assert_eq!(spectra.len(), 1);
+        let s = &spectra[0];
+        assert_eq!(s.precursors.len(), 2, "expected 2 precursors");
+
+        let p0 = &s.precursors[0];
+        assert!((p0.mz - 400.1234).abs() < 1e-4);
+        assert_eq!(p0.charge, Some(2));
+        assert!((p0.intensity.unwrap() - 50000.0).abs() < 1.0);
+        assert_eq!(p0.source_scan, Some(100));
+        let iw0 = p0.isolation_window.as_ref().unwrap();
+        assert!((iw0.target_mz - 400.0).abs() < 1e-4);
+        assert!((iw0.lower_offset - 0.5).abs() < 0.01);
+        assert!((iw0.upper_offset - 0.5).abs() < 0.01);
+
+        let p1 = &s.precursors[1];
+        assert!((p1.mz - 600.5678).abs() < 1e-4);
+        assert_eq!(p1.charge, Some(3));
+        assert!((p1.intensity.unwrap() - 75000.0).abs() < 1.0);
+        assert_eq!(p1.source_scan, Some(101));
+        let iw1 = p1.isolation_window.as_ref().unwrap();
+        assert!((iw1.target_mz - 600.0).abs() < 1e-4);
+        assert!((iw1.lower_offset - 1.0).abs() < 0.01);
+        assert!((iw1.upper_offset - 1.0).abs() < 0.01);
     }
 }
