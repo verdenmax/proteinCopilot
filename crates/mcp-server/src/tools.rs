@@ -101,6 +101,10 @@ struct RunSearchInput {
     #[serde(default, deserialize_with = "deserialize_hints")]
     #[schemars(with = "Option<UserHints>")]
     hints: Option<UserHints>,
+    /// Optional run_id from extract_dia_precursors. When provided, uses cached
+    /// DIA-extracted spectra instead of reading from input_files.
+    #[allow(dead_code)] // Used by Task 3: DIA run_search integration
+    dia_run_id: Option<String>,
 }
 
 /// Deserialize params from either a JSON object or a JSON string.
@@ -332,6 +336,16 @@ impl OrderedDiaCache {
         Self {
             entries: HashMap::new(),
             order: Vec::new(),
+        }
+    }
+
+    #[allow(dead_code)] // Used by Task 3: DIA run_search integration
+    fn remove(&mut self, id: &Uuid) -> Option<Vec<Spectrum>> {
+        if let Some(spectra) = self.entries.remove(id) {
+            self.order.retain(|x| x != id);
+            Some(spectra)
+        } else {
+            None
         }
     }
 
@@ -1177,7 +1191,7 @@ impl ProteinCopilotServer {
             run_id: run_id.to_string(),
             message: format!(
                 "DIA extraction complete. {} precursors extracted from {} MS2 spectra. \
-                 Results cached as run_id '{}'.",
+                 Pass dia_run_id=\"{}\" to run_search to search these spectra.",
                 result.stats.total_precursors_extracted, result.stats.ms2_count, run_id
             ),
         };
