@@ -24,7 +24,9 @@ use protein_copilot_core::search_params::SearchParams;
 use protein_copilot_core::search_result::{SearchResult, SearchResultSummary};
 use protein_copilot_core::spectrum::{AcquisitionMode, Spectrum, SpectrumSummary};
 use protein_copilot_dia_extraction::{
-    extract_dia_precursors as run_dia_extraction, DiaExtractionConfig, IsotopePatternExtractor,
+    extract_dia_precursors as run_dia_extraction,
+    extract_single_spectrum_precursors, DiaExtractionConfig, IsotopePatternExtractor,
+    SingleSpectrumExtractionResult,
 };
 use protein_copilot_param_recommend::{ParamRecommender, SearchPreset, UserHints};
 use protein_copilot_report::ReportGenerator;
@@ -278,6 +280,19 @@ struct ExtractDiaPrecursorsInput {
 
 fn default_output_mode() -> String {
     "pseudo".to_string()
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct ExtractSpectrumPrecursorsInput {
+    /// Path to the spectrum file (.mzML). The file is read to find both the
+    /// target MS2 scan and nearby MS1 spectra for isotope pattern extraction.
+    file_path: String,
+    /// Scan number (1-based) of the MS2 spectrum to extract precursors for.
+    scan_number: u32,
+    /// Minimum charge state to consider (default: 2)
+    min_charge: Option<i32>,
+    /// Maximum charge state to consider (default: 5)
+    max_charge: Option<i32>,
 }
 
 #[derive(Debug, Serialize, schemars::JsonSchema)]
@@ -1402,5 +1417,36 @@ impl ProteinCopilotServer {
         };
 
         Ok(Json(output))
+    }
+
+    /// Extract precursor candidates for a single MS2 spectrum from an mzML file.
+    #[rmcp::tool(
+        name = "extract_spectrum_precursors",
+        description = "Extract candidate precursor ions from a single MS2 spectrum. Reads the mzML file, finds the target MS2 by scan number, correlates it to the nearest MS1, and runs isotope pattern analysis within the isolation window. Returns extracted precursor candidates with charge states and the correlation method used."
+    )]
+    fn extract_spectrum_precursors(
+        &self,
+        Parameters(input): Parameters<ExtractSpectrumPrecursorsInput>,
+    ) -> Result<Json<SingleSpectrumExtractionResult>, ErrorData> {
+        let path = Path::new(&input.file_path);
+        let info = protein_copilot_spectrum_io::detect_format(path)
+            .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
+        let reader = protein_copilot_spectrum_io::create_reader(&info);
+        let spectra = reader
+            .read_all(path)
+            .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
+
+        let mut extractor = IsotopePatternExtractor::default();
+        if let Some(min_c) = input.min_charge {
+            extractor.min_charge = min_c;
+        }
+        if let Some(max_c) = input.max_charge {
+            extractor.max_charge = max_c;
+        }
+
+        let result = extract_single_spectrum_precursors(&spectra, input.scan_number, &extractor)
+            .map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, e))?;
+
+        Ok(Json(result))
     }
 }
