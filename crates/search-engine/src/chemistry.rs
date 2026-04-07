@@ -56,7 +56,12 @@ pub fn peptide_mass(sequence: &str) -> Option<f64> {
 /// Calculates the m/z value for a peptide at a given charge state.
 ///
 /// Formula: m/z = (neutral_mass + charge × proton_mass) / charge
+///
+/// # Panics
+///
+/// Panics if `charge` is zero or negative (physically impossible in MS).
 pub fn peptide_mz(neutral_mass: f64, charge: i32) -> f64 {
+    assert!(charge > 0, "charge must be > 0, got {charge}");
     (neutral_mass + charge as f64 * PROTON_MASS) / charge as f64
 }
 

@@ -62,8 +62,49 @@ fn calc_delta_ppm(observed: f64, theoretical: f64) -> f64 {
 // Fragment ion generation (b/y ions)
 // ---------------------------------------------------------------------------
 
-/// Generates theoretical singly-charged b-ion m/z values for a peptide.
-pub fn generate_b_ions(sequence: &str) -> Vec<f64> {
+/// Cumulative fixed-modification mass delta for a fragment prefix or suffix.
+///
+/// For residue-specific mods: adds `mass_delta` for each matching residue.
+/// For N-term mods: adds `mass_delta` to b-ions (which contain the N-terminus).
+/// For C-term mods: adds `mass_delta` to y-ions (which contain the C-terminus).
+pub(crate) fn mod_delta_fragment(
+    residues: &[char],
+    fixed_mods: &[Modification],
+    is_b_ion: bool,
+) -> f64 {
+    use protein_copilot_core::search_params::ModPosition;
+    let mut delta = 0.0;
+    for m in fixed_mods {
+        if m.residues.is_empty() {
+            match m.position {
+                ModPosition::AnyNTerm | ModPosition::ProteinNTerm => {
+                    if is_b_ion {
+                        delta += m.mass_delta;
+                    }
+                }
+                ModPosition::AnyCTerm | ModPosition::ProteinCTerm => {
+                    if !is_b_ion {
+                        delta += m.mass_delta;
+                    }
+                }
+                ModPosition::Anywhere => {
+                    delta += m.mass_delta;
+                }
+            }
+        } else {
+            for &ch in residues {
+                if m.residues.contains(&ch) {
+                    delta += m.mass_delta;
+                }
+            }
+        }
+    }
+    delta
+}
+
+/// Generates theoretical singly-charged b-ion m/z values for a peptide,
+/// applying fixed modifications to each fragment.
+pub fn generate_b_ions(sequence: &str, fixed_mods: &[Modification]) -> Vec<f64> {
     let chars: Vec<char> = sequence.chars().collect();
     let mut ions = Vec::with_capacity(chars.len().saturating_sub(1));
     let mut cumulative = 0.0;
@@ -75,27 +116,36 @@ pub fn generate_b_ions(sequence: &str) -> Vec<f64> {
             None => return Vec::new(),
         };
         cumulative += mass;
-        // b-ion m/z (singly charged) = cumulative + proton
-        ions.push(cumulative + PROTON_MASS);
+        let prefix_len = ions.len() + 1;
+        let mod_delta = mod_delta_fragment(&chars[..prefix_len], fixed_mods, true);
+        // b-ion m/z (singly charged) = cumulative residues + mod delta + proton
+        ions.push(cumulative + mod_delta + PROTON_MASS);
     }
 
     ions
 }
 
-/// Generates theoretical singly-charged y-ion m/z values for a peptide.
-pub fn generate_y_ions(sequence: &str) -> Vec<f64> {
+/// Generates theoretical singly-charged y-ion m/z values for a peptide,
+/// applying fixed modifications to each fragment.
+pub fn generate_y_ions(sequence: &str, fixed_mods: &[Modification]) -> Vec<f64> {
     let chars: Vec<char> = sequence.chars().collect();
-    let mut ions = Vec::with_capacity(chars.len().saturating_sub(1));
+    let n = chars.len();
+    let mut ions = Vec::with_capacity(n.saturating_sub(1));
     let mut cumulative = WATER_MASS;
 
-    for &aa in chars.iter().rev().take(chars.len().saturating_sub(1)) {
+    for (i, &aa) in chars.iter().rev().enumerate() {
+        if i >= n.saturating_sub(1) {
+            break;
+        }
         let mass = match residue_mass(aa) {
             Some(m) => m,
             None => return Vec::new(),
         };
         cumulative += mass;
-        // y-ion m/z (singly charged) = cumulative + proton
-        ions.push(cumulative + PROTON_MASS);
+        let suffix_start = n - 1 - i;
+        let mod_delta = mod_delta_fragment(&chars[suffix_start..], fixed_mods, false);
+        // y-ion m/z (singly charged) = cumulative residues + water + mod delta + proton
+        ions.push(cumulative + mod_delta + PROTON_MASS);
     }
 
     ions
@@ -148,12 +198,26 @@ fn count_matched_ions(
 // ---------------------------------------------------------------------------
 
 /// Applies fixed modifications to the theoretical peptide mass.
+///
+/// Terminal mods (empty residues) are applied based on their `ModPosition`:
+/// - `AnyNTerm` / `ProteinNTerm`: apply once (N-terminal)
+/// - `AnyCTerm` / `ProteinCTerm`: apply once (C-terminal)
+/// - `Anywhere` with empty residues: treated as a global mod, applied once
+///
+/// Residue-specific mods: apply once per matching residue in the sequence.
 fn apply_fixed_mods(sequence: &str, mods: &[Modification]) -> f64 {
+    use protein_copilot_core::search_params::ModPosition;
     let mut delta = 0.0;
     for m in mods {
         if m.residues.is_empty() {
-            // N-term or C-term mod: apply once
-            delta += m.mass_delta;
+            match m.position {
+                ModPosition::AnyNTerm | ModPosition::ProteinNTerm |
+                ModPosition::AnyCTerm | ModPosition::ProteinCTerm |
+                ModPosition::Anywhere => {
+                    // Terminal or global mod with no specific residue: apply once
+                    delta += m.mass_delta;
+                }
+            }
         } else {
             for ch in sequence.chars() {
                 if m.residues.contains(&ch) {
@@ -200,8 +264,8 @@ pub fn match_spectrum(
 
             if within_tolerance(observed_mz, theoretical_mz, precursor_tolerance) {
                 // Precursor matches — now score by fragment ions
-                let b_ions = generate_b_ions(&peptide.sequence);
-                let y_ions = generate_y_ions(&peptide.sequence);
+                let b_ions = generate_b_ions(&peptide.sequence, fixed_mods);
+                let y_ions = generate_y_ions(&peptide.sequence, fixed_mods);
 
                 let total_theoretical = (b_ions.len() + y_ions.len()) as u32;
                 if total_theoretical == 0 {
@@ -283,8 +347,8 @@ pub fn match_spectrum_all(
                 let theoretical_mz = peptide_mz(modified_mass, charge);
 
                 if within_tolerance(observed_mz, theoretical_mz, precursor_tolerance) {
-                    let b_ions = generate_b_ions(&peptide.sequence);
-                    let y_ions = generate_y_ions(&peptide.sequence);
+                    let b_ions = generate_b_ions(&peptide.sequence, fixed_mods);
+                    let y_ions = generate_y_ions(&peptide.sequence, fixed_mods);
 
                     let total_theoretical = (b_ions.len() + y_ions.len()) as u32;
                     if total_theoretical == 0 {
@@ -402,7 +466,7 @@ mod tests {
 
     #[test]
     fn b_ion_generation() {
-        let ions = generate_b_ions("GG");
+        let ions = generate_b_ions("GG", &[]);
         // b1 for "GG" = G mass + proton = 57.021464 + 1.007276
         assert_eq!(ions.len(), 1);
         assert!((ions[0] - 58.02874).abs() < 0.001);
@@ -410,7 +474,7 @@ mod tests {
 
     #[test]
     fn y_ion_generation() {
-        let ions = generate_y_ions("GG");
+        let ions = generate_y_ions("GG", &[]);
         // y1 for "GG" = G mass + water + proton
         assert_eq!(ions.len(), 1);
         assert!((ions[0] - (57.021464 + WATER_MASS + PROTON_MASS)).abs() < 0.001);
@@ -422,8 +486,8 @@ mod tests {
         let mz_z2 = peptide_mz(peptide.neutral_mass, 2);
 
         // Generate b/y ions to use as "experimental" peaks
-        let b = generate_b_ions("PEPTIDER");
-        let y = generate_y_ions("PEPTIDER");
+        let b = generate_b_ions("PEPTIDER", &[]);
+        let y = generate_y_ions("PEPTIDER", &[]);
         let mut peaks: Vec<f64> = b.iter().chain(y.iter()).copied().collect();
         peaks.sort_by(|a, b| a.total_cmp(b));
 
@@ -479,7 +543,7 @@ mod tests {
         let peptide = make_peptide("PEPTIDER", "P001");
         let mz_z3 = peptide_mz(peptide.neutral_mass, 3);
 
-        let b = generate_b_ions("PEPTIDER");
+        let b = generate_b_ions("PEPTIDER", &[]);
         let mut peaks: Vec<f64> = b;
         peaks.sort_by(|a, b| a.total_cmp(b));
 
@@ -504,8 +568,8 @@ mod tests {
         let mz_z2 = peptide_mz(pep1.neutral_mass, 2);
 
         // Peaks matching PEPTIDER's b/y ions
-        let b = generate_b_ions("PEPTIDER");
-        let y = generate_y_ions("PEPTIDER");
+        let b = generate_b_ions("PEPTIDER", &[]);
+        let y = generate_y_ions("PEPTIDER", &[]);
         let mut peaks: Vec<f64> = b.iter().chain(y.iter()).copied().collect();
         peaks.sort_by(|a, b| a.total_cmp(b));
 
@@ -599,5 +663,114 @@ mod tests {
             &[],
         );
         assert!(results.is_empty());
+    }
+
+    #[test]
+    fn b_ions_include_fixed_modification() {
+        use protein_copilot_core::search_params::ModPosition;
+        // Peptide "ACK": b2 covers A+C.
+        // Without CAM: b2 = M(A) + M(C) + proton = 71.03711 + 103.00919 + 1.00728 = 175.05358
+        // With CAM(C): b2 = 71.03711 + 103.00919 + 57.02146 + 1.00728 = 232.07504
+        let cam = Modification {
+            name: "Carbamidomethyl".to_string(),
+            mass_delta: 57.021464,
+            residues: vec!['C'],
+            position: ModPosition::Anywhere,
+        };
+
+        let b_no_mod = generate_b_ions("ACK", &[]);
+        let b_with_mod = generate_b_ions("ACK", &[cam]);
+
+        assert_eq!(b_no_mod.len(), 2); // b1, b2
+        assert_eq!(b_with_mod.len(), 2);
+
+        // b1 (A only) should be identical — no C residue
+        assert!(
+            (b_no_mod[0] - b_with_mod[0]).abs() < 0.001,
+            "b1 should be unchanged: no_mod={:.4} vs with_mod={:.4}",
+            b_no_mod[0],
+            b_with_mod[0]
+        );
+
+        // b2 (A+C) should differ by CAM mass
+        let diff = b_with_mod[1] - b_no_mod[1];
+        assert!(
+            (diff - 57.021464).abs() < 0.001,
+            "b2 should be shifted by 57.02 Da: diff={diff:.4}"
+        );
+    }
+
+    #[test]
+    fn y_ions_include_fixed_modification() {
+        use protein_copilot_core::search_params::ModPosition;
+        // Peptide "ACK": y1 covers K, y2 covers C+K
+        // y1 has no C → unchanged
+        // y2 has C → shifted by +57.02
+        let cam = Modification {
+            name: "Carbamidomethyl".to_string(),
+            mass_delta: 57.021464,
+            residues: vec!['C'],
+            position: ModPosition::Anywhere,
+        };
+
+        let y_no_mod = generate_y_ions("ACK", &[]);
+        let y_with_mod = generate_y_ions("ACK", &[cam]);
+
+        assert_eq!(y_no_mod.len(), 2);
+        assert_eq!(y_with_mod.len(), 2);
+
+        // y1 (K only) — unchanged
+        assert!(
+            (y_no_mod[0] - y_with_mod[0]).abs() < 0.001,
+            "y1 should be unchanged: no_mod={:.4} vs with_mod={:.4}",
+            y_no_mod[0],
+            y_with_mod[0]
+        );
+
+        // y2 (C+K) — shifted by CAM
+        let diff = y_with_mod[1] - y_no_mod[1];
+        assert!(
+            (diff - 57.021464).abs() < 0.001,
+            "y2 should be shifted by 57.02 Da: diff={diff:.4}"
+        );
+    }
+
+    #[test]
+    fn modified_fragment_scoring_works() {
+        use protein_copilot_core::search_params::ModPosition;
+        // Create a peptide with C and generate peaks using modified fragment ions
+        let peptide = make_peptide("PEPTIDCK", "P001");
+        let cam = Modification {
+            name: "Carbamidomethyl".to_string(),
+            mass_delta: 57.021464,
+            residues: vec!['C'],
+            position: ModPosition::Anywhere,
+        };
+        let modified_mass = peptide.neutral_mass + 57.021464; // one C
+        let mz_z2 = peptide_mz(modified_mass, 2);
+
+        // Use modified fragment ions as experimental peaks
+        let b = generate_b_ions("PEPTIDCK", std::slice::from_ref(&cam));
+        let y = generate_y_ions("PEPTIDCK", std::slice::from_ref(&cam));
+        let mut peaks: Vec<f64> = b.iter().chain(y.iter()).copied().collect();
+        peaks.sort_by(|a, b| a.total_cmp(b));
+
+        let spectrum = make_spectrum(mz_z2, Some(2), peaks);
+        let result = match_spectrum(
+            &spectrum,
+            &[peptide],
+            &default_tolerance(),
+            &fragment_tolerance(),
+            &[cam],
+        );
+
+        assert!(result.is_some());
+        let m = result.unwrap();
+        // Score should be perfect (1.0) since peaks match exactly
+        assert!(
+            m.score > 0.99,
+            "score should be ~1.0 with correct mod handling: {}",
+            m.score
+        );
     }
 }

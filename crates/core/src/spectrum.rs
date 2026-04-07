@@ -242,6 +242,11 @@ impl Spectrum {
                 field: "retention_time_sec",
             });
         }
+        if self.retention_time_sec < 0.0 {
+            return Err(SpectrumError::NegativeValue {
+                field: "retention_time_sec",
+            });
+        }
         for (i, p) in self.precursors.iter().enumerate() {
             self.validate_precursor(i, p)?;
         }

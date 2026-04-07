@@ -9,9 +9,13 @@ use protein_copilot_core::search_result::SearchResult;
 
 use crate::error::ReportError;
 
-/// Sanitizes a string for TSV output by replacing tabs and newlines.
+/// Sanitizes a string for TSV output by replacing tabs, newlines, and semicolons.
+///
+/// Semicolons are replaced because they are used as the multi-value delimiter
+/// in protein accession columns (e.g., `P001;Q002`). UniProt FASTA headers
+/// often contain semicolons which would corrupt the delimiter.
 fn sanitize_tsv(s: &str) -> String {
-    s.replace(['\t', '\n', '\r'], " ")
+    s.replace(['\t', '\n', '\r', ';'], " ")
 }
 
 /// Exports search results as 3 TSV files in the given directory.
@@ -40,7 +44,7 @@ pub(crate) fn export_tsv(result: &SearchResult, output_dir: &Path) -> Result<(),
             .collect();
         writeln!(
             psm_file,
-            "{}\t{}\t{}\t{:.6}\t{:.6}\t{:.2}\t{:.6}\t{}\t{}\t{}\t{}",
+            "{}\t{}\t{}\t{:.8}\t{:.8}\t{:.2}\t{:.6}\t{}\t{}\t{}\t{}",
             psm.spectrum_scan,
             sanitize_tsv(&psm.peptide_sequence),
             psm.charge,

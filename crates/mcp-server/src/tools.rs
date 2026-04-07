@@ -493,7 +493,7 @@ impl ProteinCopilotServer {
                 .lock()
                 .map_err(|_| mcp_err(ErrorCode::INTERNAL_ERROR, "cache lock failed"))?;
             let state = cache.get(&id).ok_or_else(|| {
-                mcp_err(ErrorCode::INVALID_PARAMS, format!("run_id {id} not found"))
+                mcp_err(ErrorCode::INVALID_PARAMS, format!("run_id {id} not found — it may have been evicted from the cache (max 100 recent runs are kept)"))
             })?;
             return state.result.clone().ok_or_else(|| {
                 mcp_err(
@@ -527,6 +527,28 @@ impl ServerHandler for ProteinCopilotServer {
     }
 }
 
+/// Validate that a file_path string is non-empty.
+fn validate_file_path(path: &str) -> Result<(), ErrorData> {
+    if path.trim().is_empty() {
+        return Err(mcp_err(
+            ErrorCode::INVALID_PARAMS,
+            "file_path cannot be empty",
+        ));
+    }
+    Ok(())
+}
+
+/// Validate that a scan_number is >= 1 (1-based indexing).
+fn validate_scan_number(scan: u32) -> Result<(), ErrorData> {
+    if scan == 0 {
+        return Err(mcp_err(
+            ErrorCode::INVALID_PARAMS,
+            "scan_number must be >= 1 (1-based indexing)",
+        ));
+    }
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Tool implementations
 // ---------------------------------------------------------------------------
@@ -542,6 +564,7 @@ impl ProteinCopilotServer {
         &self,
         Parameters(input): Parameters<ReadSpectraInput>,
     ) -> Result<Json<SpectrumSummary>, ErrorData> {
+        validate_file_path(&input.file_path)?;
         let path = Path::new(&input.file_path);
         let info = protein_copilot_spectrum_io::detect_format(path)
             .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
@@ -561,6 +584,8 @@ impl ProteinCopilotServer {
         &self,
         Parameters(input): Parameters<GetSpectrumInput>,
     ) -> Result<Json<Spectrum>, ErrorData> {
+        validate_file_path(&input.file_path)?;
+        validate_scan_number(input.scan_number)?;
         let path = Path::new(&input.file_path);
         let info = protein_copilot_spectrum_io::detect_format(path)
             .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
@@ -584,6 +609,7 @@ impl ProteinCopilotServer {
         let summary = if let Some(s) = input.summary {
             s
         } else if let Some(ref fp) = input.file_path {
+            validate_file_path(fp)?;
             let path = std::path::Path::new(fp);
             let info = protein_copilot_spectrum_io::detect_format(path)
                 .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
@@ -1048,7 +1074,7 @@ impl ProteinCopilotServer {
             .map_err(|_| mcp_err(ErrorCode::INTERNAL_ERROR, "cache lock failed"))?;
         let state = cache
             .get(&id)
-            .ok_or_else(|| mcp_err(ErrorCode::INVALID_PARAMS, format!("run_id {id} not found")))?;
+            .ok_or_else(|| mcp_err(ErrorCode::INVALID_PARAMS, format!("run_id {id} not found — it may have been evicted from the cache (max 100 recent runs are kept)")))?;
         Ok(Json(state.progress.clone()))
     }
 
@@ -1069,7 +1095,7 @@ impl ProteinCopilotServer {
             .map_err(|_| mcp_err(ErrorCode::INTERNAL_ERROR, "cache lock failed"))?;
         let state = cache
             .get_mut(&id)
-            .ok_or_else(|| mcp_err(ErrorCode::INVALID_PARAMS, format!("run_id {id} not found")))?;
+            .ok_or_else(|| mcp_err(ErrorCode::INVALID_PARAMS, format!("run_id {id} not found — it may have been evicted from the cache (max 100 recent runs are kept)")))?;
 
         if state.progress.status != "Running" {
             return Err(mcp_err(
@@ -1281,6 +1307,14 @@ impl ProteinCopilotServer {
             (&input.file_path, &input.peptide_sequence, input.charge)
         {
             // Mode 2: manual annotation
+            validate_file_path(fp)?;
+            validate_scan_number(input.scan_number)?;
+            if pep.trim().is_empty() {
+                return Err(mcp_err(
+                    ErrorCode::INVALID_PARAMS,
+                    "peptide_sequence cannot be empty in manual annotation mode",
+                ));
+            }
             (
                 PathBuf::from(fp),
                 pep.clone(),
@@ -1356,6 +1390,7 @@ impl ProteinCopilotServer {
         &self,
         Parameters(input): Parameters<ExtractDiaPrecursorsInput>,
     ) -> Result<Json<DiaExtractionOutput>, ErrorData> {
+        validate_file_path(&input.file_path)?;
         let path = Path::new(&input.file_path);
         let info = protein_copilot_spectrum_io::detect_format(path)
             .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
@@ -1443,6 +1478,8 @@ impl ProteinCopilotServer {
         &self,
         Parameters(input): Parameters<ExtractSpectrumPrecursorsInput>,
     ) -> Result<Json<SingleSpectrumExtractionResult>, ErrorData> {
+        validate_file_path(&input.file_path)?;
+        validate_scan_number(input.scan_number)?;
         let path = Path::new(&input.file_path);
         let info = protein_copilot_spectrum_io::detect_format(path)
             .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;

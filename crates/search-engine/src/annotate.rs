@@ -521,8 +521,8 @@ mod tests {
         let prec_mz = peptide_mz(mass, charge);
 
         // Build experimental peaks from exact b/y ion positions
-        let b = generate_b_ions(seq);
-        let y = generate_y_ions(seq);
+        let b = generate_b_ions(seq, &[]);
+        let y = generate_y_ions(seq, &[]);
         let mut peaks: Vec<f64> = b.iter().chain(y.iter()).copied().collect();
         peaks.sort_by(|a, b| a.total_cmp(b));
         peaks.dedup();
@@ -617,7 +617,7 @@ mod tests {
         let mass = peptide_mass(seq).unwrap();
         let prec_mz = peptide_mz(mass, charge);
 
-        let b = generate_b_ions(seq);
+        let b = generate_b_ions(seq, &[]);
         // Add noise peaks that don't match any theoretical ion
         let noise_peaks = [50.0, 150.5, 850.0, 1200.0];
         let mut peaks: Vec<f64> = b
@@ -658,8 +658,8 @@ mod tests {
         let mass = peptide_mass(seq).unwrap();
         let prec_mz = peptide_mz(mass, charge);
 
-        let b = generate_b_ions(seq);
-        let y = generate_y_ions(seq);
+        let b = generate_b_ions(seq, &[]);
+        let y = generate_y_ions(seq, &[]);
         let mut peaks: Vec<f64> = b.iter().chain(y.iter()).copied().collect();
         peaks.sort_by(|a, b| a.total_cmp(b));
         peaks.dedup();

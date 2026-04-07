@@ -179,3 +179,29 @@ delta_ppm = (observed - theoretical) / theoretical × 1e6
 - **隔离窗口宽度** = `lower_offset + upper_offset`（总宽度，非半宽）
 - **DIA 判定阈值**: 中位窗口宽度 > 5 Da
 - **局限**: 5 Da 窄窗口 DIA 会被误判为 DDA（可通过 `acquisition_mode` 手动指定）
+
+---
+
+## 代码审计验证记录
+
+以下问题在代码审计中被标记，经过分析确认为安全/非问题：
+
+### cancel_search 竞态条件 — 安全
+
+`cancel_search()` 持有 Mutex 锁的同时检查并修改状态为 "Cancelled"。后台搜索任务在写入 "Completed" 前也需要获取同一把锁，并会检查 `status == "Cancelled"` 后跳过覆盖。`PanicGuard` 也检查 `status == "Running"` 才覆盖。因此不存在竞态条件。
+
+### 空谱图/空文件处理 — 安全
+
+`Spectrum::validate()` 会拒绝空 peaks 数据（`NoPeaks` 错误）。mzML/MGF reader 在解析后调用 `validate()`，因此不会产生无效谱图进入下游流程。空文件会在 reader 层返回空 Vec，搜索引擎对空输入返回空结果而非 panic。
+
+### Target-Decoy 未实现 — MVP 已知限制
+
+当前 `DecoyStrategy::Reverse` 被接受但实际由搜索引擎内部处理。Rust 侧未实现独立的 decoy 数据库生成。这是 MVP 的已知限制（参见 `tasks/001` 中 FW-6）。
+
+### FDR 硬编码 1% — MVP 已知限制
+
+`report` crate 中 FDR 阈值硬编码为 1%（PSM/肽段/蛋白质）。可配置 FDR 阈值列为未来工作。
+
+### DIA 5 Da 检测阈值 — 已文档化
+
+窄窗口 DIA（<5 Da）可能被误判为 DDA。用户可通过 `acquisition_mode` 参数手动覆盖。

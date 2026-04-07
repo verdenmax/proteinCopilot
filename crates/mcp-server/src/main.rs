@@ -23,6 +23,15 @@ async fn main() {
     tracing::info!("Starting ProteinCopilot MCP Server");
 
     let server = ProteinCopilotServer::new();
-    let service = server.serve(stdio()).await.unwrap();
-    service.waiting().await.unwrap();
+    let service = match server.serve(stdio()).await {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::error!("Failed to start MCP server: {e}");
+            std::process::exit(1);
+        }
+    };
+    if let Err(e) = service.waiting().await {
+        tracing::error!("MCP server exited with error: {e}");
+        std::process::exit(1);
+    }
 }
