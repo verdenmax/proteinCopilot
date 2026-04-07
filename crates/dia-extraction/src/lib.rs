@@ -72,8 +72,8 @@ pub fn extract_dia_precursors(
         if let Some(idx) = ms1_idx {
             if let Some(iw) = ms2
                 .precursors
-                .first()
-                .and_then(|p| p.isolation_window.as_ref())
+                .iter()
+                .find_map(|p| p.isolation_window.as_ref())
             {
                 let candidates = extractor.extract(ms1_refs[*idx], iw);
                 cloned.precursors = candidates;
@@ -133,11 +133,11 @@ pub fn extract_single_spectrum_precursors(
         .find(|s| s.scan_number == scan_number && s.ms_level == MsLevel::MS2)
         .ok_or(DiaExtractionError::ScanNotFound { scan: scan_number })?;
 
-    // Get isolation window
+    // Get isolation window (from any precursor that has one)
     let isolation_window = ms2
         .precursors
-        .first()
-        .and_then(|p| p.isolation_window.clone())
+        .iter()
+        .find_map(|p| p.isolation_window.clone())
         .ok_or(DiaExtractionError::NoIsolationWindow { scan: scan_number })?;
 
     // Collect MS1 spectra

@@ -38,6 +38,11 @@ impl Default for IsotopePatternExtractor {
 
 impl PrecursorExtractor for IsotopePatternExtractor {
     fn extract(&self, ms1: &Spectrum, isolation_window: &IsolationWindow) -> Vec<PrecursorInfo> {
+        // Guard against invalid charge range
+        if self.min_charge < 1 || self.max_charge < self.min_charge {
+            return Vec::new();
+        }
+
         let low = isolation_window.target_mz - isolation_window.lower_offset;
         let high = isolation_window.target_mz + isolation_window.upper_offset;
 

@@ -11,7 +11,7 @@ use crate::error::ReportError;
 
 /// Sanitizes a string for TSV output by replacing tabs and newlines.
 fn sanitize_tsv(s: &str) -> String {
-    s.replace(['\t', '\n'], " ").replace('\r', "")
+    s.replace(['\t', '\n', '\r'], " ")
 }
 
 /// Exports search results as 3 TSV files in the given directory.

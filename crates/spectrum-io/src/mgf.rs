@@ -127,6 +127,21 @@ where
         }
 
         if trimmed == "BEGIN IONS" {
+            // Recover incomplete previous block (missing END IONS)
+            if let Some(prev) = block.take() {
+                tracing::warn!(
+                    "MGF line {}: BEGIN IONS without closing END IONS for previous block \
+                     (started at line {}); recovering previous spectrum",
+                    line_idx + 1,
+                    block_start_line,
+                );
+                let spectrum = prev.into_spectrum(fallback_scan, path, block_start_line)?;
+                let keep_going = handler(spectrum)?;
+                count += 1;
+                if !keep_going {
+                    return Ok(count);
+                }
+            }
             block = Some(MgfBlock::default());
             block_start_line = line_idx + 1; // 1-based
             fallback_scan += 1;

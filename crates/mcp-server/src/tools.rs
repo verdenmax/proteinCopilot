@@ -1364,9 +1364,21 @@ impl ProteinCopilotServer {
         // Configure extractor
         let mut extractor = IsotopePatternExtractor::default();
         if let Some(min_c) = input.min_charge {
+            if min_c < 1 {
+                return Err(mcp_err(
+                    ErrorCode::INVALID_PARAMS,
+                    "min_charge must be >= 1",
+                ));
+            }
             extractor.min_charge = min_c;
         }
         if let Some(max_c) = input.max_charge {
+            if max_c < extractor.min_charge {
+                return Err(mcp_err(
+                    ErrorCode::INVALID_PARAMS,
+                    "max_charge must be >= min_charge",
+                ));
+            }
             extractor.max_charge = max_c;
         }
 
@@ -1438,9 +1450,21 @@ impl ProteinCopilotServer {
 
         let mut extractor = IsotopePatternExtractor::default();
         if let Some(min_c) = input.min_charge {
+            if min_c < 1 {
+                return Err(mcp_err(
+                    ErrorCode::INVALID_PARAMS,
+                    "min_charge must be >= 1",
+                ));
+            }
             extractor.min_charge = min_c;
         }
         if let Some(max_c) = input.max_charge {
+            if max_c < extractor.min_charge {
+                return Err(mcp_err(
+                    ErrorCode::INVALID_PARAMS,
+                    "max_charge must be >= min_charge",
+                ));
+            }
             extractor.max_charge = max_c;
         }
 

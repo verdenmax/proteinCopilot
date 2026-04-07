@@ -437,6 +437,13 @@ impl SpectrumSummary {
                 max: self.rt_range_sec[1],
             });
         }
+        if let Some(w) = self.median_isolation_window_da {
+            if !w.is_finite() {
+                return Err(SpectrumError::NonFiniteValue {
+                    field: "median_isolation_window_da",
+                });
+            }
+        }
         Ok(())
     }
 }

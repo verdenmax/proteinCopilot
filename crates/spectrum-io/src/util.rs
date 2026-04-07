@@ -159,8 +159,7 @@ impl SummaryAccumulator {
         let median_iw = if self.isolation_widths.is_empty() {
             None
         } else {
-            let mid = self.isolation_widths.len() / 2;
-            Some(self.isolation_widths[mid])
+            Some(protein_copilot_core::util::compute_median(&self.isolation_widths))
         };
 
         let summary = SpectrumSummary {

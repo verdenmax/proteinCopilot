@@ -283,6 +283,11 @@ pub fn annotate_spectrum(
     protein_accessions: Vec<String>,
 ) -> Result<SpectrumAnnotation, SearchEngineError> {
     // --- Validation ---
+    if charge <= 0 {
+        return Err(SearchEngineError::ExecutionError {
+            detail: format!("charge must be >= 1, got {charge}"),
+        });
+    }
     if spectrum.mz_array.is_empty() {
         return Err(SearchEngineError::ExecutionError {
             detail: "spectrum has no peaks".to_string(),
