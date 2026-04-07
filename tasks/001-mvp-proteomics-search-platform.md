@@ -3,7 +3,7 @@
 > **文件名**：`prd-mvp-proteomics-search.md`
 > **版本**：1.0
 > **创建日期**：2026-03-27
-> **状态**：In Progress — M1.1 ✅ M1.2 ✅ M1.3 ✅ M1.4 ✅ M1.5 ✅ M1.6 ✅ M1.7 ✅（357 tests, 0 warnings）— MVP 完成 + Post-MVP 功能（异步搜索优化、搜索历史持久化、谱图注释可视化）+ DIA 数据支持（前体提取 + 搜索集成 + 端到端工作流）
+> **状态**：In Progress — M1.1 ✅ M1.2 ✅ M1.3 ✅ M1.4 ✅ M1.5 ✅ M1.6 ✅ M1.7 ✅（379 tests, 0 warnings）— MVP 完成 + Post-MVP 功能（异步搜索优化、搜索历史持久化、谱图注释可视化）+ DIA 数据支持（前体提取 + 搜索集成 + 端到端工作流）+ Biology Audit 完成
 
 ---
 
@@ -995,3 +995,47 @@ M1.7 (集成验证)    ← 需要所有 MVP Milestone
 - `SimpleSearchEngine` 重构：`run_search_on_spectra()` 提取核心逻辑
 - `RunSearchInput` 增加 `dia_run_id` 参数
 - 完整 DIA 工作流：`extract_dia_precursors` → `run_search(dia_run_id=...)`
+
+---
+
+## Biology Audit: 已修复与未来工作
+
+> **审计日期**: 2026-04-07
+> **审计范围**: 全部 7 个 crate 的生物学/化学计算正确性
+
+### 已验证正确 ✅
+
+| 检查项 | 结果 |
+|--------|------|
+| 20 种氨基酸单同位素残基质量 | 与 NIST 标准一致 |
+| PROTON_MASS (1.007276 Da) | 正确 |
+| WATER_MASS (18.010565 Da) | 正确 |
+| ¹³C-¹²C 质量差 (1.003355 Da) | 正确 |
+| b 离子公式 (Σ残基，不加水) | 正确 |
+| y 离子公式 (Σ残基 + H₂O) | 正确 |
+| PPM 计算 (分母为理论值) | 正确 |
+| 修饰质量 (CAM/Ox/Phospho/TMT/SILAC) | 与 UniMod 一致 |
+| 酶切规则 (Trypsin K/R not before P 等) | 正确 |
+| DIA 隔离窗口解读 | 正确 |
+| 同位素峰间距与检测 | 正确 |
+
+### 已修复 🔧
+
+| # | 问题 | 修复方案 | 影响 |
+|---|------|----------|------|
+| BIO-1 | `SearchParams` 缺少 `max_variable_modifications` | 添加字段，默认 3，上限 10 | 防止可变修饰组合爆炸 |
+| BIO-2 | 肽段长度 6-50 硬编码 | 添加 `min/max_peptide_length` 到 SearchParams，默认 7/50 | 可配置，标准值 |
+| BIO-3 | `DigestedPeptide` 缺少蛋白端位标记 | 添加 `is_protein_nterm/cterm` | 为 ProteinNTerm 修饰枚举做准备 |
+| BIO-4 | DIA 检测缺少非对称窗口文档 | 补充详细文档注释 | 说明 5 Da 阈值的合理性与局限 |
+
+### 未来工作（Phase 2+）
+
+| # | 工作项 | 优先级 | 依赖 | 说明 |
+|---|--------|--------|------|------|
+| FW-1 | **ProteinNTerm 修饰枚举** | 高 | 可变修饰枚举实现 | 搜索时仅对 `is_protein_nterm=true` 的肽段应用 ProteinNTerm 修饰（如 Acetyl） |
+| FW-2 | **可变修饰组合枚举** | 高 | — | 实现 `max_variable_modifications` 限制的组合生成算法 |
+| FW-3 | **ppm 碎片离子容差** | 中 | — | 预设改用 ppm（20 ppm）代替 Da（0.02 Da），对高分辨 Orbitrap HCD 更准确 |
+| FW-4 | **多电荷碎片离子** | 中 | — | 对高电荷母离子（z≥3），生成 b²⁺/y²⁺ 碎片离子提高匹配率 |
+| FW-5 | **a/c/x/z 离子系列** | 低 | — | ETD/ECD 碎裂模式需要 c/z 离子；CID 辅助可加 a 离子 |
+| FW-6 | **原生 FDR 计算** | 高 | M2.2 | 实现 target-decoy FDR + q-value 单调化，不再依赖外部引擎 |
+| FW-7 | **负离子模式** | 低 | — | 当前仅支持正离子 [M+nH]ⁿ⁺，负模式需要 [M-nH]ⁿ⁻ |

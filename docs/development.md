@@ -125,3 +125,54 @@ cargo build --release -p protein-copilot-mcp-server
 
 当前 MVP 使用 **SimpleSearchEngine**（内置简化搜索引擎），不需要 SSH 或外部依赖。
 后续接入 pFind 后，Agent 工作流程不变，`run_search` tool 会通过 `EngineRegistry` 自动分发到 pFind adapter。
+
+## 质谱学生物学约定
+
+以下常数和公式已经过审计验证（2026-04-07），与 NIST/UniMod 标准一致。
+
+### 质量常数 (`crates/search-engine/src/chemistry.rs`)
+
+| 常数 | 值 (Da) | 来源 |
+|------|---------|------|
+| PROTON_MASS | 1.007276 | NIST |
+| WATER_MASS | 18.010565 | H₂O 单同位素 |
+| C13_C12_MASS_DIFF | 1.003355 | ¹³C - ¹²C（`crates/dia-extraction/src/isotope.rs`） |
+
+### 碎片离子公式
+
+- **b 离子**: `b_n = Σ(residue_1..n)` — 不含水
+- **y 离子**: `y_n = Σ(residue_{n+1}..end) + H₂O` — 含水（C 端保留 OH，N 端保留 H）
+- **m/z 转换**: `ion_mz = (ion_mass + charge × PROTON_MASS) / charge`
+- **当前限制**: 仅生成单电荷碎片（b¹⁺, y¹⁺）
+
+### PPM 计算
+
+```
+delta_ppm = (observed - theoretical) / theoretical × 1e6
+```
+
+分母始终使用**理论值**（不是观测值）。
+
+### 修饰应用规则
+
+- **固定修饰**: 自动应用到所有目标残基
+- **可变修饰**: 组合枚举，受 `max_variable_modifications` 限制（默认 3）
+- **N 端修饰**: `AnyNTerm` 应用于所有肽段 N 端；`ProteinNTerm` 仅应用于蛋白质第一条肽段（需要 `DigestedPeptide.is_protein_nterm` 标志）
+- **C 端修饰**: 同理，使用 `is_protein_cterm` 标志
+
+### 酶切规则
+
+| 酶 | 规则 | 异常 |
+|----|------|------|
+| Trypsin | K/R 后切 | P 前不切 |
+| Trypsin/P | K/R 后切 | 无异常 |
+| Lys-C | K 后切 | — |
+| Glu-C | D/E 后切 | — |
+| Asp-N | D **前**切 | — |
+| Chymotrypsin | F/W/Y/L 后切 | — |
+
+### DIA 检测
+
+- **隔离窗口宽度** = `lower_offset + upper_offset`（总宽度，非半宽）
+- **DIA 判定阈值**: 中位窗口宽度 > 5 Da
+- **局限**: 5 Da 窄窗口 DIA 会被误判为 DDA（可通过 `acquisition_mode` 手动指定）
