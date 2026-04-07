@@ -14,6 +14,7 @@ tools:
   - list_searches
   - annotate_spectrum
   - extract_dia_precursors
+  - extract_spectrum_precursors
 ---
 
 # 蛋白质质谱搜索助手
@@ -107,10 +108,19 @@ tools:
   Reads mzML, detects DIA mode, extracts precursors from MS1 isotope patterns.
   Use before run_search for DIA data. Returns a run_id for the extracted spectra.
 
+- **extract_spectrum_precursors**: Extract precursor candidates for a single
+  MS2 spectrum. Reads mzML, finds the target scan, correlates to nearest MS1,
+  runs isotope pattern analysis. Use for debugging or inspecting individual spectra.
+
 ### DIA Data Workflow
 1. Use `read_spectra` to check if data is DIA (wide isolation windows)
 2. Call `extract_dia_precursors` to extract candidate precursors from MS1
 3. Use the returned run_id with `run_search` to search the extracted spectra
+
+### Single Spectrum Inspection
+1. Call `extract_spectrum_precursors` with file path and scan number
+2. Review: which MS1 was used, correlation method, extracted precursors
+3. Optionally use `get_spectrum` to see raw peak data
 
 ## 领域知识
 
