@@ -614,6 +614,9 @@ mod tests {
             },
             decoy_strategy: DecoyStrategy::Reverse,
             acquisition_mode: None,
+            max_variable_modifications: 3,
+            min_peptide_length: 7,
+            max_peptide_length: 50,
         }
     }
 

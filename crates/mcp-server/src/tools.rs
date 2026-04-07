@@ -1213,6 +1213,9 @@ impl ProteinCopilotServer {
                             decoy_strategy:
                                 protein_copilot_core::search_params::DecoyStrategy::Reverse,
                             acquisition_mode: None,
+            max_variable_modifications: 3,
+            min_peptide_length: 7,
+            max_peptide_length: 50,
                         },
                         total_psms: None,
                         psms_at_1pct_fdr: None,

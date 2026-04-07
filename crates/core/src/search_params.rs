@@ -56,6 +56,28 @@ pub enum SearchParamsError {
         /// The invalid mass_delta value.
         value: f64,
     },
+
+    /// max_variable_modifications exceeds limit.
+    #[error("max_variable_modifications must be <= {max}, got {actual}")]
+    TooManyVariableMods {
+        /// The value provided.
+        actual: u32,
+        /// The maximum allowed.
+        max: u32,
+    },
+
+    /// min_peptide_length is zero.
+    #[error("min_peptide_length must be >= 1, got 0")]
+    ZeroPeptideLength,
+
+    /// min_peptide_length > max_peptide_length.
+    #[error("min_peptide_length ({min}) must be <= max_peptide_length ({max})")]
+    InvalidPeptideLengthRange {
+        /// The minimum value provided.
+        min: u32,
+        /// The maximum value provided.
+        max: u32,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -198,6 +220,19 @@ pub enum DecoyStrategy {
 /// Maximum allowed value for `missed_cleavages`.
 const MAX_MISSED_CLEAVAGES: u32 = 5;
 
+/// Maximum allowed value for `max_variable_modifications`.
+const MAX_VARIABLE_MODS_LIMIT: u32 = 10;
+
+fn default_max_variable_modifications() -> u32 {
+    3
+}
+fn default_min_peptide_length() -> u32 {
+    7
+}
+fn default_max_peptide_length() -> u32 {
+    50
+}
+
 /// Complete search configuration for a proteomics database search.
 ///
 /// Use [`SearchParams::validate()`] after construction or deserialization
@@ -223,6 +258,21 @@ pub struct SearchParams {
     /// Data acquisition mode. `None` = auto-detect or not applicable.
     #[serde(default)]
     pub acquisition_mode: Option<AcquisitionMode>,
+
+    /// Maximum number of variable modifications per peptide (default: 3).
+    /// Limits combinatorial explosion during variable modification enumeration.
+    #[serde(default = "default_max_variable_modifications")]
+    pub max_variable_modifications: u32,
+
+    /// Minimum peptide length in residues (default: 7).
+    /// Peptides shorter than this are excluded from search results.
+    #[serde(default = "default_min_peptide_length")]
+    pub min_peptide_length: u32,
+
+    /// Maximum peptide length in residues (default: 50).
+    /// Peptides longer than this are excluded from search results.
+    #[serde(default = "default_max_peptide_length")]
+    pub max_peptide_length: u32,
 }
 
 impl SearchParams {
@@ -265,6 +315,21 @@ impl SearchParams {
                     value: m.mass_delta,
                 });
             }
+        }
+        if self.max_variable_modifications > MAX_VARIABLE_MODS_LIMIT {
+            return Err(SearchParamsError::TooManyVariableMods {
+                actual: self.max_variable_modifications,
+                max: MAX_VARIABLE_MODS_LIMIT,
+            });
+        }
+        if self.min_peptide_length == 0 {
+            return Err(SearchParamsError::ZeroPeptideLength);
+        }
+        if self.min_peptide_length > self.max_peptide_length {
+            return Err(SearchParamsError::InvalidPeptideLengthRange {
+                min: self.min_peptide_length,
+                max: self.max_peptide_length,
+            });
         }
         Ok(())
     }
@@ -313,6 +378,9 @@ mod tests {
             database_path: "/data/uniprot_human.fasta".to_string(),
             decoy_strategy: DecoyStrategy::Reverse,
             acquisition_mode: None,
+            max_variable_modifications: 3,
+            min_peptide_length: 7,
+            max_peptide_length: 50,
         }
     }
 
@@ -566,5 +634,71 @@ mod tests {
             SearchParamsError::InvalidModificationMassDelta { .. }
         ));
         assert!(err.to_string().contains("Oxidation"));
+    }
+
+    // -- New field validation ------------------------------------------
+
+    #[test]
+    fn new_fields_serde_default() {
+        let json = r#"{
+            "enzyme": "Trypsin",
+            "missed_cleavages": 2,
+            "fixed_modifications": [],
+            "variable_modifications": [],
+            "precursor_tolerance": {"value": 10.0, "unit": "Ppm"},
+            "fragment_tolerance": {"value": 0.02, "unit": "Da"},
+            "database_path": "test.fasta",
+            "decoy_strategy": "Reverse"
+        }"#;
+        let params: SearchParams = serde_json::from_str(json).unwrap();
+        assert_eq!(params.max_variable_modifications, 3);
+        assert_eq!(params.min_peptide_length, 7);
+        assert_eq!(params.max_peptide_length, 50);
+    }
+
+    #[test]
+    fn validate_rejects_excessive_variable_mods() {
+        let mut p = valid_params();
+        p.max_variable_modifications = 11;
+        assert!(matches!(
+            p.validate(),
+            Err(SearchParamsError::TooManyVariableMods { actual: 11, max: 10 })
+        ));
+    }
+
+    #[test]
+    fn validate_allows_max_variable_mods() {
+        let mut p = valid_params();
+        p.max_variable_modifications = 10;
+        assert!(p.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_zero_peptide_length() {
+        let mut p = valid_params();
+        p.min_peptide_length = 0;
+        assert!(matches!(
+            p.validate(),
+            Err(SearchParamsError::ZeroPeptideLength)
+        ));
+    }
+
+    #[test]
+    fn validate_rejects_min_gt_max_peptide_length() {
+        let mut p = valid_params();
+        p.min_peptide_length = 20;
+        p.max_peptide_length = 10;
+        assert!(matches!(
+            p.validate(),
+            Err(SearchParamsError::InvalidPeptideLengthRange { min: 20, max: 10 })
+        ));
+    }
+
+    #[test]
+    fn validate_allows_equal_min_max_peptide_length() {
+        let mut p = valid_params();
+        p.min_peptide_length = 10;
+        p.max_peptide_length = 10;
+        assert!(p.validate().is_ok());
     }
 }
