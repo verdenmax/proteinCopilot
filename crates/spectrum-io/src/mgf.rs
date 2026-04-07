@@ -85,13 +85,15 @@ fn parse_charge(s: &str) -> Option<i32> {
     if s.is_empty() {
         return None;
     }
-    if let Some(num_str) = s.strip_suffix('+') {
+    let value = if let Some(num_str) = s.strip_suffix('+') {
         num_str.trim().parse::<i32>().ok()
     } else if let Some(num_str) = s.strip_suffix('-') {
         num_str.trim().parse::<i32>().ok().map(|v| -v)
     } else {
         s.parse::<i32>().ok()
-    }
+    };
+    // Charge 0 is physically meaningless; treat as unknown
+    value.filter(|&v| v != 0)
 }
 
 /// Parses a PEPMASS field value like "471.2561" or "471.2561 1500000.0".

@@ -79,10 +79,38 @@ impl PrecursorExtractor for IsotopePatternExtractor {
             for z in self.min_charge..=self.max_charge {
                 let delta = C13_C12_MASS_DIFF / z as f64;
                 let mut cluster_indices = vec![seed_idx];
+
+                // Look BACKWARD one step for the monoisotopic peak (M+0).
+                // The seed may be M+1 for large peptides where M+1 > M+0.
+                // Only accept if the lighter peak has reasonable intensity.
+                {
+                    let expected_mz = seed_mz - delta;
+                    let mut best_candidate: Option<(usize, f64, f64)> = None;
+                    let mut best_dist = f64::MAX;
+
+                    for &(idx, mz, intensity) in &peaks {
+                        if used[idx] || idx == seed_idx {
+                            continue;
+                        }
+                        let dist = (mz - expected_mz).abs();
+                        if dist <= self.isotope_tolerance_da && dist < best_dist {
+                            best_candidate = Some((idx, mz, intensity));
+                            best_dist = dist;
+                        }
+                    }
+
+                    if let Some((idx, _, intensity)) = best_candidate {
+                        // M+0 should be at least min_intensity_ratio of seed
+                        if intensity >= self.min_intensity_ratio * seed_intensity {
+                            cluster_indices.push(idx);
+                        }
+                    }
+                }
+
+                // Look FORWARD for heavier isotope peaks (+1, +2, +3, ...).
                 let mut prev_intensity = seed_intensity;
                 let mut current_mz = seed_mz;
 
-                // Look for successive isotope peaks (+1, +2, +3, ...).
                 loop {
                     let expected_mz = current_mz + delta;
 
@@ -143,8 +171,17 @@ impl PrecursorExtractor for IsotopePatternExtractor {
                 for &idx in &indices {
                     used[idx] = true;
                 }
+                // Use the monoisotopic (lowest m/z) peak from the cluster,
+                // not the seed peak which may be M+1 or M+2.
+                let monoisotopic_mz = indices
+                    .iter()
+                    .filter_map(|&idx| {
+                        peaks.iter().find(|(i, _, _)| *i == idx).map(|&(_, mz, _)| mz)
+                    })
+                    .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                    .unwrap_or(seed_mz);
                 candidates.push(PrecursorInfo {
-                    mz: seed_mz,
+                    mz: monoisotopic_mz,
                     charge: Some(charge),
                     intensity: Some(seed_intensity),
                     isolation_window: None,
