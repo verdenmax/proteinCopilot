@@ -402,6 +402,7 @@ mod tests {
             rt_range_sec: [0.0, 3600.0],
             precursor_charge_distribution: charge_dist,
             median_peaks_per_spectrum: 256,
+            median_isolation_window_da: None,
         }
     }
 
@@ -419,6 +420,7 @@ mod tests {
             rt_range_sec: [0.0, 1800.0],
             precursor_charge_distribution: charge_dist,
             median_peaks_per_spectrum: 50,
+            median_isolation_window_da: None,
         }
     }
 
@@ -433,6 +435,7 @@ mod tests {
             rt_range_sec: [0.0, 0.0],
             precursor_charge_distribution: HashMap::new(),
             median_peaks_per_spectrum: 0,
+            median_isolation_window_da: None,
         }
     }
 

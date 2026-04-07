@@ -72,6 +72,7 @@ pub(crate) struct SummaryAccumulator {
     rt_max: f64,
     charge_dist: HashMap<i32, u64>,
     peak_counts: Vec<u32>,
+    isolation_widths: Vec<f64>,
 }
 
 impl SummaryAccumulator {
@@ -87,6 +88,7 @@ impl SummaryAccumulator {
             rt_max: f64::MIN,
             charge_dist: HashMap::new(),
             peak_counts: Vec::new(),
+            isolation_widths: Vec::new(),
         }
     }
 
@@ -122,6 +124,12 @@ impl SummaryAccumulator {
             if let Some(c) = p.charge {
                 *self.charge_dist.entry(c).or_insert(0) += 1;
             }
+            if let Some(iw) = &p.isolation_window {
+                let width = iw.lower_offset + iw.upper_offset;
+                if width.is_finite() && width > 0.0 {
+                    self.isolation_widths.push(width);
+                }
+            }
         }
 
         self.peak_counts.push(s.num_peaks() as u32);
@@ -145,6 +153,16 @@ impl SummaryAccumulator {
         self.peak_counts.sort_unstable();
         let median_peaks = protein_copilot_core::util::compute_median_u32(&self.peak_counts);
 
+        // Compute median isolation window width
+        self.isolation_widths
+            .sort_unstable_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let median_iw = if self.isolation_widths.is_empty() {
+            None
+        } else {
+            let mid = self.isolation_widths.len() / 2;
+            Some(self.isolation_widths[mid])
+        };
+
         let summary = SpectrumSummary {
             file_path: path.to_string_lossy().to_string(),
             format,
@@ -155,6 +173,7 @@ impl SummaryAccumulator {
             rt_range_sec: [self.rt_min, self.rt_max],
             precursor_charge_distribution: self.charge_dist,
             median_peaks_per_spectrum: median_peaks,
+            median_isolation_window_da: median_iw,
         };
         summary
             .validate()

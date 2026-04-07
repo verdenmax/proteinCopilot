@@ -393,6 +393,10 @@ pub struct SpectrumSummary {
     pub precursor_charge_distribution: HashMap<i32, u64>,
     /// Median number of peaks per spectrum.
     pub median_peaks_per_spectrum: u32,
+    /// Median isolation window width in Da (`None` if no isolation windows found).
+    /// Useful for DIA detection: DDA windows are typically < 3 Da, DIA > 5 Da.
+    #[serde(default)]
+    pub median_isolation_window_da: Option<f64>,
 }
 
 impl SpectrumSummary {
@@ -483,6 +487,7 @@ mod tests {
             rt_range_sec: [0.0, 3600.0],
             precursor_charge_distribution: charge_dist,
             median_peaks_per_spectrum: 150,
+            median_isolation_window_da: None,
         }
     }
 
@@ -633,6 +638,7 @@ mod tests {
             rt_range_sec: [0.0, 0.0],
             precursor_charge_distribution: HashMap::new(),
             median_peaks_per_spectrum: 0,
+            median_isolation_window_da: None,
         };
         let json = serde_json::to_string(&summary).unwrap();
         let back: SpectrumSummary = serde_json::from_str(&json).unwrap();
