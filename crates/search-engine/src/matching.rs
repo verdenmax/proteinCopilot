@@ -361,6 +361,8 @@ mod tests {
             sequence: sequence.to_string(),
             protein_accession: accession.to_string(),
             neutral_mass: peptide_mass(sequence).expect("test uses standard residues"),
+            is_protein_nterm: false,
+            is_protein_cterm: false,
         }
     }
 
@@ -554,6 +556,8 @@ mod tests {
             sequence: "PEPTIDE".to_string(),
             protein_accession: "test".to_string(),
             neutral_mass: 1197.985448, // (600.0 - 1.007276) * 2
+            is_protein_nterm: false,
+            is_protein_cterm: false,
         }];
 
         let tol = MassTolerance {

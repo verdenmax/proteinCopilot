@@ -17,33 +17,59 @@ pub struct DigestedPeptide {
     pub protein_accession: String,
     /// Monoisotopic neutral mass (Da).
     pub neutral_mass: f64,
+    /// Whether this peptide starts at the protein N-terminus.
+    pub is_protein_nterm: bool,
+    /// Whether this peptide ends at the protein C-terminus.
+    pub is_protein_cterm: bool,
 }
 
 /// Digests a protein sequence with the given enzyme and missed cleavages.
 ///
-/// Returns a list of peptide sequences. Supports all enzyme types from core.
+/// Uses default peptide length range (6–50). For configurable lengths,
+/// use [`digest_with_length`].
 pub fn digest(
     sequence: &str,
     protein_accession: &str,
     enzyme: &Enzyme,
     missed_cleavages: u32,
 ) -> Vec<DigestedPeptide> {
+    digest_with_length(sequence, protein_accession, enzyme, missed_cleavages, 6, 50)
+}
+
+/// Digests a protein sequence with configurable peptide length range.
+///
+/// `min_length` and `max_length` control accepted peptide lengths (in residues).
+/// Also tracks whether each peptide is at the protein N- or C-terminus.
+pub fn digest_with_length(
+    sequence: &str,
+    protein_accession: &str,
+    enzyme: &Enzyme,
+    missed_cleavages: u32,
+    min_length: u32,
+    max_length: u32,
+) -> Vec<DigestedPeptide> {
     let cleavage_sites = find_cleavage_sites(sequence, enzyme);
     let fragments = split_at_sites(sequence, &cleavage_sites);
+    let num_fragments = fragments.len();
 
     let mut peptides = Vec::new();
 
     // Generate peptides with 0..=missed_cleavages missed sites
     for mc in 0..=(missed_cleavages as usize) {
-        for window in fragments.windows(mc + 1) {
+        for (i, window) in fragments.windows(mc + 1).enumerate() {
             let combined: String = window.concat();
-            if combined.len() >= 6 && combined.len() <= 50 {
+            let len = combined.len() as u32;
+            if len >= min_length && len <= max_length {
                 // Skip peptides containing non-standard amino acids
                 if let Some(mass) = peptide_mass(&combined) {
+                    let is_nterm = i == 0;
+                    let is_cterm = i + mc + 1 == num_fragments;
                     peptides.push(DigestedPeptide {
                         sequence: combined,
                         protein_accession: protein_accession.to_string(),
                         neutral_mass: mass,
+                        is_protein_nterm: is_nterm,
+                        is_protein_cterm: is_cterm,
                     });
                 }
             }
@@ -247,10 +273,75 @@ mod tests {
 
     #[test]
     fn peptide_length_filter() {
-        // Very short peptides (< 6 aa) should be filtered out
+        // Very short peptides (< 6 aa) should be filtered out (default digest)
         let peptides = digest("AVKCDKEFGHIKLMNR", "P001", &Enzyme::Trypsin, 0);
         for p in &peptides {
             assert!(p.sequence.len() >= 6, "peptide too short: {}", p.sequence);
         }
+    }
+
+    #[test]
+    fn digest_with_length_respects_min() {
+        let peptides = digest_with_length(
+            "PEPTIDEKANSTHERPEPTIDERLASTPART",
+            "P001",
+            &Enzyme::Trypsin,
+            0,
+            8,
+            50,
+        );
+        for p in &peptides {
+            assert!(p.sequence.len() >= 8, "too short: {}", p.sequence);
+        }
+        let seqs: Vec<&str> = peptides.iter().map(|p| p.sequence.as_str()).collect();
+        assert!(seqs.contains(&"PEPTIDEK")); // exactly 8
+    }
+
+    #[test]
+    fn digest_with_length_respects_max() {
+        let peptides = digest_with_length(
+            "PEPTIDEKANSTHERPEPTIDERLASTPART",
+            "P001",
+            &Enzyme::Trypsin,
+            0,
+            6,
+            10,
+        );
+        for p in &peptides {
+            assert!(p.sequence.len() <= 10, "too long: {}", p.sequence);
+        }
+    }
+
+    #[test]
+    fn digest_marks_protein_nterm() {
+        // PEPTIDEK | ANSTHER | TENDSWTGFAM
+        // 3 fragments, all >= 6 chars, last has no K/R → stays as C-terminal
+        let peptides = digest_with_length(
+            "PEPTIDEKANSTHERTENDSWTGFAM",
+            "P001",
+            &Enzyme::Trypsin,
+            0,
+            6,
+            50,
+        );
+        assert_eq!(peptides.len(), 3);
+        // First peptide should be protein N-terminal
+        assert!(peptides[0].is_protein_nterm, "first peptide should be N-term");
+        assert!(!peptides[0].is_protein_cterm);
+        // Last peptide should be protein C-terminal
+        let last = peptides.last().unwrap();
+        assert!(last.is_protein_cterm, "last peptide should be C-term");
+        assert!(!last.is_protein_nterm);
+        // Internal peptide is neither
+        assert!(!peptides[1].is_protein_nterm);
+        assert!(!peptides[1].is_protein_cterm);
+    }
+
+    #[test]
+    fn digest_single_peptide_is_both_terminal() {
+        let peptides = digest_with_length("PEPTIDEK", "P001", &Enzyme::Trypsin, 0, 6, 50);
+        assert_eq!(peptides.len(), 1);
+        assert!(peptides[0].is_protein_nterm);
+        assert!(peptides[0].is_protein_cterm);
     }
 }

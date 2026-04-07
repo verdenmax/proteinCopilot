@@ -21,7 +21,7 @@ use protein_copilot_core::search_result::{
 use protein_copilot_core::spectrum::{MsLevel, Spectrum};
 use uuid::Uuid;
 
-use crate::digest::{digest, DigestedPeptide};
+use crate::digest::{digest_with_length, DigestedPeptide};
 use crate::error::SearchEngineError;
 use crate::fasta::parse_fasta;
 use crate::matching::{match_spectrum, match_spectrum_all, PeptideMatch};
@@ -79,11 +79,13 @@ impl SimpleSearchEngine {
         report("Digesting proteins", 0.08);
         let mut all_peptides: Vec<DigestedPeptide> = Vec::new();
         for protein in &proteins {
-            let peptides = digest(
+            let peptides = digest_with_length(
                 &protein.sequence,
                 &protein.accession,
                 &params.enzyme,
                 params.missed_cleavages,
+                params.min_peptide_length,
+                params.max_peptide_length,
             );
             all_peptides.extend(peptides);
         }
@@ -92,8 +94,10 @@ impl SimpleSearchEngine {
             return Err(SearchEngineError::ExecutionError {
                 detail: format!(
                     "no candidate peptides generated from {} proteins \
-                     (all peptides may be shorter than 6 or longer than 50 residues)",
-                    proteins.len()
+                     (all peptides may be shorter than {} or longer than {} residues)",
+                    proteins.len(),
+                    params.min_peptide_length,
+                    params.max_peptide_length,
                 ),
             });
         }
@@ -307,11 +311,13 @@ impl SearchEngineAdapter for SimpleSearchEngine {
         report("Digesting proteins", 0.08);
         let mut all_peptides: Vec<DigestedPeptide> = Vec::new();
         for protein in &proteins {
-            let peptides = digest(
+            let peptides = digest_with_length(
                 &protein.sequence,
                 &protein.accession,
                 &params.enzyme,
                 params.missed_cleavages,
+                params.min_peptide_length,
+                params.max_peptide_length,
             );
             all_peptides.extend(peptides);
         }
@@ -320,8 +326,10 @@ impl SearchEngineAdapter for SimpleSearchEngine {
             return Err(CoreError::from(SearchEngineError::ExecutionError {
                 detail: format!(
                     "no candidate peptides generated from {} proteins \
-                     (all peptides may be shorter than 6 or longer than 50 residues)",
-                    proteins.len()
+                     (all peptides may be shorter than {} or longer than {} residues)",
+                    proteins.len(),
+                    params.min_peptide_length,
+                    params.max_peptide_length,
                 ),
             }));
         }
