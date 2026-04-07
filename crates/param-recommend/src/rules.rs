@@ -55,9 +55,15 @@ pub(crate) fn recommend(
         base.enzyme = enzyme;
     }
 
+    // Step 3.5: Detect DIA acquisition mode from isolation window width
+    let dia_detected = detect_dia(summary);
+    if dia_detected {
+        base.acquisition_mode = Some(protein_copilot_core::spectrum::AcquisitionMode::DIA);
+    }
+
     // Step 4: Build explanation, evidence, alternatives
-    let explanation = build_explanation(summary, &instrument, experiment_type);
-    let evidence = build_evidence(summary, &instrument);
+    let explanation = build_explanation(summary, &instrument, experiment_type, dia_detected);
+    let evidence = build_evidence(summary, &instrument, dia_detected);
     let alternatives = build_alternatives(experiment_type);
     let confidence = compute_confidence(hints, &instrument);
 
@@ -88,6 +94,20 @@ pub(crate) fn recommend(
         alternatives,
         evidence,
     })
+}
+
+// ---------------------------------------------------------------------------
+// DIA detection
+// ---------------------------------------------------------------------------
+
+/// Detect DIA acquisition mode based on median isolation window width.
+///
+/// Returns `true` if `median_isolation_window_da > 5.0 Da`.
+fn detect_dia(summary: &SpectrumSummary) -> bool {
+    summary
+        .median_isolation_window_da
+        .map(|w| w > 5.0)
+        .unwrap_or(false)
 }
 
 // ---------------------------------------------------------------------------
@@ -241,6 +261,7 @@ fn build_explanation(
     summary: &SpectrumSummary,
     instrument: &InstrumentClass,
     experiment_type: &str,
+    dia_detected: bool,
 ) -> String {
     let instrument_desc = match instrument {
         InstrumentClass::HighResolution => "high-resolution instrument (e.g., Orbitrap)",
@@ -254,16 +275,25 @@ fn build_explanation(
         InstrumentClass::General => "precursor tolerance 15 ppm, fragment tolerance 0.05 Da",
     };
 
-    format!(
+    let mut text = format!(
         "Based on m/z range [{:.0}-{:.0}] and median {:.0} peaks/spectrum, \
          inferred {instrument_desc}. Recommending {tolerance_desc}. \
          Experiment type: \"{experiment_type}\", using Trypsin digestion with \
          appropriate modification set.",
         summary.mz_range[0], summary.mz_range[1], summary.median_peaks_per_spectrum,
-    )
+    );
+
+    if dia_detected {
+        text.push_str(
+            " DIA acquisition mode detected (median isolation window > 5 Da). \
+             Use extract_dia_precursors tool before running search.",
+        );
+    }
+
+    text
 }
 
-fn build_evidence(summary: &SpectrumSummary, instrument: &InstrumentClass) -> Vec<String> {
+fn build_evidence(summary: &SpectrumSummary, instrument: &InstrumentClass, dia_detected: bool) -> Vec<String> {
     let mut evidence = vec![
         format!(
             "m/z range: {:.0}-{:.0}",
@@ -287,6 +317,12 @@ fn build_evidence(summary: &SpectrumSummary, instrument: &InstrumentClass) -> Ve
     }
 
     evidence.push(format!("Instrument inference: {:?}", instrument));
+
+    if dia_detected {
+        if let Some(w) = summary.median_isolation_window_da {
+            evidence.push(format!("DIA detected: median isolation window {w:.1} Da"));
+        }
+    }
 
     evidence
 }
@@ -705,5 +741,37 @@ mod tests {
     fn preset_with_database_validates() {
         let params = preset::standard_preset().with_database("/data/human.fasta");
         assert!(params.validate().is_ok());
+    }
+
+    // -- DIA detection --------------------------------------------------
+
+    #[test]
+    fn dia_detected_from_wide_isolation_window() {
+        let mut summary = high_res_summary();
+        summary.median_isolation_window_da = Some(25.0);
+        let result = recommend(&summary, None).unwrap();
+        assert_eq!(
+            result.decision.acquisition_mode,
+            Some(protein_copilot_core::spectrum::AcquisitionMode::DIA),
+        );
+        assert!(result.explanation.contains("DIA acquisition mode detected"));
+        assert!(result.evidence.iter().any(|e| e.contains("DIA detected")));
+    }
+
+    #[test]
+    fn dda_not_flagged_with_narrow_window() {
+        let mut summary = high_res_summary();
+        summary.median_isolation_window_da = Some(2.0);
+        let result = recommend(&summary, None).unwrap();
+        assert_eq!(result.decision.acquisition_mode, None);
+        assert!(!result.explanation.contains("DIA"));
+    }
+
+    #[test]
+    fn no_isolation_window_stays_none() {
+        let summary = high_res_summary(); // median_isolation_window_da is None
+        let result = recommend(&summary, None).unwrap();
+        assert_eq!(result.decision.acquisition_mode, None);
+        assert!(!result.explanation.contains("DIA"));
     }
 }
