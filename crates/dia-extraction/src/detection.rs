@@ -5,6 +5,17 @@ use protein_copilot_core::spectrum::{AcquisitionMode, MsLevel, Spectrum};
 /// Detects whether spectra were acquired in DDA or DIA mode based on
 /// the median isolation window width of MS2 spectra.
 ///
+/// **Detection logic:** Total window width = `lower_offset + upper_offset`.
+/// This correctly handles both symmetric windows (e.g., ±12.5 Da → 25 Da total)
+/// and asymmetric windows (e.g., -10/+15 Da → 25 Da total) as defined in the
+/// mzML specification (lower/upper offsets from target_mz).
+///
+/// **Threshold:** Typical DDA isolation windows are 1–3 Da; DIA windows are 10–25 Da.
+/// The default threshold of 5 Da is conservative and correctly separates the two modes.
+/// Some optimized DIA methods use narrow 5 Da windows — these would be classified as DDA,
+/// which is an acceptable limitation for auto-detection. Users can override via
+/// `DiaExtractionConfig::acquisition_mode`.
+///
 /// Returns `AcquisitionMode::Unknown` when no MS2 spectra exist or none
 /// carry isolation window information.
 pub fn detect_acquisition_mode(spectra: &[Spectrum], threshold_da: f64) -> AcquisitionMode {
