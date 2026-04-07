@@ -20,6 +20,7 @@ AI 驱动的蛋白质组学质谱搜索与结果解释平台。
 **输出文件**：psm.tsv、peptide.tsv、protein.tsv、result.json、run_metadata.json
 
 **DIA 工作流**：`extract_dia_precursors(file)` → 缓存提取结果 → `run_search(dia_run_id=...)` → 端到端搜索
+**单谱图检查**：`extract_spectrum_precursors(file, scan)` → 查看单张 MS2 的母离子提取详情
 
 ## 快速测试
 
@@ -42,7 +43,7 @@ crates/
 ├── search-engine/     搜索引擎（SimpleSearch + pFind adapter 预留）
 ├── dia-extraction/    DIA 前体离子提取（同位素模式检测 + MS1↔MS2 关联）
 ├── report/            报告生成（摘要 + TSV/JSON 导出）
-└── mcp-server/        MCP Server 二进制（13 tools，stdio transport）
+└── mcp-server/        MCP Server 二进制（14 tools，stdio transport）
 
 .github/
 ├── agents/proteomics-search.agent.md   蛋白搜索助手 Agent
@@ -50,7 +51,7 @@ crates/
 └── prompts/result-interpretation.prompt.md  结果解读 Skill
 ```
 
-## MCP Tools（13 个）
+## MCP Tools（14 个）
 
 | Tool | 功能 |
 |------|------|
@@ -67,13 +68,14 @@ crates/
 | `list_searches` | 列出搜索历史（活跃 + 持久化） |
 | `annotate_spectrum` | 单张谱图 b/y 离子注释 + HTML 可视化 |
 | `extract_dia_precursors` | DIA MS1 前体离子提取（同位素模式检测） |
+| `extract_spectrum_precursors` | 单张 MS2 谱图母离子提取（调试用） |
 
 ## 架构原则
 
 - **确定性/LLM 分层**：Rust 做所有计算，LLM 做意图理解和结果解释
 - **MCP 协议**：所有能力通过 MCP tools 暴露给 LLM
 - **DDA + DIA 支持**：自动检测采集模式，DIA 数据通过 MS1 同位素模式提取前体离子后搜索
-- **可测试**：357 个单元/集成测试，0 clippy warnings
+- **可测试**：379 个单元/集成测试，0 clippy warnings
 - **可审计**：每次搜索生成 run_id + 完整参数 + 引擎版本记录
 
 ## 当前进度
@@ -85,10 +87,11 @@ crates/
 | M1.3 param-recommend | ✅ 规则引擎 + 5 个预设 |
 | M1.4 search-engine | ✅ SimpleSearch + pFind 预留 |
 | M1.5 report | ✅ 摘要 + TSV/JSON 导出 |
-| M1.6 mcp-server | ✅ 13 MCP tools + Agent + Skill |
+| M1.6 mcp-server | ✅ 14 MCP tools + Agent + Skill |
 | M1.7 integration | ✅ 端到端测试 + 文档 |
 | Post-MVP | ✅ 异步搜索优化（阶段进度 + 取消 + 历史持久化）+ 谱图注释可视化 |
 | DIA 支持 | ✅ DIA 前体提取 + 搜索集成 + 端到端工作流 |
+| Biology Audit | ✅ 全部 7 crate 审计，4 项修复，7 项未来工作追踪 |
 
 详细计划：`tasks/001-mvp-proteomics-search-platform.md`
 架构设计：`docs/architecture.md`

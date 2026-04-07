@@ -413,7 +413,7 @@ mzML 输入
 
 **职责**：唯一的二进制入口。组装所有 library，注册为 MCP Tools，启动 stdio server。
 
-**注册的 13 个 MCP Tools**：
+**注册的 14 个 MCP Tools**：
 
 | Tool | 功能 | 对应 Library |
 |------|------|-------------|
@@ -428,14 +428,15 @@ mzML 输入
 | `generate_summary` | FDR 过滤统计摘要 | report |
 | `export_results` | 导出 TSV/JSON 文件 | report |
 | `list_searches` | 列出历史搜索记录 | mcp-server (cache) |
-| `annotate_spectrum` | 谱图碎片离子注释 | report |
+| `annotate_spectrum` | 谱图碎片离子注释 | search-engine |
 | `extract_dia_precursors` | DIA MS1 前体提取 | dia-extraction |
+| `extract_spectrum_precursors` | 单张 MS2 母离子提取（调试用） | dia-extraction |
 
 **内部结构**：
 ```text
 mcp-server/src/
 ├── main.rs       ← 入口：tracing 初始化 + ProteinCopilotServer + serve(stdio)
-└── tools.rs      ← 13 个 tool 定义 + EngineRegistry 初始化
+└── tools.rs      ← 14 个 tool 定义 + EngineRegistry 初始化
                      使用 #[rmcp::tool_router] + #[rmcp::tool_handler] 宏
 ```
 
@@ -447,7 +448,7 @@ mcp-server/src/
 - `run_search` 入口显式调用 `params.validate()` 提前拦截无效参数
 - 返回类型统一使用 `Result<Json<T>, ErrorData>`
 
-**依赖**：`core`, `spectrum-io`, `param-recommend`, `search-engine`, `report`, `rmcp` v1.3, `tokio`, `tracing`
+**依赖**：`core`, `spectrum-io`, `param-recommend`, `search-engine`, `dia-extraction`, `report`, `rmcp` v1.3, `tokio`, `tracing`
 
 ---
 
@@ -791,6 +792,7 @@ Layer 0: 用户
 | `generate_summary` | report | search_result | SearchResultSummary | 生成结果摘要 |
 | `export_results` | report | search_result, format, output_path | ExportResult | 导出结果文件 |
 | `extract_dia_precursors` | dia-extraction | file_path, params? | RunId + ExtractionSummary | DIA 前体提取 |
+| `extract_spectrum_precursors` | dia-extraction | file_path, scan_number | SingleSpectrumExtractionResult | 单谱图母离子提取 |
 
 ---
 
@@ -838,6 +840,12 @@ Layer 0: 用户
 
 ## 10. 下一步
 
-1. 初始化 Workspace + core crate（Milestone 1.1 Task 1.1.1 ~ 1.1.8）
-2. 验证 rmcp `#[tool_router]` 宏在最小示例中的可用性
-3. 实现 spectrum-io 的 mgf 解析（最小可验证路径）
+1. ~~初始化 Workspace + core crate~~ ✅
+2. ~~验证 rmcp `#[tool_router]` 宏在最小示例中的可用性~~ ✅
+3. ~~实现 spectrum-io 的 mgf 解析~~ ✅
+
+> MVP 已完成。当前重点：
+> - 修复碎片离子评分中固定修饰未应用的 bug（matching.rs）
+> - 实现可变修饰组合枚举（FW-2）
+> - 接入 pFind 搜索引擎 adapter
+> - 详见 `tasks/001-mvp-proteomics-search-platform.md` Biology Audit 部分

@@ -8,6 +8,7 @@ crates/
 ├── spectrum-io/       谱图文件解析（mgf/mzML）
 ├── param-recommend/   参数推荐规则引擎
 ├── search-engine/     搜索引擎（SimpleSearch + pFind 预留）
+├── dia-extraction/    DIA 前体离子提取（同位素模式检测 + MS1↔MS2 关联）
 ├── report/            报告生成（摘要 + TSV/JSON 导出）
 └── mcp-server/        MCP Server 二进制（组装所有 tool）
 ```
@@ -144,6 +145,8 @@ cargo build --release -p protein-copilot-mcp-server
 - **y 离子**: `y_n = Σ(residue_{n+1}..end) + H₂O` — 含水（C 端保留 OH，N 端保留 H）
 - **m/z 转换**: `ion_mz = (ion_mass + charge × PROTON_MASS) / charge`
 - **当前限制**: 仅生成单电荷碎片（b¹⁺, y¹⁺）
+- **⚠️ 已知问题**: `matching.rs` 的碎片离子生成不应用固定修饰（`annotate.rs` 版本正确），待修复
+- **未实现**: 中性丢失离子（b°/y° -18 Da, b\*/y\* -17 Da）、磷酸化丢失（-98 Da H₃PO₄）
 
 ### PPM 计算
 

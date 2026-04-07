@@ -3,7 +3,7 @@
 > **文件名**：`prd-mvp-proteomics-search.md`
 > **版本**：1.0
 > **创建日期**：2026-03-27
-> **状态**：In Progress — M1.1 ✅ M1.2 ✅ M1.3 ✅ M1.4 ✅ M1.5 ✅ M1.6 ✅ M1.7 ✅（379 tests, 0 warnings）— MVP 完成 + Post-MVP 功能（异步搜索优化、搜索历史持久化、谱图注释可视化）+ DIA 数据支持（前体提取 + 搜索集成 + 端到端工作流）+ Biology Audit 完成
+> **状态**：In Progress — M1.1 ✅ M1.2 ✅ M1.3 ✅ M1.4 ✅ M1.5 ✅ M1.6 ✅ M1.7 ✅（379 tests, 0 warnings）— MVP 完成 + Post-MVP 功能（异步搜索优化、搜索历史持久化、谱图注释可视化）+ DIA 数据支持（前体提取 + 搜索集成 + 端到端工作流 + 单谱图母离子提取）+ Biology Audit 完成 + 14 MCP Tools
 
 ---
 
@@ -996,6 +996,15 @@ M1.7 (集成验证)    ← 需要所有 MVP Milestone
 - `RunSearchInput` 增加 `dia_run_id` 参数
 - 完整 DIA 工作流：`extract_dia_precursors` → `run_search(dia_run_id=...)`
 
+### Phase 4: 单谱图母离子提取工具 ✅
+
+**状态**: 完成
+
+- `extract_spectrum_precursors` MCP Tool（第 14 个工具）
+- 读取 mzML 文件，找到目标 MS2 scan，关联最近的 MS1 谱图
+- 在隔离窗口内运行同位素模式分析，返回候选母离子列表
+- 用于调试和检查单张谱图的母离子提取结果
+
 ---
 
 ## Biology Audit: 已修复与未来工作
@@ -1039,3 +1048,11 @@ M1.7 (集成验证)    ← 需要所有 MVP Milestone
 | FW-5 | **a/c/x/z 离子系列** | 低 | — | ETD/ECD 碎裂模式需要 c/z 离子；CID 辅助可加 a 离子 |
 | FW-6 | **原生 FDR 计算** | 高 | M2.2 | 实现 target-decoy FDR + q-value 单调化，不再依赖外部引擎 |
 | FW-7 | **负离子模式** | 低 | — | 当前仅支持正离子 [M+nH]ⁿ⁺，负模式需要 [M-nH]ⁿ⁻ |
+| FW-8 | **中性丢失离子** | 中 | — | 水丢失 b°/y°（-18 Da H₂O）和氨丢失 b*/y*（-17 Da NH₃），HCD 中常见，可提高匹配率 |
+| FW-9 | **磷酸化中性丢失** | 中 | FW-8 | 磷酸化肽段特异性丢失 -98 Da (H₃PO₄) 和 -80 Da (HPO₃)，phospho 预设必需 |
+
+### 已知 Bug 🐛
+
+| # | 问题 | 影响 | 计划修复 |
+|---|------|------|----------|
+| BUG-1 | **碎片离子评分不应用固定修饰** | 高 — `matching.rs` 的 `generate_b_ions()`/`generate_y_ions()` 只使用原始残基质量生成碎片 m/z，不包含固定修饰（如 CAM +57 Da）。母离子质量正确应用了修饰，但碎片离子未修正。导致含修饰残基的碎片匹配失败，PSM 评分偏低。`annotate.rs` 中的版本（`generate_b_ions_with_mods`）是正确的。 | 待修复 |
