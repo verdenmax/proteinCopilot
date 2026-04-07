@@ -26,4 +26,18 @@ pub enum DiaExtractionError {
         /// Description of the extraction failure.
         detail: String,
     },
+
+    /// Requested scan number not found as MS2.
+    #[error("MS2 scan {scan} not found")]
+    ScanNotFound {
+        /// The scan number that was requested.
+        scan: u32,
+    },
+
+    /// MS2 spectrum has no isolation window (needed for precursor extraction).
+    #[error("MS2 scan {scan} has no isolation window")]
+    NoIsolationWindow {
+        /// The scan number missing an isolation window.
+        scan: u32,
+    },
 }

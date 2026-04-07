@@ -38,6 +38,21 @@ pub struct ExtractionStats {
     pub charge_distribution: HashMap<i32, u32>,
 }
 
+/// Result of extracting precursors from a single MS2 spectrum.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct SingleSpectrumExtractionResult {
+    /// The MS2 scan number that was analyzed.
+    pub ms2_scan: u32,
+    /// The MS1 scan used for isotope pattern extraction.
+    pub ms1_scan_used: u32,
+    /// How the MS1 was selected: "source_scan", "scan_order", or "rt_nearest".
+    pub correlation_method: String,
+    /// Isolation window of the MS2 spectrum (if available).
+    pub isolation_window: Option<protein_copilot_core::spectrum::IsolationWindow>,
+    /// Extracted precursor candidates from isotope pattern analysis.
+    pub precursors: Vec<protein_copilot_core::spectrum::PrecursorInfo>,
+}
+
 /// Result of DIA precursor extraction.
 #[derive(Debug, Clone)]
 pub struct DiaExtractionResult {

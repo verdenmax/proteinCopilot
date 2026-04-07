@@ -14,12 +14,12 @@ pub mod error;
 pub mod extractor;
 pub mod isotope;
 
-pub use config::{DiaExtractionConfig, DiaExtractionResult, ExtractionStats};
+pub use config::{DiaExtractionConfig, DiaExtractionResult, ExtractionStats, SingleSpectrumExtractionResult};
 pub use error::DiaExtractionError;
 pub use extractor::PrecursorExtractor;
 pub use isotope::IsotopePatternExtractor;
 
-use protein_copilot_core::spectrum::{AcquisitionMode, Spectrum};
+use protein_copilot_core::spectrum::{AcquisitionMode, MsLevel, Spectrum};
 use std::collections::HashMap;
 
 /// Extract candidate precursor ions from DIA mass spectrometry data.
@@ -112,6 +112,58 @@ pub fn extract_dia_precursors(
         detected_mode,
         enhanced_spectra,
         stats,
+    })
+}
+
+/// Extract precursor candidates for a single MS2 spectrum by correlating with MS1.
+///
+/// Finds the target MS2 by scan number, correlates it to the best MS1 spectrum,
+/// then runs isotope pattern extraction within the MS2's isolation window.
+///
+/// Returns a [`SingleSpectrumExtractionResult`] with the extracted precursor
+/// candidates and metadata about which MS1 was used and how it was selected.
+pub fn extract_single_spectrum_precursors(
+    spectra: &[Spectrum],
+    scan_number: u32,
+    extractor: &dyn PrecursorExtractor,
+) -> Result<SingleSpectrumExtractionResult, DiaExtractionError> {
+    // Find the target MS2 spectrum
+    let ms2 = spectra
+        .iter()
+        .find(|s| s.scan_number == scan_number && s.ms_level == MsLevel::MS2)
+        .ok_or(DiaExtractionError::ScanNotFound { scan: scan_number })?;
+
+    // Get isolation window
+    let isolation_window = ms2
+        .precursors
+        .first()
+        .and_then(|p| p.isolation_window.clone())
+        .ok_or(DiaExtractionError::NoIsolationWindow { scan: scan_number })?;
+
+    // Collect MS1 spectra
+    let ms1_refs: Vec<&Spectrum> = spectra
+        .iter()
+        .filter(|s| s.ms_level == MsLevel::MS1)
+        .collect();
+
+    if ms1_refs.is_empty() {
+        return Err(DiaExtractionError::NoMs1Spectra);
+    }
+
+    // Correlate to find the best MS1
+    let (ms1_idx, method) = correlation::correlate_single_with_method(&ms1_refs, ms2);
+    let ms1_idx = ms1_idx.ok_or(DiaExtractionError::NoMs1Spectra)?;
+    let ms1 = ms1_refs[ms1_idx];
+
+    // Extract precursors using isotope pattern analysis
+    let precursors = extractor.extract(ms1, &isolation_window);
+
+    Ok(SingleSpectrumExtractionResult {
+        ms2_scan: scan_number,
+        ms1_scan_used: ms1.scan_number,
+        correlation_method: method.to_string(),
+        isolation_window: Some(isolation_window),
+        precursors,
     })
 }
 
@@ -314,5 +366,86 @@ mod tests {
 
         let result = extract_dia_precursors(&spectra, &extractor, &config);
         assert!(matches!(result, Err(DiaExtractionError::NoMs1Spectra)));
+    }
+
+    // -- extract_single_spectrum_precursors tests -------------------------
+
+    #[test]
+    fn test_single_spectrum_extraction_found() {
+        // MS1 with an isotope cluster at ~500 Da (charge 2, spacing ~0.502)
+        let ms1 = make_ms1(
+            1, 10.0,
+            vec![500.0, 500.502, 501.003],
+            vec![1000.0, 800.0, 400.0],
+        );
+        // DIA MS2 with wide isolation window covering the cluster
+        let ms2 = make_ms2_dia(2, 10.1, 500.0, 50.0, 50.0, Some(1));
+
+        let spectra = vec![ms1, ms2];
+        let extractor = IsotopePatternExtractor::default();
+
+        let result = extract_single_spectrum_precursors(&spectra, 2, &extractor).unwrap();
+
+        assert_eq!(result.ms2_scan, 2);
+        assert_eq!(result.ms1_scan_used, 1);
+        assert_eq!(result.correlation_method, "source_scan");
+        assert!(!result.precursors.is_empty());
+        assert!(result.isolation_window.is_some());
+    }
+
+    #[test]
+    fn test_single_spectrum_scan_not_found() {
+        let ms1 = make_ms1(1, 10.0, vec![500.0], vec![1000.0]);
+        let ms2 = make_ms2_dia(2, 10.1, 500.0, 50.0, 50.0, Some(1));
+        let spectra = vec![ms1, ms2];
+        let extractor = IsotopePatternExtractor::default();
+
+        let result = extract_single_spectrum_precursors(&spectra, 99, &extractor);
+        assert!(matches!(result, Err(DiaExtractionError::ScanNotFound { scan: 99 })));
+    }
+
+    #[test]
+    fn test_single_spectrum_no_ms1() {
+        let ms2 = make_ms2_dia(2, 10.0, 500.0, 50.0, 50.0, None);
+        let spectra = vec![ms2];
+        let extractor = IsotopePatternExtractor::default();
+
+        let result = extract_single_spectrum_precursors(&spectra, 2, &extractor);
+        assert!(matches!(result, Err(DiaExtractionError::NoMs1Spectra)));
+    }
+
+    #[test]
+    fn test_single_spectrum_no_isolation_window() {
+        let ms1 = make_ms1(1, 10.0, vec![500.0], vec![1000.0]);
+        // MS2 without isolation window
+        let ms2 = Spectrum::new(
+            2, MsLevel::MS2, 10.1,
+            vec![PrecursorInfo {
+                mz: 500.0,
+                charge: Some(2),
+                intensity: None,
+                isolation_window: None,
+                source_scan: None,
+            }],
+            vec![200.0], vec![500.0],
+        ).unwrap();
+
+        let spectra = vec![ms1, ms2];
+        let extractor = IsotopePatternExtractor::default();
+
+        let result = extract_single_spectrum_precursors(&spectra, 2, &extractor);
+        assert!(matches!(result, Err(DiaExtractionError::NoIsolationWindow { scan: 2 })));
+    }
+
+    #[test]
+    fn test_single_spectrum_scan_order_fallback() {
+        let ms1 = make_ms1(1, 10.0, vec![500.0, 500.502], vec![1000.0, 800.0]);
+        let ms2 = make_ms2_dia(2, 10.1, 500.0, 50.0, 50.0, None); // no source_scan
+
+        let spectra = vec![ms1, ms2];
+        let extractor = IsotopePatternExtractor::default();
+
+        let result = extract_single_spectrum_precursors(&spectra, 2, &extractor).unwrap();
+        assert_eq!(result.correlation_method, "scan_order");
     }
 }

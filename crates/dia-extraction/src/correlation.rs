@@ -28,14 +28,20 @@ pub fn correlate_ms1_ms2(
 }
 
 /// Correlates a single MS2 spectrum to an MS1 using the three-level fallback.
-fn correlate_single(ms1_spectra: &[&Spectrum], ms2: &Spectrum) -> Option<usize> {
+///
+/// Returns `(Option<usize>, &'static str)` — the MS1 index and the method name
+/// ("source_scan", "scan_order", "rt_nearest", or "none").
+pub fn correlate_single_with_method(
+    ms1_spectra: &[&Spectrum],
+    ms2: &Spectrum,
+) -> (Option<usize>, &'static str) {
     // Level 1: source_scan from precursor metadata
     if let Some(source_scan) = ms2.precursors.first().and_then(|p| p.source_scan) {
         if let Some(idx) = ms1_spectra
             .iter()
             .position(|ms1| ms1.scan_number == source_scan)
         {
-            return Some(idx);
+            return (Some(idx), "source_scan");
         }
     }
 
@@ -47,11 +53,11 @@ fn correlate_single(ms1_spectra: &[&Spectrum], ms2: &Spectrum) -> Option<usize> 
         .max_by_key(|(_, ms1)| ms1.scan_number);
 
     if let Some((idx, _)) = by_scan_order {
-        return Some(idx);
+        return (Some(idx), "scan_order");
     }
 
     // Level 3: closest MS1 by retention time
-    ms1_spectra
+    let by_rt = ms1_spectra
         .iter()
         .enumerate()
         .min_by(|(_, a), (_, b)| {
@@ -59,7 +65,17 @@ fn correlate_single(ms1_spectra: &[&Spectrum], ms2: &Spectrum) -> Option<usize> 
             let db = (b.retention_time_sec - ms2.retention_time_sec).abs();
             da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
         })
-        .map(|(idx, _)| idx)
+        .map(|(idx, _)| idx);
+
+    match by_rt {
+        Some(idx) => (Some(idx), "rt_nearest"),
+        None => (None, "none"),
+    }
+}
+
+/// Correlates a single MS2 spectrum to an MS1 using the three-level fallback.
+fn correlate_single(ms1_spectra: &[&Spectrum], ms2: &Spectrum) -> Option<usize> {
+    correlate_single_with_method(ms1_spectra, ms2).0
 }
 
 #[cfg(test)]
