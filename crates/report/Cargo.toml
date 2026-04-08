@@ -9,6 +9,7 @@ description = "Report generation and result export for ProteinCopilot"
 [dependencies]
 protein-copilot-core = { workspace = true }
 protein-copilot-search-engine = { workspace = true }
+protein-copilot-xic = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
