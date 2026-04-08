@@ -41,4 +41,5 @@ protein-copilot-spectrum-io = { path = "crates/spectrum-io" }
 protein-copilot-param-recommend = { path = "crates/param-recommend" }
 protein-copilot-search-engine = { path = "crates/search-engine" }
 protein-copilot-report = { path = "crates/report" }
+protein-copilot-fdr = { path = "crates/fdr" }
 protein-copilot-dia-extraction = { path = "crates/dia-extraction" }

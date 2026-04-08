@@ -9,6 +9,7 @@ description = "Search engine orchestration and simplified search for ProteinCopi
 [dependencies]
 protein-copilot-core = { workspace = true }
 protein-copilot-spectrum-io = { workspace = true }
+protein-copilot-fdr = { workspace = true }
 tokio = { workspace = true }
 async-trait = { workspace = true }
 thiserror = { workspace = true }
@@ -19,7 +20,7 @@ chrono = { workspace = true }
 serde_json = { workspace = true }
 
 # Added when implementing SimpleSearchEngine (Task 1.4.4):
-# tracing = { workspace = true }
+tracing = { workspace = true }
 
 [dev-dependencies]
 protein-copilot-spectrum-io = { workspace = true }

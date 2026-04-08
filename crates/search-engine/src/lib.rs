@@ -28,6 +28,7 @@ pub mod digest;
 pub mod error;
 pub mod fasta;
 pub mod matching;
+pub mod varmod;
 pub mod progress;
 pub mod registry;
 pub mod simple_engine;

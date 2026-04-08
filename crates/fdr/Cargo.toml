@@ -1,0 +1,16 @@
+[package]
+name = "protein-copilot-fdr"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "FDR calculation and decoy database generation for ProteinCopilot"
+
+[dependencies]
+protein-copilot-core = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+rand = { version = "0.8", features = ["std"] }
+
+[dev-dependencies]
+protein-copilot-core = { workspace = true }

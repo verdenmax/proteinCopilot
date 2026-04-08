@@ -14,7 +14,7 @@ use protein_copilot_core::engine::{EngineInfo, HealthStatus, SearchEngineAdapter
 use protein_copilot_core::error::CoreError;
 use protein_copilot_core::progress::{ProgressCallback, SearchProgress};
 use protein_copilot_core::run_metadata::{RunMetadata, RunStatus};
-use protein_copilot_core::search_params::SearchParams;
+use protein_copilot_core::search_params::{DecoyStrategy, SearchParams};
 use protein_copilot_core::search_result::{
     PeptideResult, ProteinResult, Psm, SearchResult, SearchResultSummary,
 };
@@ -100,6 +100,28 @@ impl SimpleSearchEngine {
                     params.max_peptide_length,
                 ),
             });
+        }
+
+        // Generate and digest decoy database if strategy is active
+        if params.decoy_strategy != DecoyStrategy::None {
+            report("Generating decoy database", 0.10);
+            let target_tuples: Vec<(String, String, String)> = proteins
+                .iter()
+                .map(|p| (p.accession.clone(), p.description.clone(), p.sequence.clone()))
+                .collect();
+            let decoy_proteins =
+                protein_copilot_fdr::generate_decoys(&target_tuples, params.decoy_strategy);
+            for decoy in &decoy_proteins {
+                let peptides = digest_with_length(
+                    &decoy.sequence,
+                    &decoy.accession,
+                    &params.enzyme,
+                    params.missed_cleavages,
+                    params.min_peptide_length,
+                    params.max_peptide_length,
+                );
+                all_peptides.extend(peptides);
+            }
         }
 
         // Step 3: Read all spectra from input files
@@ -190,6 +212,8 @@ impl SimpleSearchEngine {
                     &params.precursor_tolerance,
                     &params.fragment_tolerance,
                     &params.fixed_modifications,
+                    &params.variable_modifications,
+                    params.max_variable_modifications,
                 );
                 for m in &matches {
                     psms.push(build_psm(spectrum, m, &params.fixed_modifications));
@@ -202,10 +226,41 @@ impl SimpleSearchEngine {
                     &params.precursor_tolerance,
                     &params.fragment_tolerance,
                     &params.fixed_modifications,
+                    &params.variable_modifications,
+                    params.max_variable_modifications,
                 ) {
                     psms.push(build_psm(spectrum, &m, &params.fixed_modifications));
                 }
             }
+        }
+
+        // Calculate FDR and assign q-values if decoy strategy is active
+        if params.decoy_strategy != DecoyStrategy::None {
+            report("Calculating FDR", 0.88);
+            let scored: Vec<protein_copilot_fdr::calculation::ScoredPsm> = psms
+                .iter()
+                .enumerate()
+                .map(|(i, p)| protein_copilot_fdr::calculation::ScoredPsm {
+                    index: i,
+                    score: p.score,
+                    is_decoy: p.is_decoy,
+                })
+                .collect();
+
+            if let Ok(qvalues) = protein_copilot_fdr::calculate_fdr(&scored) {
+                for (idx, q) in qvalues {
+                    if idx < psms.len() {
+                        psms[idx].q_value = Some(q);
+                    }
+                }
+            } else {
+                tracing::warn!(
+                    "FDR calculation failed (likely no decoy hits); q-values not assigned"
+                );
+            }
+
+            // Remove decoy PSMs from final results
+            psms.retain(|p| !p.is_decoy);
         }
 
         // Aggregate peptide and protein level results
@@ -334,6 +389,28 @@ impl SearchEngineAdapter for SimpleSearchEngine {
             }));
         }
 
+        // Generate and digest decoy database if strategy is active
+        if params.decoy_strategy != DecoyStrategy::None {
+            report("Generating decoy database", 0.10);
+            let target_tuples: Vec<(String, String, String)> = proteins
+                .iter()
+                .map(|p| (p.accession.clone(), p.description.clone(), p.sequence.clone()))
+                .collect();
+            let decoy_proteins =
+                protein_copilot_fdr::generate_decoys(&target_tuples, params.decoy_strategy);
+            for decoy in &decoy_proteins {
+                let peptides = digest_with_length(
+                    &decoy.sequence,
+                    &decoy.accession,
+                    &params.enzyme,
+                    params.missed_cleavages,
+                    params.min_peptide_length,
+                    params.max_peptide_length,
+                );
+                all_peptides.extend(peptides);
+            }
+        }
+
         // Use the shared core logic (no input files for spectra-based search)
         self.run_search_on_spectra(
             params,
@@ -358,7 +435,7 @@ fn build_psm(
     m: &PeptideMatch,
     fixed_mods: &[protein_copilot_core::search_params::Modification],
 ) -> Psm {
-    // Collect modifications that apply to this peptide
+    // Collect fixed modifications that apply to this peptide
     let mut mods = Vec::new();
     for fm in fixed_mods {
         for ch in m.peptide.sequence.chars() {
@@ -369,6 +446,14 @@ fn build_psm(
         }
     }
 
+    // Add variable modifications from the match
+    for (vm, _pos) in &m.applied_variable_mods {
+        mods.push(vm.clone());
+    }
+
+    let is_decoy = m.peptide.protein_accession.starts_with("REV_")
+        || m.peptide.protein_accession.starts_with("SHUF_");
+
     Psm {
         spectrum_scan: spectrum.scan_number,
         peptide_sequence: m.peptide.sequence.clone(),
@@ -378,9 +463,9 @@ fn build_psm(
         calculated_mz: m.theoretical_mz,
         delta_mass_ppm: m.delta_mass_ppm,
         score: m.score,
-        q_value: None, // simplified engine doesn't compute FDR
+        q_value: None,
         protein_accessions: vec![m.peptide.protein_accession.clone()],
-        is_decoy: false,
+        is_decoy,
     }
 }
 
@@ -476,10 +561,22 @@ fn aggregate_proteins(psms: &[Psm], proteins: &[crate::fasta::FastaEntry]) -> Ve
 fn build_summary(psms: &[Psm], total_spectra: u64, duration: f64) -> SearchResultSummary {
     let total_psms = psms.len() as u64;
 
-    // Without FDR, treat all PSMs as passing
-    let unique_peptides: std::collections::HashSet<&str> =
-        psms.iter().map(|p| p.peptide_sequence.as_str()).collect();
-    let unique_proteins: std::collections::HashSet<&str> = psms
+    // FDR-filtered counts: if q-values are available, count only PSMs at ≤1% FDR
+    let has_qvalues = psms.iter().any(|p| p.q_value.is_some());
+    let fdr_filtered: Vec<&Psm> = if has_qvalues {
+        psms.iter()
+            .filter(|p| p.q_value.is_some_and(|q| q <= 0.01))
+            .collect()
+    } else {
+        psms.iter().collect()
+    };
+
+    let psms_at_fdr = fdr_filtered.len() as u64;
+    let unique_peptides_fdr: std::collections::HashSet<&str> = fdr_filtered
+        .iter()
+        .map(|p| p.peptide_sequence.as_str())
+        .collect();
+    let unique_proteins_fdr: std::collections::HashSet<&str> = fdr_filtered
         .iter()
         .flat_map(|p| p.protein_accessions.iter().map(|a| a.as_str()))
         .collect();
@@ -508,7 +605,7 @@ fn build_summary(psms: &[Psm], total_spectra: u64, duration: f64) -> SearchResul
     let median_score = protein_copilot_core::util::compute_median(&scores);
     let median_delta = protein_copilot_core::util::compute_median(&delta_ppms);
     let id_rate = if total_spectra > 0 {
-        total_psms as f64 / total_spectra as f64
+        psms_at_fdr as f64 / total_spectra as f64
     } else {
         0.0
     };
@@ -516,9 +613,9 @@ fn build_summary(psms: &[Psm], total_spectra: u64, duration: f64) -> SearchResul
     SearchResultSummary {
         total_spectra_searched: total_spectra,
         total_psms,
-        psms_at_1pct_fdr: total_psms, // no FDR filtering
-        unique_peptides_at_1pct_fdr: unique_peptides.len() as u64,
-        protein_groups_at_1pct_fdr: unique_proteins.len() as u64,
+        psms_at_1pct_fdr: psms_at_fdr,
+        unique_peptides_at_1pct_fdr: unique_peptides_fdr.len() as u64,
+        protein_groups_at_1pct_fdr: unique_proteins_fdr.len() as u64,
         median_score,
         median_delta_mass_ppm: median_delta,
         identification_rate: id_rate,

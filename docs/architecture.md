@@ -133,6 +133,7 @@ proteinCopilot/
 │   ├── search-engine/                 ← [lib] 搜索引擎 adapter 层
 │   ├── report/                        ← [lib] 结果摘要与导出
 │   ├── dia-extraction/                ← [lib] DIA 前体离子提取
+│   ├── fdr/                           ← [lib] FDR 计算（decoy 生成 + TDA + q-value）
 │   └── mcp-server/                    ← [bin] MCP Server（组装所有 tool）
 ```
 
@@ -280,14 +281,16 @@ search-engine/src/
 ├── chemistry.rs             ← 氨基酸质量表 + 质量计算（共享）
 ├── fasta.rs                 ← FASTA 数据库解析
 ├── digest.rs                ← 酶切消化（支持 7 种酶）
-├── matching.rs              ← precursor m/z 匹配 + b/y 离子打分
-├── simple_engine.rs         ← SimpleSearchEngine 实现
+├── matching.rs              ← precursor m/z 匹配 + b/y 离子打分（已应用固定+可变修饰）
+├── varmod.rs                ← 可变修饰站点发现 + 组合枚举（DFS）
+├── annotate.rs              ← 谱图碎片离子注释（SpectrumAnnotation + HTML 可视化）
+├── simple_engine.rs         ← SimpleSearchEngine 实现（含 decoy 生成 + FDR 集成）
 └── adapters/
     ├── mod.rs
     └── pfind.rs             ← PFindAdapter + SshConfig（预留桩）
 ```
 
-**依赖**：`core`, `spectrum-io`, `tokio`, `async-trait`
+**依赖**：`core`, `spectrum-io`, `fdr`, `tokio`, `async-trait`
 
 **设计原则**：
 - SimpleSearchEngine 是 MVP 验证引擎，用于测试端到端数据流正确性
@@ -304,26 +307,35 @@ search-engine/src/
 
 Step 1: 参数校验 (validate)
 Step 2: 读取 FASTA → 蛋白质列表
-Step 3: 酶切消化 → 候选肽段列表
+Step 3: 酶切消化 → 候选肽段列表（target）
          ├── 按 Enzyme 规则切割 (Trypsin: K/R 后切, P 除外)
          ├── missed cleavages 0~N
          └── 过滤: 6 ≤ 肽段长度 ≤ 50 aa
+Step 3b: Decoy 生成（如 DecoyStrategy != None）
+         ├── Reverse: 反转蛋白序列（保留末尾 AA）
+         ├── Shuffle: 随机打乱（种子 42）
+         └── 酶切 decoy 蛋白 → decoy 肽段（accession 加 REV_/SHUF_ 前缀）
 Step 4: 读取谱图文件 (spectrum-io)
-Step 5: 逐谱图匹配
+Step 5: 逐谱图匹配（target + decoy 肽段一起参与竞争）
          对于每张 MS2 谱图:
            observed_mz = precursor m/z
            对于每个候选肽段:
              modified_mass = peptide_mass + Σ fixed_mod_delta
-             对于每个 charge (已知用实际值, 未知试 2→3→1→4):
-               theoretical_mz = (modified_mass + charge × 1.007276) / charge
-               if |observed - theoretical| / theoretical × 1e6 < tolerance_ppm:
-                 生成理论 b 离子: cumulative_residue_mass + proton
-                 生成理论 y 离子: cumulative_from_C_term + water + proton
-                 matched = 在实验 peak list 中 binary search 匹配数
-                 score = matched / total_theoretical_ions
-                 保留最高分匹配
-Step 6: 聚合 → PSM → Peptide → Protein (位置追踪 coverage)
-Step 7: 统计 → SearchResultSummary + RunMetadata
+             对于每种可变修饰组合（DFS 枚举，受 max_variable_mods 限制）:
+               total_mass = modified_mass + Σ varmod_delta
+               对于每个 charge (已知用实际值, 未知试 2→3→1→4):
+                 theoretical_mz = (total_mass + charge × 1.007276) / charge
+                 if |observed - theoretical| / theoretical × 1e6 < tolerance_ppm:
+                   合并固定+可变修饰 → 生成理论 b/y 离子
+                   matched = 在实验 peak list 中 binary search 匹配数
+                   score = matched / total_theoretical_ions
+                   保留最高分匹配（记录修饰组合）
+Step 6: FDR 计算（如有 decoy）
+         ├── 竞争式 TDA: FDR(t) = decoys / targets 在每个分数阈值
+         ├── q-value 单调化（反向扫描）
+         └── 移除 decoy PSM
+Step 7: 聚合 → PSM → Peptide → Protein (位置追踪 coverage)
+Step 8: 统计 → SearchResultSummary + RunMetadata
 ```
 
 **复杂度**: O(spectra × peptides × charges)，全量遍历无索引。
@@ -363,10 +375,22 @@ report/src/
 ├── lib.rs         ← ReportGenerator 门面
 ├── error.rs       ← ReportError（3 变体）
 ├── summary.rs     ← FDR 过滤 + 统计聚合
-└── export.rs      ← TSV/JSON 导出（含 sanitize_tsv 转义）
+├── export.rs      ← TSV/JSON 导出（含 sanitize_tsv 转义）
+└── visualize.rs   ← 谱图注释 HTML 渲染（自包含 HTML，浏览器可直接查看）
 ```
 
-**依赖**：`core`（共享类型 + compute_median）, `serde_json`
+**对外暴露**（补充 `render_annotation`）：
+```rust
+impl ReportGenerator {
+    /// 渲染谱图注释为自包含 HTML 文件。
+    pub fn render_annotation(
+        annotation: &SpectrumAnnotation,
+        output_path: &Path,
+    ) -> Result<(), ReportError>;
+}
+```
+
+**依赖**：`core`（共享类型 + compute_median）, `search-engine`（SpectrumAnnotation 类型）, `serde_json`
 
 ---
 
@@ -413,7 +437,29 @@ mzML 输入
 
 ---
 
-### 3.7 `mcp-server`（bin crate）— 组装层
+### 3.7 `fdr`（lib crate）
+
+**职责**：独立的 FDR 计算模块。生成 decoy 蛋白序列，实现竞争式 target-decoy 分析（TDA），计算 q-value 并强制单调化。
+
+**核心模块**：
+```text
+fdr::
+├── decoy       ← reverse_sequence()（保留末尾 AA）, shuffle_sequence()（种子 42）
+├── calculation ← calculate_fdr()：竞争式 TDA, q-value 反向单调化
+└── error       ← FdrError → CoreError 转换
+```
+
+**关键设计**：
+- `reverse_sequence()` 保留最后一个氨基酸不动（tryptic decoy 兼容性）
+- Shuffle 使用确定性种子（42）确保可复现
+- FDR 公式：`FDR(t) = decoys_at_t / targets_at_t`（竞争式 TDA）
+- q-value 单调化：从最差分数向最佳分数反向扫描，`q[i] = min(raw_fdr[i], q[i+1])`
+
+**依赖**：`core`, `rand 0.8`（确定性 shuffle）
+
+---
+
+### 3.8 `mcp-server`（bin crate）— 组装层
 
 **职责**：唯一的二进制入口。组装所有 library，注册为 MCP Tools，启动 stdio server。
 
@@ -535,6 +581,14 @@ pub struct SearchParams {
     pub fragment_tolerance: MassTolerance,
     pub database_path: String,
     pub decoy_strategy: DecoyStrategy,
+    #[serde(default)]
+    pub acquisition_mode: Option<AcquisitionMode>,  // DDA/DIA/Unknown
+    #[serde(default = "default_max_variable_modifications")]  // default: 3, max: 10
+    pub max_variable_modifications: u32,
+    #[serde(default = "default_min_peptide_length")]  // default: 7
+    pub min_peptide_length: u32,
+    #[serde(default = "default_max_peptide_length")]  // default: 50
+    pub max_peptide_length: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -672,7 +726,7 @@ pub enum HealthStatus {
 | 搜索引擎调用 | Rust | search-engine | 子进程管理 |
 | pFind 配置文件生成 | Rust | search-engine/pfind | 模板化转换 |
 | pFind 结果解析 → 标准化 | Rust | search-engine/pfind | 确定性解析 |
-| FDR 计算（target-decoy） | Rust | core / mcp-fdr（Phase 2） | 数值计算 |
+| FDR 计算（target-decoy） | Rust | fdr crate（✅ 已实现） | 数值计算 |
 | 搜索结果统计摘要 | Rust | report | 确定性聚合 |
 | **搜索结果解释**（面向用户） | **LLM** | Agent.md | 自然语言解释 |
 | **搜索失败诊断** | **LLM** | Agent.md（Phase 2） | 推理诊断 |
@@ -848,8 +902,8 @@ Layer 0: 用户
 2. ~~验证 rmcp `#[tool_router]` 宏在最小示例中的可用性~~ ✅
 3. ~~实现 spectrum-io 的 mgf 解析~~ ✅
 
-> MVP 已完成。当前重点：
-> - 修复碎片离子评分中固定修饰未应用的 bug（matching.rs）
+> MVP 已完成，BUG-1（碎片离子固定修饰）已修复。当前重点：
+> - ~~修复碎片离子评分中固定修饰未应用的 bug（matching.rs）~~ ✅ 已修复
 > - 实现可变修饰组合枚举（FW-2）
 > - 接入 pFind 搜索引擎 adapter
 > - 详见 `tasks/001-mvp-proteomics-search-platform.md` Biology Audit 部分

@@ -1,0 +1,16 @@
+//! # ProteinCopilot FDR
+//!
+//! Native target-decoy FDR calculation for proteomics search results.
+//!
+//! Provides:
+//! - Decoy database generation (reverse/shuffle protein sequences)
+//! - Target-decoy approach FDR calculation
+//! - q-value assignment with monotonicity enforcement
+
+pub mod calculation;
+pub mod decoy;
+pub mod error;
+
+pub use calculation::calculate_fdr;
+pub use decoy::{generate_decoys, DecoyProtein};
+pub use error::FdrError;
