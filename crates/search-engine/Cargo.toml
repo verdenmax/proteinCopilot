@@ -9,6 +9,7 @@ description = "Search engine orchestration and simplified search for ProteinCopi
 [dependencies]
 protein-copilot-core = { workspace = true }
 protein-copilot-spectrum-io = { workspace = true }
+protein-copilot-fdr = { workspace = true }
 tokio = { workspace = true }
 async-trait = { workspace = true }
 thiserror = { workspace = true }

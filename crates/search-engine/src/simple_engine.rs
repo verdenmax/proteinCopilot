@@ -14,7 +14,7 @@ use protein_copilot_core::engine::{EngineInfo, HealthStatus, SearchEngineAdapter
 use protein_copilot_core::error::CoreError;
 use protein_copilot_core::progress::{ProgressCallback, SearchProgress};
 use protein_copilot_core::run_metadata::{RunMetadata, RunStatus};
-use protein_copilot_core::search_params::SearchParams;
+use protein_copilot_core::search_params::{DecoyStrategy, SearchParams};
 use protein_copilot_core::search_result::{
     PeptideResult, ProteinResult, Psm, SearchResult, SearchResultSummary,
 };
@@ -100,6 +100,28 @@ impl SimpleSearchEngine {
                     params.max_peptide_length,
                 ),
             });
+        }
+
+        // Generate and digest decoy database if strategy is active
+        if params.decoy_strategy != DecoyStrategy::None {
+            report("Generating decoy database", 0.10);
+            let target_tuples: Vec<(String, String, String)> = proteins
+                .iter()
+                .map(|p| (p.accession.clone(), p.description.clone(), p.sequence.clone()))
+                .collect();
+            let decoy_proteins =
+                protein_copilot_fdr::generate_decoys(&target_tuples, params.decoy_strategy);
+            for decoy in &decoy_proteins {
+                let peptides = digest_with_length(
+                    &decoy.sequence,
+                    &decoy.accession,
+                    &params.enzyme,
+                    params.missed_cleavages,
+                    params.min_peptide_length,
+                    params.max_peptide_length,
+                );
+                all_peptides.extend(peptides);
+            }
         }
 
         // Step 3: Read all spectra from input files
@@ -210,6 +232,31 @@ impl SimpleSearchEngine {
                     psms.push(build_psm(spectrum, &m, &params.fixed_modifications));
                 }
             }
+        }
+
+        // Calculate FDR and assign q-values if decoy strategy is active
+        if params.decoy_strategy != DecoyStrategy::None {
+            report("Calculating FDR", 0.88);
+            let scored: Vec<protein_copilot_fdr::calculation::ScoredPsm> = psms
+                .iter()
+                .enumerate()
+                .map(|(i, p)| protein_copilot_fdr::calculation::ScoredPsm {
+                    index: i,
+                    score: p.score,
+                    is_decoy: p.is_decoy,
+                })
+                .collect();
+
+            if let Ok(qvalues) = protein_copilot_fdr::calculate_fdr(&scored) {
+                for (idx, q) in qvalues {
+                    if idx < psms.len() {
+                        psms[idx].q_value = Some(q);
+                    }
+                }
+            }
+
+            // Remove decoy PSMs from final results
+            psms.retain(|p| !p.is_decoy);
         }
 
         // Aggregate peptide and protein level results
@@ -338,6 +385,28 @@ impl SearchEngineAdapter for SimpleSearchEngine {
             }));
         }
 
+        // Generate and digest decoy database if strategy is active
+        if params.decoy_strategy != DecoyStrategy::None {
+            report("Generating decoy database", 0.10);
+            let target_tuples: Vec<(String, String, String)> = proteins
+                .iter()
+                .map(|p| (p.accession.clone(), p.description.clone(), p.sequence.clone()))
+                .collect();
+            let decoy_proteins =
+                protein_copilot_fdr::generate_decoys(&target_tuples, params.decoy_strategy);
+            for decoy in &decoy_proteins {
+                let peptides = digest_with_length(
+                    &decoy.sequence,
+                    &decoy.accession,
+                    &params.enzyme,
+                    params.missed_cleavages,
+                    params.min_peptide_length,
+                    params.max_peptide_length,
+                );
+                all_peptides.extend(peptides);
+            }
+        }
+
         // Use the shared core logic (no input files for spectra-based search)
         self.run_search_on_spectra(
             params,
@@ -378,6 +447,9 @@ fn build_psm(
         mods.push(vm.clone());
     }
 
+    let is_decoy = m.peptide.protein_accession.starts_with("REV_")
+        || m.peptide.protein_accession.starts_with("SHUF_");
+
     Psm {
         spectrum_scan: spectrum.scan_number,
         peptide_sequence: m.peptide.sequence.clone(),
@@ -389,7 +461,7 @@ fn build_psm(
         score: m.score,
         q_value: None,
         protein_accessions: vec![m.peptide.protein_accession.clone()],
-        is_decoy: false,
+        is_decoy,
     }
 }
 
