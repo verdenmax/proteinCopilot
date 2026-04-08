@@ -226,14 +226,46 @@
 
     <section id="pipeline" class="page-section reveal">
       <p class="eyebrow">Section 03</p>
-      <h2>端到端工作流</h2>
-      <p>这一层会把 read spectra、recommend params、run search、generate/export report 串成一条从输入到结果的故事线。</p>
+      <h2>端到端工作流：从谱图到可解释结果</h2>
+      <p>这一段不要堆所有 API 细节，只强调平台如何把研究员的问题转成一条稳定的处理链路。</p>
+      <div class="pipeline-steps">
+        <button class="hotspot pipeline-step" type="button" data-panel="read-spectra" aria-controls="detail-panel" aria-pressed="false">
+          <strong>01 · read_spectra</strong>
+          <span>读取 mzML / mgf，先拿到数据摘要</span>
+        </button>
+        <button class="hotspot pipeline-step" type="button" data-panel="recommend-params" aria-controls="detail-panel" aria-pressed="false">
+          <strong>02 · recommend_params</strong>
+          <span>规则引擎输出参数建议，LLM 负责解释</span>
+        </button>
+        <button class="hotspot pipeline-step" type="button" data-panel="run-search" aria-controls="detail-panel" aria-pressed="false">
+          <strong>03 · run_search</strong>
+          <span>Rust 调用搜索引擎并产出结构化结果</span>
+        </button>
+        <button class="hotspot pipeline-step" type="button" data-panel="generate-report" aria-controls="detail-panel" aria-pressed="false">
+          <strong>04 · generate_summary / export_results</strong>
+          <span>输出统计摘要与文件结果，供 LLM 进一步解释</span>
+        </button>
+      </div>
     </section>
 
     <section id="extensibility" class="page-section reveal">
       <p class="eyebrow">Section 04</p>
-      <h2>可扩展性</h2>
-      <p>这一层会说明如何新增搜索引擎 adapter、增加 MCP 模块，以及在未来把领域拆成更多 MCP Server。</p>
+      <h2>可扩展性：架构不是终点，而是平台起点</h2>
+      <p>这一段要把“可以继续长大”讲清楚，让观众看到 search adapter、MCP 模块和 server 拆分都是被架构显式预留的。</p>
+      <div class="section-grid extension-grid">
+        <button class="hotspot extension-card" type="button" data-panel="new-adapter" aria-controls="detail-panel" aria-pressed="false">
+          <strong>新增搜索引擎 adapter</strong>
+          <span>MSFragger / Comet 只需要实现统一的 adapter 契约</span>
+        </button>
+        <button class="hotspot extension-card" type="button" data-panel="new-module" aria-controls="detail-panel" aria-pressed="false">
+          <strong>新增 MCP 模块</strong>
+          <span>qc、fdr、protein inference 都可以按 crate + tool 方式插入</span>
+        </button>
+        <button class="hotspot extension-card" type="button" data-panel="split-server" aria-controls="detail-panel" aria-pressed="false">
+          <strong>未来拆成更多 MCP Server</strong>
+          <span>某个领域需要独立部署时，可以从 library 提升为独立 server</span>
+        </button>
+      </div>
     </section>
 
     <aside class="page-section detail-panel" id="detail-panel" aria-live="polite">
