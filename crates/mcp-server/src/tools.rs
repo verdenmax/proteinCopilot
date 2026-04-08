@@ -308,6 +308,70 @@ struct DiaExtractionOutput {
     message: String,
 }
 
+/// Input for the `extract_xic` MCP tool.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct ExtractXicInput {
+    /// Spectrum file path (mzML only).
+    #[schemars(description = "Path to the spectrum file (.mzML). XIC extraction requires mzML format for MS1+MS2 and isolation window data.")]
+    file_path: Option<String>,
+    /// Target scan number (1-based).
+    #[schemars(description = "Scan number (1-based) to center the XIC around.")]
+    scan_number: u32,
+    /// Peptide sequence.
+    #[schemars(description = "Peptide amino acid sequence (one-letter codes).")]
+    peptide_sequence: Option<String>,
+    /// Charge state.
+    #[schemars(description = "Precursor charge state.")]
+    charge: Option<i32>,
+    /// Real precursor m/z (not DIA isolation window center).
+    #[schemars(description = "True precursor m/z. For DIA data, use the PSM-derived value, not the isolation window center.")]
+    precursor_mz: Option<f64>,
+    /// Complete modifications list (fixed + applied variable).
+    #[schemars(description = "Modifications applied to this peptide (fixed + variable). If omitted, uses unmodified sequence.")]
+    modifications: Option<Vec<protein_copilot_core::search_params::Modification>>,
+    /// Number of DIA cycles before/after target (default: 5).
+    #[schemars(description = "Number of DIA cycles before and after target scan. Default: 5.")]
+    n_cycles: Option<u32>,
+    /// Number of top ions to display (default: 6).
+    #[schemars(description = "Number of top fragment ions to display. Default: 6.")]
+    top_n_ions: Option<usize>,
+    /// Heavy-label type for SILAC comparison.
+    #[schemars(description = "Heavy-label configuration. Use {\"Silac\": {\"heavy_k_delta\": 8.014199, \"heavy_r_delta\": 10.008269}} for standard SILAC.")]
+    label_type: Option<protein_copilot_xic::LabelType>,
+    /// m/z extraction tolerance (default: 20 ppm).
+    #[schemars(description = "Mass tolerance for XIC peak extraction. Default: 20 ppm.")]
+    extraction_tolerance: Option<protein_copilot_core::search_params::MassTolerance>,
+    /// Intensity extraction rule (default: MaxInWindow).
+    #[schemars(description = "How to extract intensity from peaks within tolerance. Default: MaxInWindow.")]
+    intensity_rule: Option<protein_copilot_xic::IntensityRule>,
+    /// Plotly loading mode (default: Cdn).
+    #[schemars(description = "Plotly.js loading: 'Cdn' (default, smaller) or 'Embedded' (offline).")]
+    plotly_mode: Option<protein_copilot_xic::PlotlyMode>,
+    /// Output HTML file path.
+    #[schemars(description = "Output HTML file path. Default: ./output/xic_scan{N}.html")]
+    output_path: Option<String>,
+    /// Run ID to resolve PSM context (single-file searches only).
+    #[schemars(description = "Run ID from a previous search. Auto-fills peptide, charge, mods, precursor_mz. MVP: single-file searches only.")]
+    run_id: Option<String>,
+}
+
+/// Result returned by `extract_xic`.
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct ExtractXicResult {
+    /// Path to the generated HTML file.
+    output_path: String,
+    /// Number of MS2 scans in the XIC window.
+    ms2_scan_count: usize,
+    /// Number of light fragment traces extracted.
+    light_trace_count: usize,
+    /// Number of heavy fragment traces extracted.
+    heavy_trace_count: usize,
+    /// Whether MS1 precursor XIC was found.
+    has_ms1_xic: bool,
+    /// Summary message.
+    summary: String,
+}
+
 /// Presets list response
 #[derive(Debug, Serialize, schemars::JsonSchema)]
 struct PresetsResponse {
@@ -1512,5 +1576,136 @@ impl ProteinCopilotServer {
             .map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, e))?;
 
         Ok(Json(result))
+    }
+
+    /// Extract XIC (Extracted Ion Chromatogram) for a peptide from an mzML file.
+    #[rmcp::tool(
+        name = "extract_xic",
+        description = "Extract XIC (Extracted Ion Chromatogram) for a peptide from an mzML file. Generates an interactive HTML file with Plotly.js showing MS1 precursor and MS2 fragment ion chromatograms. Supports SILAC heavy-label comparison. Two modes: (1) provide run_id + scan_number to use PSM context, or (2) provide file_path + scan_number + peptide_sequence + charge + precursor_mz."
+    )]
+    fn extract_xic(
+        &self,
+        #[allow(unused_variables)] Parameters(input): Parameters<ExtractXicInput>,
+    ) -> Result<Json<ExtractXicResult>, ErrorData> {
+        use protein_copilot_core::search_params::{MassTolerance, ToleranceUnit};
+
+        validate_scan_number(input.scan_number)?;
+
+        // Resolve mode: run_id or manual
+        let (file_path, peptide, charge, precursor_mz, modifications) =
+            if let Some(ref rid) = input.run_id {
+                let result = self.get_result(&None, &Some(rid.clone()))?;
+                let psm = result
+                    .psms
+                    .iter()
+                    .find(|p| p.spectrum_scan == input.scan_number)
+                    .ok_or_else(|| {
+                        mcp_err(
+                            ErrorCode::INVALID_PARAMS,
+                            format!("no PSM for scan {} in run {}", input.scan_number, rid),
+                        )
+                    })?;
+                let file = result
+                    .metadata
+                    .input_files
+                    .first()
+                    .ok_or_else(|| {
+                        mcp_err(ErrorCode::INTERNAL_ERROR, "no input files in search result")
+                    })?
+                    .clone();
+                (
+                    file,
+                    psm.peptide_sequence.clone(),
+                    psm.charge,
+                    psm.precursor_mz,
+                    psm.modifications.clone(),
+                )
+            } else if let (Some(ref fp), Some(ref pep), Some(ch), Some(mz)) = (
+                &input.file_path,
+                &input.peptide_sequence,
+                input.charge,
+                input.precursor_mz,
+            ) {
+                validate_file_path(fp)?;
+                if pep.trim().is_empty() {
+                    return Err(mcp_err(
+                        ErrorCode::INVALID_PARAMS,
+                        "peptide_sequence cannot be empty",
+                    ));
+                }
+                (
+                    PathBuf::from(fp),
+                    pep.clone(),
+                    ch,
+                    mz,
+                    input.modifications.clone().unwrap_or_default(),
+                )
+            } else {
+                return Err(mcp_err(
+                    ErrorCode::INVALID_PARAMS,
+                    "provide either 'run_id' or 'file_path' + 'peptide_sequence' + 'charge' + 'precursor_mz'",
+                ));
+            };
+
+        let params = protein_copilot_xic::ExtractionParams {
+            mz_tolerance: input.extraction_tolerance.unwrap_or(MassTolerance {
+                value: 20.0,
+                unit: ToleranceUnit::Ppm,
+            }),
+            n_cycles: input.n_cycles.unwrap_or(5),
+            top_n_ions: input.top_n_ions.unwrap_or(6),
+            label_type: input.label_type.clone(),
+            intensity_rule: input
+                .intensity_rule
+                .unwrap_or(protein_copilot_xic::IntensityRule::MaxInWindow),
+        };
+
+        // Extract XIC
+        let xic_data = protein_copilot_xic::extract::extract_xic(
+            &file_path,
+            input.scan_number,
+            &peptide,
+            charge,
+            precursor_mz,
+            &modifications,
+            &params,
+        )
+        .map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, e.to_string()))?;
+
+        // Render HTML
+        let out_path = input.output_path.map(PathBuf::from).unwrap_or_else(|| {
+            PathBuf::from(format!("output/xic_scan{}.html", input.scan_number))
+        });
+
+        let plotly_mode = input
+            .plotly_mode
+            .unwrap_or(protein_copilot_xic::PlotlyMode::Cdn);
+
+        protein_copilot_report::xic_visualize::render_xic_html(&xic_data, &out_path, plotly_mode)
+            .map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, e.to_string()))?;
+
+        let ms2_count = xic_data
+            .fragment_xic_traces
+            .first()
+            .map(|t| t.data_points.len())
+            .unwrap_or(0);
+
+        let summary = format!(
+            "XIC extracted for {} ({}+) — {} light traces, {} heavy traces, {} MS2 scans",
+            peptide,
+            charge,
+            xic_data.fragment_xic_traces.len(),
+            xic_data.heavy_fragment_xic_traces.len(),
+            ms2_count,
+        );
+
+        Ok(Json(ExtractXicResult {
+            output_path: out_path.to_string_lossy().to_string(),
+            ms2_scan_count: ms2_count,
+            light_trace_count: xic_data.fragment_xic_traces.len(),
+            heavy_trace_count: xic_data.heavy_fragment_xic_traces.len(),
+            has_ms1_xic: xic_data.ms1_precursor_xic.is_some(),
+            summary,
+        }))
     }
 }
