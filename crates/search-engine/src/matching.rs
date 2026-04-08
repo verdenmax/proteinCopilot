@@ -36,6 +36,9 @@ pub struct PeptideMatch {
     pub matched_ions: u32,
     /// Total theoretical b/y ions.
     pub total_ions: u32,
+    /// Variable modifications applied in this match.
+    /// Each entry is (Modification, 0-based residue position or usize::MAX for terminal).
+    pub applied_variable_mods: Vec<(Modification, usize)>,
 }
 
 // ---------------------------------------------------------------------------
@@ -229,6 +232,38 @@ fn apply_fixed_mods(sequence: &str, mods: &[Modification]) -> f64 {
     delta
 }
 
+/// Builds a combined modification list merging fixed mods with applied variable sites.
+///
+/// Variable mods at residue positions are converted to `Anywhere` single-residue
+/// mods for fragment ion mass calculation via `mod_delta_fragment`.
+fn build_combined_mods(
+    fixed_mods: &[Modification],
+    variable_mods: &[Modification],
+    applied_sites: &[crate::varmod::ModSite],
+    sequence: &str,
+) -> Vec<Modification> {
+    use protein_copilot_core::search_params::ModPosition;
+    let chars: Vec<char> = sequence.chars().collect();
+    let mut combined: Vec<Modification> = fixed_mods.to_vec();
+
+    for site in applied_sites {
+        let base_mod = &variable_mods[site.mod_index];
+        if site.residue_pos == usize::MAX {
+            combined.push(base_mod.clone());
+        } else {
+            let ch = chars[site.residue_pos];
+            combined.push(Modification {
+                name: base_mod.name.clone(),
+                mass_delta: base_mod.mass_delta,
+                residues: vec![ch],
+                position: ModPosition::Anywhere,
+            });
+        }
+    }
+
+    combined
+}
+
 /// Matches a single spectrum against all candidate peptides.
 ///
 /// Returns the best match (highest score) if any peptide matches
@@ -239,6 +274,8 @@ pub fn match_spectrum(
     precursor_tolerance: &MassTolerance,
     fragment_tolerance: &MassTolerance,
     fixed_mods: &[Modification],
+    variable_mods: &[Modification],
+    max_variable_mods: u32,
 ) -> Option<PeptideMatch> {
     // Need at least one precursor to match against
     let precursor = spectrum.precursors.first()?;
@@ -254,91 +291,21 @@ pub fn match_spectrum(
     let mut best_match: Option<PeptideMatch> = None;
 
     for peptide in candidates {
-        let modified_mass = peptide.neutral_mass + apply_fixed_mods(&peptide.sequence, fixed_mods);
+        let fixed_delta = apply_fixed_mods(&peptide.sequence, fixed_mods);
 
-        for &charge in &charge_states {
-            if charge == 0 {
-                continue;
-            }
-            let theoretical_mz = peptide_mz(modified_mass, charge);
+        // Discover applicable variable mod sites for this peptide
+        let sites = crate::varmod::find_applicable_sites(
+            &peptide.sequence,
+            variable_mods,
+            peptide.is_protein_nterm,
+            peptide.is_protein_cterm,
+        );
 
-            if within_tolerance(observed_mz, theoretical_mz, precursor_tolerance) {
-                // Precursor matches — now score by fragment ions
-                let b_ions = generate_b_ions(&peptide.sequence, fixed_mods);
-                let y_ions = generate_y_ions(&peptide.sequence, fixed_mods);
+        let combinations =
+            crate::varmod::enumerate_combinations(variable_mods, &sites, max_variable_mods);
 
-                let total_theoretical = (b_ions.len() + y_ions.len()) as u32;
-                if total_theoretical == 0 {
-                    continue;
-                }
-
-                let all_ions: Vec<f64> = b_ions.into_iter().chain(y_ions).collect();
-                let matched = count_matched_ions(&all_ions, &spectrum.mz_array, fragment_tolerance);
-
-                let score = matched as f64 / total_theoretical as f64;
-                let delta_ppm = calc_delta_ppm(observed_mz, theoretical_mz);
-
-                // Guard: skip if score or delta_ppm is NaN (should not happen
-                // with validated inputs, but prevents downstream corruption)
-                if !score.is_finite() || !delta_ppm.is_finite() {
-                    continue;
-                }
-
-                let is_better = match &best_match {
-                    None => true,
-                    Some(prev) => score > prev.score,
-                };
-
-                if is_better {
-                    best_match = Some(PeptideMatch {
-                        peptide: peptide.clone(),
-                        charge,
-                        observed_mz,
-                        theoretical_mz,
-                        delta_mass_ppm: delta_ppm,
-                        score,
-                        matched_ions: matched,
-                        total_ions: total_theoretical,
-                    });
-                }
-            }
-        }
-    }
-
-    best_match
-}
-
-/// Matches a spectrum against candidate peptides using ALL precursors.
-///
-/// Unlike [`match_spectrum`] which only uses the first precursor,
-/// this function iterates over every precursor in `spectrum.precursors`
-/// and returns the best match for each precursor that produces a hit.
-///
-/// Designed for DIA data where a spectrum can have multiple candidate
-/// precursors after extraction.
-pub fn match_spectrum_all(
-    spectrum: &Spectrum,
-    candidates: &[DigestedPeptide],
-    precursor_tolerance: &MassTolerance,
-    fragment_tolerance: &MassTolerance,
-    fixed_mods: &[Modification],
-) -> Vec<PeptideMatch> {
-    let mut results = Vec::new();
-
-    for precursor in &spectrum.precursors {
-        let observed_mz = precursor.mz;
-
-        let charge_states: Vec<i32> = if let Some(c) = precursor.charge {
-            vec![c]
-        } else {
-            vec![2, 3, 1, 4]
-        };
-
-        let mut best_match: Option<PeptideMatch> = None;
-
-        for peptide in candidates {
-            let modified_mass =
-                peptide.neutral_mass + apply_fixed_mods(&peptide.sequence, fixed_mods);
+        for combo in &combinations {
+            let modified_mass = peptide.neutral_mass + fixed_delta + combo.mass_delta;
 
             for &charge in &charge_states {
                 if charge == 0 {
@@ -347,8 +314,15 @@ pub fn match_spectrum_all(
                 let theoretical_mz = peptide_mz(modified_mass, charge);
 
                 if within_tolerance(observed_mz, theoretical_mz, precursor_tolerance) {
-                    let b_ions = generate_b_ions(&peptide.sequence, fixed_mods);
-                    let y_ions = generate_y_ions(&peptide.sequence, fixed_mods);
+                    let combined_mods = build_combined_mods(
+                        fixed_mods,
+                        variable_mods,
+                        &combo.sites,
+                        &peptide.sequence,
+                    );
+
+                    let b_ions = generate_b_ions(&peptide.sequence, &combined_mods);
+                    let y_ions = generate_y_ions(&peptide.sequence, &combined_mods);
 
                     let total_theoretical = (b_ions.len() + y_ions.len()) as u32;
                     if total_theoretical == 0 {
@@ -372,6 +346,12 @@ pub fn match_spectrum_all(
                     };
 
                     if is_better {
+                        let applied = combo
+                            .sites
+                            .iter()
+                            .map(|s| (variable_mods[s.mod_index].clone(), s.residue_pos))
+                            .collect();
+
                         best_match = Some(PeptideMatch {
                             peptide: peptide.clone(),
                             charge,
@@ -381,7 +361,120 @@ pub fn match_spectrum_all(
                             score,
                             matched_ions: matched,
                             total_ions: total_theoretical,
+                            applied_variable_mods: applied,
                         });
+                    }
+                }
+            }
+        }
+    }
+
+    best_match
+}
+
+/// Matches a spectrum against candidate peptides using ALL precursors.
+///
+/// Unlike [`match_spectrum`] which only uses the first precursor,
+/// this function iterates over every precursor in `spectrum.precursors`
+/// and returns the best match for each precursor that produces a hit.
+///
+/// Designed for DIA data where a spectrum can have multiple candidate
+/// precursors after extraction.
+pub fn match_spectrum_all(
+    spectrum: &Spectrum,
+    candidates: &[DigestedPeptide],
+    precursor_tolerance: &MassTolerance,
+    fragment_tolerance: &MassTolerance,
+    fixed_mods: &[Modification],
+    variable_mods: &[Modification],
+    max_variable_mods: u32,
+) -> Vec<PeptideMatch> {
+    let mut results = Vec::new();
+
+    for precursor in &spectrum.precursors {
+        let observed_mz = precursor.mz;
+
+        let charge_states: Vec<i32> = if let Some(c) = precursor.charge {
+            vec![c]
+        } else {
+            vec![2, 3, 1, 4]
+        };
+
+        let mut best_match: Option<PeptideMatch> = None;
+
+        for peptide in candidates {
+            let fixed_delta = apply_fixed_mods(&peptide.sequence, fixed_mods);
+
+            let sites = crate::varmod::find_applicable_sites(
+                &peptide.sequence,
+                variable_mods,
+                peptide.is_protein_nterm,
+                peptide.is_protein_cterm,
+            );
+
+            let combinations =
+                crate::varmod::enumerate_combinations(variable_mods, &sites, max_variable_mods);
+
+            for combo in &combinations {
+                let modified_mass = peptide.neutral_mass + fixed_delta + combo.mass_delta;
+
+                for &charge in &charge_states {
+                    if charge == 0 {
+                        continue;
+                    }
+                    let theoretical_mz = peptide_mz(modified_mass, charge);
+
+                    if within_tolerance(observed_mz, theoretical_mz, precursor_tolerance) {
+                        let combined_mods = build_combined_mods(
+                            fixed_mods,
+                            variable_mods,
+                            &combo.sites,
+                            &peptide.sequence,
+                        );
+
+                        let b_ions = generate_b_ions(&peptide.sequence, &combined_mods);
+                        let y_ions = generate_y_ions(&peptide.sequence, &combined_mods);
+
+                        let total_theoretical = (b_ions.len() + y_ions.len()) as u32;
+                        if total_theoretical == 0 {
+                            continue;
+                        }
+
+                        let all_ions: Vec<f64> = b_ions.into_iter().chain(y_ions).collect();
+                        let matched =
+                            count_matched_ions(&all_ions, &spectrum.mz_array, fragment_tolerance);
+
+                        let score = matched as f64 / total_theoretical as f64;
+                        let delta_ppm = calc_delta_ppm(observed_mz, theoretical_mz);
+
+                        if !score.is_finite() || !delta_ppm.is_finite() {
+                            continue;
+                        }
+
+                        let is_better = match &best_match {
+                            None => true,
+                            Some(prev) => score > prev.score,
+                        };
+
+                        if is_better {
+                            let applied = combo
+                                .sites
+                                .iter()
+                                .map(|s| (variable_mods[s.mod_index].clone(), s.residue_pos))
+                                .collect();
+
+                            best_match = Some(PeptideMatch {
+                                peptide: peptide.clone(),
+                                charge,
+                                observed_mz,
+                                theoretical_mz,
+                                delta_mass_ppm: delta_ppm,
+                                score,
+                                matched_ions: matched,
+                                total_ions: total_theoretical,
+                                applied_variable_mods: applied,
+                            });
+                        }
                     }
                 }
             }
@@ -498,6 +591,8 @@ mod tests {
             &default_tolerance(),
             &fragment_tolerance(),
             &[],
+            &[],
+            0,
         );
 
         assert!(result.is_some());
@@ -519,6 +614,8 @@ mod tests {
             &default_tolerance(),
             &fragment_tolerance(),
             &[],
+            &[],
+            0,
         );
 
         assert!(result.is_none());
@@ -555,6 +652,8 @@ mod tests {
             &default_tolerance(),
             &fragment_tolerance(),
             &[],
+            &[],
+            0,
         );
 
         assert!(result.is_some());
@@ -583,6 +682,8 @@ mod tests {
             }, // wide tolerance to let both match precursor
             &fragment_tolerance(),
             &[],
+            &[],
+            0,
         );
 
         assert!(result.is_some());
@@ -633,7 +734,7 @@ mod tests {
             unit: ToleranceUnit::Da,
         };
 
-        let results = match_spectrum_all(&spectrum, &peptides, &tol, &frag_tol, &[]);
+        let results = match_spectrum_all(&spectrum, &peptides, &tol, &frag_tol, &[], &[], 0);
         assert!(!results.is_empty());
     }
 
@@ -661,6 +762,8 @@ mod tests {
                 unit: ToleranceUnit::Da,
             },
             &[],
+            &[],
+            0,
         );
         assert!(results.is_empty());
     }
@@ -762,6 +865,8 @@ mod tests {
             &default_tolerance(),
             &fragment_tolerance(),
             &[cam],
+            &[],
+            0,
         );
 
         assert!(result.is_some());

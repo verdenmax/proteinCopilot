@@ -190,6 +190,8 @@ impl SimpleSearchEngine {
                     &params.precursor_tolerance,
                     &params.fragment_tolerance,
                     &params.fixed_modifications,
+                    &params.variable_modifications,
+                    params.max_variable_modifications,
                 );
                 for m in &matches {
                     psms.push(build_psm(spectrum, m, &params.fixed_modifications));
@@ -202,6 +204,8 @@ impl SimpleSearchEngine {
                     &params.precursor_tolerance,
                     &params.fragment_tolerance,
                     &params.fixed_modifications,
+                    &params.variable_modifications,
+                    params.max_variable_modifications,
                 ) {
                     psms.push(build_psm(spectrum, &m, &params.fixed_modifications));
                 }
@@ -358,7 +362,7 @@ fn build_psm(
     m: &PeptideMatch,
     fixed_mods: &[protein_copilot_core::search_params::Modification],
 ) -> Psm {
-    // Collect modifications that apply to this peptide
+    // Collect fixed modifications that apply to this peptide
     let mut mods = Vec::new();
     for fm in fixed_mods {
         for ch in m.peptide.sequence.chars() {
@@ -367,6 +371,11 @@ fn build_psm(
                 break; // one per mod type
             }
         }
+    }
+
+    // Add variable modifications from the match
+    for (vm, _pos) in &m.applied_variable_mods {
+        mods.push(vm.clone());
     }
 
     Psm {
@@ -378,7 +387,7 @@ fn build_psm(
         calculated_mz: m.theoretical_mz,
         delta_mass_ppm: m.delta_mass_ppm,
         score: m.score,
-        q_value: None, // simplified engine doesn't compute FDR
+        q_value: None,
         protein_accessions: vec![m.peptide.protein_accession.clone()],
         is_decoy: false,
     }
