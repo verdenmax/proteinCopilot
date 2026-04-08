@@ -169,13 +169,59 @@
     <section id="mcp" class="page-section reveal">
       <p class="eyebrow">Section 01</p>
       <h2>MCP 是什么？</h2>
-      <p>MCP 是 LLM 客户端与 Rust 工具之间的结构化协议层：LLM 不直接做数值计算，而是通过标准化 tool 调用把任务交给确定性代码执行。</p>
+      <p>MCP 不是 LLM 本身，而是 LLM Client 与 ProteinCopilot Rust 能力之间的结构化桥梁。它把“理解意图”和“执行确定性工具”分开，让调用过程可解释、可组合、可扩展。</p>
+      <div class="section-grid mcp-grid">
+        <article class="info-card">
+          <h3>Client</h3>
+          <p>Copilot CLI / Claude Desktop 读取 Agent 与 Prompt，并代表用户发起 tool 调用。</p>
+        </article>
+        <article class="info-card">
+          <h3>Protocol</h3>
+          <p>JSON-RPC 风格的结构化消息，把输入、输出和错误都稳定地交给 Rust 处理。</p>
+        </article>
+        <article class="info-card">
+          <h3>Tool Bridge</h3>
+          <p>ProteinCopilot MCP Server 把 read_spectra、run_search、generate_summary 等能力暴露给 LLM。</p>
+        </article>
+      </div>
     </section>
 
     <section id="layers" class="page-section reveal">
       <p class="eyebrow">Section 02</p>
-      <h2>分层架构</h2>
-      <p>这一层会展示用户 / MCP Client / LLM、ProteinCopilot MCP Server、Rust crates 与搜索引擎之间的职责边界。</p>
+      <h2>分层架构：从 Agent 到 crate 的责任边界</h2>
+      <p>页面要清楚表达两条主线：LLM 负责编排和解释，Rust 负责所有确定性计算；同时 MCP Server 作为统一入口连接上层 Agent 和下层 crate。</p>
+      <div class="section-grid architecture-layout">
+        <div class="stack">
+          <button class="hotspot layer llm-layer" type="button" data-panel="llm-layer" aria-controls="detail-panel" aria-pressed="false">
+            <strong>用户 / MCP Client / Agent & Prompt</strong>
+            <span>理解意图、规划步骤、解释结果</span>
+          </button>
+          <button class="hotspot layer mcp-layer" type="button" data-panel="mcp-server" aria-controls="detail-panel" aria-pressed="false">
+            <strong>ProteinCopilot MCP Server</strong>
+            <span>统一 tool 入口，负责协议层与能力注册</span>
+          </button>
+          <div class="crate-grid">
+            <button class="hotspot crate-card" type="button" data-panel="core-crate" aria-controls="detail-panel" aria-pressed="false">core</button>
+            <button class="hotspot crate-card" type="button" data-panel="spectrum-io-crate" aria-controls="detail-panel" aria-pressed="false">spectrum-io</button>
+            <button class="hotspot crate-card" type="button" data-panel="param-recommend-crate" aria-controls="detail-panel" aria-pressed="false">param-recommend</button>
+            <button class="hotspot crate-card" type="button" data-panel="search-engine-crate" aria-controls="detail-panel" aria-pressed="false">search-engine</button>
+            <button class="hotspot crate-card" type="button" data-panel="report-crate" aria-controls="detail-panel" aria-pressed="false">report</button>
+            <button class="hotspot crate-card" type="button" data-panel="dia-extraction-crate" aria-controls="detail-panel" aria-pressed="false">dia-extraction</button>
+          </div>
+          <button class="hotspot layer ext-layer" type="button" data-panel="search-adapter" aria-controls="detail-panel" aria-pressed="false">
+            <strong>搜索引擎 / Adapter</strong>
+            <span>SimpleSearch 当前可用，pFind adapter 预留扩展位</span>
+          </button>
+        </div>
+        <div class="takeaway-card">
+          <h3>核心结论</h3>
+          <ul>
+            <li>Rust 负责解析、校验、搜索、聚合、导出</li>
+            <li>LLM 负责意图理解、工作流编排、自然语言解释</li>
+            <li>MCP Server 是统一能力入口，不让 LLM 直接触碰数值计算</li>
+          </ul>
+        </div>
+      </div>
     </section>
 
     <section id="pipeline" class="page-section reveal">
