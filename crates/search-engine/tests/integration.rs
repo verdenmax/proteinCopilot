@@ -247,12 +247,86 @@ async fn protein_nterm_acetylation_fw1() {
     // If any PSM has Acetyl mod, verify it's on a protein N-terminal peptide
     for psm in &result.psms {
         if psm.modifications.iter().any(|m| m.name == "Acetyl") {
-            // This PSM should be from the first tryptic peptide of its protein
-            // (we can't easily verify position here, but the fact it runs without
-            // error and the mod is correctly propagated is the key test)
             assert!(
                 !psm.peptide_sequence.is_empty(),
                 "acetylated PSM should have a sequence"
+            );
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────
+// FDR Integration Tests (FW-6)
+// ─────────────────────────────────────────────────────────
+
+/// Search with Reverse decoy strategy produces q-values and removes decoys.
+#[tokio::test]
+async fn fdr_reverse_decoy_strategy_fw6() {
+    use protein_copilot_core::search_params::*;
+    use protein_copilot_search_engine::SimpleSearchEngine;
+
+    let fasta = create_test_fasta();
+
+    let params = SearchParams {
+        enzyme: Enzyme::Trypsin,
+        missed_cleavages: 1,
+        fixed_modifications: vec![],
+        variable_modifications: vec![],
+        max_variable_modifications: 3,
+        precursor_tolerance: MassTolerance {
+            value: 10.0,
+            unit: ToleranceUnit::Ppm,
+        },
+        fragment_tolerance: MassTolerance {
+            value: 0.02,
+            unit: ToleranceUnit::Da,
+        },
+        database_path: fasta.path().to_string_lossy().to_string(),
+        decoy_strategy: DecoyStrategy::Reverse,
+        min_peptide_length: 7,
+        max_peptide_length: 50,
+        acquisition_mode: None,
+    };
+
+    let engine = SimpleSearchEngine::new();
+    let result = engine
+        .search(&params, &[mgf_fixture()], noop_progress())
+        .await
+        .unwrap();
+
+    assert_eq!(result.summary.total_spectra_searched, 10);
+
+    // All output PSMs should be targets (decoys removed)
+    for psm in &result.psms {
+        assert!(!psm.is_decoy, "decoy PSMs should be removed from output");
+        assert!(
+            !psm.protein_accessions.iter().any(|a| a.starts_with("REV_")),
+            "no REV_ accessions in output"
+        );
+    }
+
+    // PSMs with scores should have q-values assigned
+    if !result.psms.is_empty() {
+        let has_qval = result.psms.iter().any(|p| p.q_value.is_some());
+        assert!(has_qval, "at least some PSMs should have q-values");
+
+        // q-values must be monotonically non-decreasing when sorted by score descending
+        let mut scored: Vec<_> = result
+            .psms
+            .iter()
+            .filter(|p| p.q_value.is_some())
+            .collect();
+        scored.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        for w in scored.windows(2) {
+            assert!(
+                w[0].q_value.unwrap() <= w[1].q_value.unwrap(),
+                "q-values should be monotonically non-decreasing: {} > {}",
+                w[0].q_value.unwrap(),
+                w[1].q_value.unwrap(),
             );
         }
     }
