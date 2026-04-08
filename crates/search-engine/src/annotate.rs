@@ -13,7 +13,7 @@ use protein_copilot_core::spectrum::Spectrum;
 
 use crate::chemistry::{peptide_mass, peptide_mz, PROTON_MASS, WATER_MASS};
 use crate::error::SearchEngineError;
-use crate::matching::within_tolerance;
+use crate::matching::{mod_delta_fragment, within_tolerance};
 
 // ---------------------------------------------------------------------------
 // Data structures
@@ -44,6 +44,8 @@ pub struct IonAnnotation {
     pub ion_type: IonType,
     /// Ion number (1-based; e.g. b3 → 3).
     pub ion_number: u32,
+    /// Charge state of the fragment ion (1 for b3¹⁺, 2 for b3²⁺, etc.).
+    pub charge: u32,
     /// Theoretical m/z of the ion.
     pub theoretical_mz: f64,
     /// Absolute mass deviation (Da) between experimental and theoretical m/z.
@@ -70,6 +72,8 @@ pub struct TheoreticalIon {
     pub ion_type: IonType,
     /// Ion number (1-based).
     pub number: u32,
+    /// Charge state (1 for singly-charged, 2 for doubly-charged, etc.).
+    pub charge: u32,
     /// Theoretical m/z.
     pub theoretical_mz: f64,
     /// Whether this ion was matched in the experimental spectrum.
@@ -176,80 +180,64 @@ fn apply_fixed_mod_mass(sequence: &str, fixed_mods: &[Modification]) -> f64 {
 }
 
 // ---------------------------------------------------------------------------
-// Fragment ion generation with modification support
+// Fragment ion generation with modification support (multi-charge aware)
 // ---------------------------------------------------------------------------
 
-/// Generates theoretical b-ion m/z values applying fixed modifications.
-fn generate_b_ions_with_mods(sequence: &str, fixed_mods: &[Modification]) -> Option<Vec<f64>> {
+/// A theoretical fragment ion entry before matching.
+struct FragmentEntry {
+    ion_type: IonType,
+    ion_number: u32,
+    charge: u32,
+    mz: f64,
+}
+
+/// Generates theoretical b-ion entries at multiple charge states.
+fn generate_b_entries(
+    sequence: &str,
+    fixed_mods: &[Modification],
+    max_charge: u32,
+) -> Option<Vec<FragmentEntry>> {
     let chars: Vec<char> = sequence.chars().collect();
     let n = chars.len();
     if n < 2 {
         return Some(Vec::new());
     }
-    let mut ions = Vec::with_capacity(n - 1);
+    let max_z = max_charge.max(1) as usize;
+    let mut entries = Vec::with_capacity((n - 1) * max_z);
     let mut cumulative = 0.0;
 
-    for &aa in &chars[..n - 1] {
+    for (frag_idx, &aa) in chars[..n - 1].iter().enumerate() {
         let mass = crate::chemistry::residue_mass(aa)?;
         cumulative += mass;
-        ions.push(
-            cumulative
-                + mod_delta_fragment(&chars[..ions.len() + 1], fixed_mods, true)
-                + PROTON_MASS,
-        );
-    }
-    Some(ions)
-}
+        let prefix_len = frag_idx + 1;
+        let mod_delta = mod_delta_fragment(&chars[..prefix_len], fixed_mods, true);
+        let neutral = cumulative + mod_delta;
 
-/// Cumulative fixed-mod delta for a fragment prefix/suffix.
-///
-/// For residue-specific mods: adds mass_delta for each matching residue.
-/// For N-term mods: adds mass_delta to b-ions (which contain the N-terminus).
-/// For C-term mods: adds mass_delta to y-ions (which contain the C-terminus).
-fn mod_delta_fragment(residues: &[char], fixed_mods: &[Modification], is_b_ion: bool) -> f64 {
-    use protein_copilot_core::search_params::ModPosition;
-    let mut delta = 0.0;
-    for m in fixed_mods {
-        if m.residues.is_empty() {
-            // Terminal modification: apply based on ion type
-            match m.position {
-                ModPosition::AnyNTerm | ModPosition::ProteinNTerm => {
-                    // N-term mod applies to all b-ions (they contain the N-terminus)
-                    if is_b_ion {
-                        delta += m.mass_delta;
-                    }
-                }
-                ModPosition::AnyCTerm | ModPosition::ProteinCTerm => {
-                    // C-term mod applies to all y-ions (they contain the C-terminus)
-                    if !is_b_ion {
-                        delta += m.mass_delta;
-                    }
-                }
-                ModPosition::Anywhere => {
-                    // Global mod with no specific residue — add once per fragment
-                    delta += m.mass_delta;
-                }
-            }
-        } else {
-            // Residue-specific mod
-            for &ch in residues {
-                if m.residues.contains(&ch) {
-                    delta += m.mass_delta;
-                }
-            }
+        for z in 1..=max_z {
+            entries.push(FragmentEntry {
+                ion_type: IonType::B,
+                ion_number: (frag_idx + 1) as u32,
+                charge: z as u32,
+                mz: (neutral + z as f64 * PROTON_MASS) / z as f64,
+            });
         }
     }
-    delta
+    Some(entries)
 }
 
-/// Generates theoretical y-ion m/z values applying fixed modifications.
-fn generate_y_ions_with_mods(sequence: &str, fixed_mods: &[Modification]) -> Option<Vec<f64>> {
+/// Generates theoretical y-ion entries at multiple charge states.
+fn generate_y_entries(
+    sequence: &str,
+    fixed_mods: &[Modification],
+    max_charge: u32,
+) -> Option<Vec<FragmentEntry>> {
     let chars: Vec<char> = sequence.chars().collect();
     let n = chars.len();
     if n < 2 {
         return Some(Vec::new());
     }
-    let mut ions = Vec::with_capacity(n - 1);
+    let max_z = max_charge.max(1) as usize;
+    let mut entries = Vec::with_capacity((n - 1) * max_z);
     let mut cumulative = WATER_MASS;
 
     for (i, &aa) in chars.iter().rev().enumerate() {
@@ -260,9 +248,18 @@ fn generate_y_ions_with_mods(sequence: &str, fixed_mods: &[Modification]) -> Opt
         cumulative += mass;
         let suffix_start = n - 1 - i;
         let mod_delta = mod_delta_fragment(&chars[suffix_start..], fixed_mods, false);
-        ions.push(cumulative + mod_delta + PROTON_MASS);
+        let neutral = cumulative + mod_delta;
+
+        for z in 1..=max_z {
+            entries.push(FragmentEntry {
+                ion_type: IonType::Y,
+                ion_number: (i + 1) as u32,
+                charge: z as u32,
+                mz: (neutral + z as f64 * PROTON_MASS) / z as f64,
+            });
+        }
     }
-    Some(ions)
+    Some(entries)
 }
 
 // ---------------------------------------------------------------------------
@@ -317,25 +314,27 @@ pub fn annotate_spectrum(
     let precursor_delta_ppm =
         (observed_precursor_mz - theoretical_precursor_mz) / theoretical_precursor_mz * 1e6;
 
-    // --- Generate theoretical fragment ions (with modifications) ---
-    let b_ion_mzs =
-        generate_b_ions_with_mods(peptide_sequence, fixed_modifications).ok_or_else(|| {
-            SearchEngineError::ExecutionError {
+    // --- Generate theoretical fragment ions (with modifications, multi-charge) ---
+    let max_frag_charge: u32 = if charge >= 3 { 2 } else { 1 };
+
+    let b_entries =
+        generate_b_entries(peptide_sequence, fixed_modifications, max_frag_charge).ok_or_else(
+            || SearchEngineError::ExecutionError {
                 detail: format!(
                     "cannot generate b-ions for '{}': non-standard residue",
                     peptide_sequence
                 ),
-            }
-        })?;
-    let y_ion_mzs =
-        generate_y_ions_with_mods(peptide_sequence, fixed_modifications).ok_or_else(|| {
-            SearchEngineError::ExecutionError {
+            },
+        )?;
+    let y_entries =
+        generate_y_entries(peptide_sequence, fixed_modifications, max_frag_charge).ok_or_else(
+            || SearchEngineError::ExecutionError {
                 detail: format!(
                     "cannot generate y-ions for '{}': non-standard residue",
                     peptide_sequence
                 ),
-            }
-        })?;
+            },
+        )?;
 
     let exp_mz = &spectrum.mz_array;
     let exp_int = &spectrum.intensity_array;
@@ -343,95 +342,59 @@ pub fn annotate_spectrum(
     // --- Match theoretical ions against experimental peaks ---
     let mut peak_annotations: Vec<Option<IonAnnotation>> = vec![None; exp_mz.len()];
 
-    // Build TheoreticalIon lists
-    let mut b_ions_out: Vec<TheoreticalIon> = Vec::with_capacity(b_ion_mzs.len());
-    for (i, &theo_mz) in b_ion_mzs.iter().enumerate() {
-        let ion_number = (i + 1) as u32;
-        let (_, best_idx) = find_best_match(theo_mz, exp_mz, fragment_tolerance);
+    // Helper closure: match entries and build TheoreticalIon list
+    let mut match_entries =
+        |entries: &[FragmentEntry]| -> Vec<TheoreticalIon> {
+            let mut ions_out = Vec::with_capacity(entries.len());
+            for entry in entries {
+                let (_, best_idx) = find_best_match(entry.mz, exp_mz, fragment_tolerance);
 
-        if let Some(idx) = best_idx {
-            let obs_mz = exp_mz[idx];
-            let dppm = (obs_mz - theo_mz) / theo_mz * 1e6;
+                if let Some(idx) = best_idx {
+                    let obs_mz = exp_mz[idx];
+                    let dppm = (obs_mz - entry.mz) / entry.mz * 1e6;
 
-            // Annotate the experimental peak (prefer closer theoretical ion if conflict)
-            let new_annotation = IonAnnotation {
-                ion_type: IonType::B,
-                ion_number,
-                theoretical_mz: theo_mz,
-                delta_mz: obs_mz - theo_mz,
-                delta_ppm: dppm,
-            };
-            match &peak_annotations[idx] {
-                Some(existing) if existing.delta_mz.abs() <= new_annotation.delta_mz.abs() => {
-                    // Keep existing closer annotation
-                }
-                _ => {
-                    peak_annotations[idx] = Some(new_annotation);
-                }
-            }
+                    let new_annotation = IonAnnotation {
+                        ion_type: entry.ion_type,
+                        ion_number: entry.ion_number,
+                        charge: entry.charge,
+                        theoretical_mz: entry.mz,
+                        delta_mz: obs_mz - entry.mz,
+                        delta_ppm: dppm,
+                    };
+                    match &peak_annotations[idx] {
+                        Some(existing)
+                            if existing.delta_mz.abs() <= new_annotation.delta_mz.abs() => {}
+                        _ => {
+                            peak_annotations[idx] = Some(new_annotation);
+                        }
+                    }
 
-            b_ions_out.push(TheoreticalIon {
-                ion_type: IonType::B,
-                number: ion_number,
-                theoretical_mz: theo_mz,
-                matched: true,
-                matched_mz: Some(obs_mz),
-                delta_ppm: Some(dppm),
-            });
-        } else {
-            b_ions_out.push(TheoreticalIon {
-                ion_type: IonType::B,
-                number: ion_number,
-                theoretical_mz: theo_mz,
-                matched: false,
-                matched_mz: None,
-                delta_ppm: None,
-            });
-        }
-    }
-
-    let mut y_ions_out: Vec<TheoreticalIon> = Vec::with_capacity(y_ion_mzs.len());
-    for (i, &theo_mz) in y_ion_mzs.iter().enumerate() {
-        let ion_number = (i + 1) as u32;
-        let (_, best_idx) = find_best_match(theo_mz, exp_mz, fragment_tolerance);
-
-        if let Some(idx) = best_idx {
-            let obs_mz = exp_mz[idx];
-            let dppm = (obs_mz - theo_mz) / theo_mz * 1e6;
-
-            let new_annotation = IonAnnotation {
-                ion_type: IonType::Y,
-                ion_number,
-                theoretical_mz: theo_mz,
-                delta_mz: obs_mz - theo_mz,
-                delta_ppm: dppm,
-            };
-            match &peak_annotations[idx] {
-                Some(existing) if existing.delta_mz.abs() <= new_annotation.delta_mz.abs() => {}
-                _ => {
-                    peak_annotations[idx] = Some(new_annotation);
+                    ions_out.push(TheoreticalIon {
+                        ion_type: entry.ion_type,
+                        number: entry.ion_number,
+                        charge: entry.charge,
+                        theoretical_mz: entry.mz,
+                        matched: true,
+                        matched_mz: Some(obs_mz),
+                        delta_ppm: Some(dppm),
+                    });
+                } else {
+                    ions_out.push(TheoreticalIon {
+                        ion_type: entry.ion_type,
+                        number: entry.ion_number,
+                        charge: entry.charge,
+                        theoretical_mz: entry.mz,
+                        matched: false,
+                        matched_mz: None,
+                        delta_ppm: None,
+                    });
                 }
             }
+            ions_out
+        };
 
-            y_ions_out.push(TheoreticalIon {
-                ion_type: IonType::Y,
-                number: ion_number,
-                theoretical_mz: theo_mz,
-                matched: true,
-                matched_mz: Some(obs_mz),
-                delta_ppm: Some(dppm),
-            });
-        } else {
-            y_ions_out.push(TheoreticalIon {
-                ion_type: IonType::Y,
-                number: ion_number,
-                theoretical_mz: theo_mz,
-                matched: false,
-                matched_mz: None,
-                delta_ppm: None,
-            });
-        }
-    }
+    let b_ions_out = match_entries(&b_entries);
+    let y_ions_out = match_entries(&y_entries);
 
     // --- Build annotated peaks ---
     let peaks: Vec<AnnotatedPeak> = exp_mz
@@ -450,7 +413,7 @@ pub fn annotate_spectrum(
     let matched_b = b_ions_out.iter().filter(|i| i.matched).count() as u32;
     let matched_y = y_ions_out.iter().filter(|i| i.matched).count() as u32;
     let matched_count = matched_b + matched_y;
-    let total_ions = (b_ion_mzs.len() + y_ion_mzs.len()) as u32;
+    let total_ions = (b_entries.len() + y_entries.len()) as u32;
     let score = if total_ions > 0 {
         matched_count as f64 / total_ions as f64
     } else {
@@ -770,8 +733,17 @@ mod tests {
         };
 
         // Generate b-ions WITH and WITHOUT the N-term mod
-        let b_no_mod = generate_b_ions_with_mods(seq, &[]).unwrap();
-        let b_with_mod = generate_b_ions_with_mods(seq, std::slice::from_ref(&tmt_mod)).unwrap();
+        let b_no_mod: Vec<f64> = generate_b_entries(seq, &[], 1)
+            .unwrap()
+            .iter()
+            .map(|e| e.mz)
+            .collect();
+        let b_with_mod: Vec<f64> =
+            generate_b_entries(seq, std::slice::from_ref(&tmt_mod), 1)
+                .unwrap()
+                .iter()
+                .map(|e| e.mz)
+                .collect();
 
         // All b-ions should be shifted by the TMT mass
         assert_eq!(b_no_mod.len(), b_with_mod.len());
@@ -784,8 +756,16 @@ mod tests {
         }
 
         // y-ions should NOT be affected by N-term mod
-        let y_no_mod = generate_y_ions_with_mods(seq, &[]).unwrap();
-        let y_with_mod = generate_y_ions_with_mods(seq, &[tmt_mod]).unwrap();
+        let y_no_mod: Vec<f64> = generate_y_entries(seq, &[], 1)
+            .unwrap()
+            .iter()
+            .map(|e| e.mz)
+            .collect();
+        let y_with_mod: Vec<f64> = generate_y_entries(seq, &[tmt_mod], 1)
+            .unwrap()
+            .iter()
+            .map(|e| e.mz)
+            .collect();
 
         assert_eq!(y_no_mod.len(), y_with_mod.len());
         for (no_mod, with_mod) in y_no_mod.iter().zip(y_with_mod.iter()) {

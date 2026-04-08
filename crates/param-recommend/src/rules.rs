@@ -270,9 +270,9 @@ fn build_explanation(
     };
 
     let tolerance_desc = match instrument {
-        InstrumentClass::HighResolution => "precursor tolerance 10 ppm, fragment tolerance 0.02 Da",
+        InstrumentClass::HighResolution => "precursor tolerance 10 ppm, fragment tolerance 20 ppm",
         InstrumentClass::LowResolution => "precursor tolerance 20 ppm, fragment tolerance 0.1 Da",
-        InstrumentClass::General => "precursor tolerance 15 ppm, fragment tolerance 0.05 Da",
+        InstrumentClass::General => "precursor tolerance 15 ppm, fragment tolerance 20 ppm",
     };
 
     let mut text = format!(

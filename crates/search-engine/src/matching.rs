@@ -49,6 +49,9 @@ pub struct PeptideMatch {
 pub fn within_tolerance(observed: f64, theoretical: f64, tolerance: &MassTolerance) -> bool {
     match tolerance.unit {
         ToleranceUnit::Ppm => {
+            if theoretical <= 0.0 {
+                return false;
+            }
             let ppm_diff = ((observed - theoretical) / theoretical).abs() * 1e6;
             ppm_diff <= tolerance.value
         }
@@ -127,13 +130,13 @@ pub fn generate_b_ions_with_charge(
     let mut ions = Vec::with_capacity(n * max_z);
     let mut cumulative = 0.0;
 
-    for &aa in &chars[..chars.len().saturating_sub(1)] {
+    for (frag_idx, &aa) in chars[..chars.len().saturating_sub(1)].iter().enumerate() {
         let mass = match residue_mass(aa) {
             Some(m) => m,
             None => return Vec::new(),
         };
         cumulative += mass;
-        let prefix_len = ions.len() / max_z + 1;
+        let prefix_len = frag_idx + 1;
         let mod_delta = mod_delta_fragment(&chars[..prefix_len], fixed_mods, true);
         let neutral = cumulative + mod_delta;
 
@@ -1037,5 +1040,24 @@ mod tests {
             "z=2 precursor should only generate z=1 fragments"
         );
         assert!(m.score > 0.99, "should match all z=1 fragments: {}", m.score);
+    }
+
+    #[test]
+    fn multicharge_empty_and_single_residue() {
+        assert!(generate_b_ions_with_charge("", &[], 2).is_empty());
+        assert!(generate_b_ions_with_charge("G", &[], 2).is_empty());
+        assert!(generate_y_ions_with_charge("", &[], 2).is_empty());
+        assert!(generate_y_ions_with_charge("G", &[], 2).is_empty());
+    }
+
+    #[test]
+    fn within_tolerance_ppm_zero_theoretical() {
+        let tol = MassTolerance {
+            value: 20.0,
+            unit: ToleranceUnit::Ppm,
+        };
+        assert!(!within_tolerance(0.0, 0.0, &tol));
+        assert!(!within_tolerance(100.0, 0.0, &tol));
+        assert!(!within_tolerance(0.0, -1.0, &tol));
     }
 }

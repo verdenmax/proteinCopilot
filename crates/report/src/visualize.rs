@@ -77,6 +77,7 @@ mod tests {
                     annotation: Some(IonAnnotation {
                         ion_type: IonType::B,
                         ion_number: 3,
+                        charge: 1,
                         theoretical_mz: 200.001,
                         delta_mz: -0.001,
                         delta_ppm: -5.0,
@@ -86,6 +87,7 @@ mod tests {
             b_ions: vec![TheoreticalIon {
                 ion_type: IonType::B,
                 number: 1,
+                charge: 1,
                 theoretical_mz: 98.06,
                 matched: true,
                 matched_mz: Some(98.061),
@@ -94,6 +96,7 @@ mod tests {
             y_ions: vec![TheoreticalIon {
                 ion_type: IonType::Y,
                 number: 1,
+                charge: 1,
                 theoretical_mz: 148.06,
                 matched: false,
                 matched_mz: None,
