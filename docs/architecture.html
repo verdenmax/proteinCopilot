@@ -129,6 +129,61 @@
       gap: 24px;
     }
 
+    .mcp-grid,
+    .architecture-layout,
+    .extension-grid {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .info-card,
+    .takeaway-card,
+    .extension-card,
+    .pipeline-step,
+    .crate-card,
+    .layer {
+      padding: 18px;
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      background: #fff;
+      color: var(--ink);
+      box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
+    }
+
+    .stack,
+    .pipeline-steps {
+      display: grid;
+      gap: 14px;
+    }
+
+    .crate-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .hotspot {
+      width: 100%;
+      border: 1px solid var(--border);
+      cursor: pointer;
+      text-align: left;
+      transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease;
+    }
+
+    .hotspot:hover,
+    .hotspot:focus-visible {
+      transform: translateY(-2px);
+      box-shadow: 0 16px 32px rgba(15, 23, 42, 0.12);
+    }
+
+    .hotspot.is-active {
+      border-color: var(--mcp);
+      box-shadow: 0 0 0 3px rgba(8, 145, 178, 0.16);
+    }
+
+    .llm-layer { background: linear-gradient(135deg, rgba(124, 58, 237, 0.08), #fff); }
+    .mcp-layer { background: linear-gradient(135deg, rgba(8, 145, 178, 0.1), #fff); }
+    .ext-layer { background: linear-gradient(135deg, rgba(234, 88, 12, 0.08), #fff); }
+
     .detail-panel {
       margin-top: 24px;
       padding: 20px;
@@ -138,8 +193,23 @@
     }
 
     .reveal {
+      opacity: 0;
+      transform: translateY(24px);
+      transition: opacity 320ms ease, transform 320ms ease;
+    }
+
+    .reveal.is-visible {
       opacity: 1;
-      transform: none;
+      transform: translateY(0);
+    }
+
+    @media (max-width: 960px) {
+      .mcp-grid,
+      .architecture-layout,
+      .extension-grid,
+      .crate-grid {
+        grid-template-columns: 1fr;
+      }
     }
 
     @media (max-width: 800px) {
@@ -276,7 +346,110 @@
   </main>
 
   <script>
-    const detailData = {};
+    const detailData = {
+      "llm-layer": {
+        title: "LLM 编排层",
+        body: "负责理解用户意图、组织调用顺序、把 Rust 返回的结构化结果解释成人能读懂的结论。"
+      },
+      "mcp-server": {
+        title: "ProteinCopilot MCP Server",
+        body: "统一暴露 tool 接口，连接 Agent/Prompt 与下层 Rust crate，并保持交互契约结构化。"
+      },
+      "core-crate": {
+        title: "core",
+        body: "定义共享领域模型、错误类型和 adapter trait，是整个 workspace 的共享数据基础。"
+      },
+      "spectrum-io-crate": {
+        title: "spectrum-io",
+        body: "负责 mzML / mgf 的读取和摘要提取，是所有后续流程的输入入口。"
+      },
+      "param-recommend-crate": {
+        title: "param-recommend",
+        body: "规则引擎根据谱图特征推荐搜索参数，保持推荐逻辑确定性。"
+      },
+      "search-engine-crate": {
+        title: "search-engine",
+        body: "封装搜索引擎适配层与统一结果结构，是执行搜索的核心模块。"
+      },
+      "report-crate": {
+        title: "report",
+        body: "把搜索结果变成结构化摘要和导出文件，供 LLM 和用户继续消费。"
+      },
+      "dia-extraction-crate": {
+        title: "dia-extraction",
+        body: "为 DIA 工作流提取候选前体离子，把宽窗口数据接到后续搜索流程。"
+      },
+      "search-adapter": {
+        title: "搜索引擎 / Adapter",
+        body: "当前有 SimpleSearch，未来可以继续接入 pFind、MSFragger、Comet。"
+      },
+      "read-spectra": {
+        title: "read_spectra",
+        body: "先读取文件并总结数据特征，为后续推荐和搜索准备结构化输入。"
+      },
+      "recommend-params": {
+        title: "recommend_params",
+        body: "Rust 给出可重复的参数建议，LLM 再把建议解释成用户能理解的话。"
+      },
+      "run-search": {
+        title: "run_search",
+        body: "Rust 调用搜索引擎并返回统一的结果结构，避免 LLM 直接碰评分与数值计算。"
+      },
+      "generate-report": {
+        title: "generate_summary / export_results",
+        body: "输出摘要和文件结果，让后续解读建立在结构化数据之上。"
+      },
+      "new-adapter": {
+        title: "新增 adapter",
+        body: "通过统一的 SearchEngineAdapter 契约接入更多搜索引擎，而不改上层交互。"
+      },
+      "new-module": {
+        title: "新增 MCP 模块",
+        body: "qc、fdr 或 protein inference 都可以作为新 crate 和新 tool 独立加入。"
+      },
+      "split-server": {
+        title: "拆分更多 MCP Server",
+        body: "当某个领域需要独立部署时，可以把 library 抽成独立 server，而不推翻现有分层。"
+      }
+    };
+
+    const titleNode = document.getElementById("detail-title");
+    const bodyNode = document.getElementById("detail-body");
+    const hotspots = document.querySelectorAll(".hotspot");
+
+    function setActivePanel(panelId) {
+      const detail = detailData[panelId];
+      if (!detail) return;
+
+      titleNode.textContent = detail.title;
+      bodyNode.textContent = detail.body;
+
+      hotspots.forEach((node) => {
+        const active = node.dataset.panel === panelId;
+        node.classList.toggle("is-active", active);
+        node.setAttribute("aria-pressed", active ? "true" : "false");
+      });
+    }
+
+    hotspots.forEach((node) => {
+      node.addEventListener("click", () => setActivePanel(node.dataset.panel));
+      node.addEventListener("mouseenter", () => {
+        if (window.matchMedia("(pointer:fine)").matches) {
+          setActivePanel(node.dataset.panel);
+        }
+      });
+    });
+
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => {
+        if (entry.isIntersecting) {
+          entry.target.classList.add("is-visible");
+        }
+      });
+    }, { threshold: 0.2 });
+
+    document.querySelectorAll(".reveal").forEach((node) => observer.observe(node));
+    setActivePanel("mcp-server");
   </script>
 </body>
 </html>
