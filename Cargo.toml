@@ -43,3 +43,4 @@ protein-copilot-search-engine = { path = "crates/search-engine" }
 protein-copilot-report = { path = "crates/report" }
 protein-copilot-fdr = { path = "crates/fdr" }
 protein-copilot-dia-extraction = { path = "crates/dia-extraction" }
+protein-copilot-xic = { path = "crates/xic" }
