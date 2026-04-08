@@ -9,7 +9,7 @@
 //! - Semantic conflict detection
 
 use protein_copilot_core::ai_decision::AiDecision;
-use protein_copilot_core::search_params::SearchParams;
+use protein_copilot_core::search_params::{SearchParams, ToleranceUnit};
 use protein_copilot_core::spectrum::SpectrumSummary;
 
 use crate::error::ParamRecommendError;
@@ -226,8 +226,8 @@ fn apply_tolerance(params: &mut SearchParams, instrument: &InstrumentClass) {
                 unit: ToleranceUnit::Ppm,
             };
             params.fragment_tolerance = MassTolerance {
-                value: 0.02,
-                unit: ToleranceUnit::Da,
+                value: 20.0,
+                unit: ToleranceUnit::Ppm,
             };
         }
         InstrumentClass::LowResolution => {
@@ -246,8 +246,8 @@ fn apply_tolerance(params: &mut SearchParams, instrument: &InstrumentClass) {
                 unit: ToleranceUnit::Ppm,
             };
             params.fragment_tolerance = MassTolerance {
-                value: 0.05,
-                unit: ToleranceUnit::Da,
+                value: 20.0,
+                unit: ToleranceUnit::Ppm,
             };
         }
     }
@@ -394,15 +394,18 @@ fn detect_conflicts(params: &SearchParams, is_open_search: bool) -> Vec<String> 
     }
 
     // Open search + narrow fragment tolerance (skip if using open preset intentionally)
-    if !is_open_search
-        && params.precursor_tolerance.value > 100.0
-        && params.fragment_tolerance.value < 0.05
-    {
-        warnings.push(
-            "- Wide precursor tolerance with very narrow fragment tolerance (< 0.05 Da) \
-             may produce few matches; consider widening fragment tolerance"
-                .to_string(),
-        );
+    if !is_open_search && params.precursor_tolerance.value > 100.0 {
+        let narrow_frag = match params.fragment_tolerance.unit {
+            ToleranceUnit::Da => params.fragment_tolerance.value < 0.05,
+            ToleranceUnit::Ppm => params.fragment_tolerance.value < 10.0,
+        };
+        if narrow_frag {
+            warnings.push(
+                "- Wide precursor tolerance with very narrow fragment tolerance \
+                 may produce few matches; consider widening fragment tolerance"
+                    .to_string(),
+            );
+        }
     }
 
     // Open search + high missed cleavages → huge search space
@@ -420,6 +423,7 @@ fn detect_conflicts(params: &SearchParams, is_open_search: bool) -> Vec<String> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use protein_copilot_core::search_params::ToleranceUnit;
     use protein_copilot_core::spectrum::{SpectrumFormat, SpectrumSummary};
     use std::collections::HashMap;
 
@@ -481,7 +485,8 @@ mod tests {
     fn high_res_data_gets_10ppm() {
         let result = recommend(&high_res_summary(), None).unwrap();
         assert_eq!(result.decision.precursor_tolerance.value, 10.0);
-        assert_eq!(result.decision.fragment_tolerance.value, 0.02);
+        assert_eq!(result.decision.fragment_tolerance.value, 20.0);
+        assert_eq!(result.decision.fragment_tolerance.unit, ToleranceUnit::Ppm);
     }
 
     #[test]
@@ -489,6 +494,7 @@ mod tests {
         let result = recommend(&low_res_summary(), None).unwrap();
         assert_eq!(result.decision.precursor_tolerance.value, 20.0);
         assert_eq!(result.decision.fragment_tolerance.value, 0.1);
+        assert_eq!(result.decision.fragment_tolerance.unit, ToleranceUnit::Da);
     }
 
     #[test]
@@ -691,7 +697,8 @@ mod tests {
         summary.median_peaks_per_spectrum = 150; // between thresholds
         let result = recommend(&summary, None).unwrap();
         assert_eq!(result.decision.precursor_tolerance.value, 15.0);
-        assert_eq!(result.decision.fragment_tolerance.value, 0.05);
+        assert_eq!(result.decision.fragment_tolerance.value, 20.0);
+        assert_eq!(result.decision.fragment_tolerance.unit, ToleranceUnit::Ppm);
     }
 
     // -- Open search selection ------------------------------------------

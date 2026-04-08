@@ -91,7 +91,7 @@ const PLACEHOLDER_DB: &str = "<database_path>";
 pub fn standard_preset() -> SearchPreset {
     SearchPreset {
         name: "standard".to_string(),
-        description: "Standard protein search: Trypsin, Carbamidomethyl(C) fixed, Oxidation(M) variable, 10ppm/0.02Da".to_string(),
+        description: "Standard protein search: Trypsin, Carbamidomethyl(C) fixed, Oxidation(M) variable, 10ppm/20ppm".to_string(),
         params: SearchParams {
             database_path: PLACEHOLDER_DB.to_string(),
             enzyme: Enzyme::Trypsin,
@@ -99,7 +99,7 @@ pub fn standard_preset() -> SearchPreset {
             fixed_modifications: vec![carbamidomethyl_c()],
             variable_modifications: vec![oxidation_m()],
             precursor_tolerance: MassTolerance { value: 10.0, unit: ToleranceUnit::Ppm },
-            fragment_tolerance: MassTolerance { value: 0.02, unit: ToleranceUnit::Da },
+            fragment_tolerance: MassTolerance { value: 20.0, unit: ToleranceUnit::Ppm },
             decoy_strategy: DecoyStrategy::Reverse,
             acquisition_mode: None,
             max_variable_modifications: 3,
@@ -130,8 +130,8 @@ pub fn phospho_preset() -> SearchPreset {
                 unit: ToleranceUnit::Ppm,
             },
             fragment_tolerance: MassTolerance {
-                value: 0.02,
-                unit: ToleranceUnit::Da,
+                value: 20.0,
+                unit: ToleranceUnit::Ppm,
             },
             decoy_strategy: DecoyStrategy::Reverse,
             acquisition_mode: None,
@@ -164,8 +164,8 @@ pub fn tmt_preset() -> SearchPreset {
                 unit: ToleranceUnit::Ppm,
             },
             fragment_tolerance: MassTolerance {
-                value: 0.02,
-                unit: ToleranceUnit::Da,
+                value: 20.0,
+                unit: ToleranceUnit::Ppm,
             },
             decoy_strategy: DecoyStrategy::Reverse,
             acquisition_mode: None,
@@ -197,8 +197,8 @@ pub fn open_search_preset() -> SearchPreset {
                 unit: ToleranceUnit::Da,
             },
             fragment_tolerance: MassTolerance {
-                value: 0.02,
-                unit: ToleranceUnit::Da,
+                value: 20.0,
+                unit: ToleranceUnit::Ppm,
             },
             decoy_strategy: DecoyStrategy::Reverse,
             acquisition_mode: None,
@@ -244,7 +244,7 @@ pub fn silac_preset() -> SearchPreset {
             fixed_modifications: vec![carbamidomethyl_c()],
             variable_modifications: vec![oxidation_m(), silac_heavy_k(), silac_heavy_r()],
             precursor_tolerance: MassTolerance { value: 10.0, unit: ToleranceUnit::Ppm },
-            fragment_tolerance: MassTolerance { value: 0.02, unit: ToleranceUnit::Da },
+            fragment_tolerance: MassTolerance { value: 20.0, unit: ToleranceUnit::Ppm },
             decoy_strategy: DecoyStrategy::Reverse,
             acquisition_mode: None,
             max_variable_modifications: 3,
