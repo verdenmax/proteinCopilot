@@ -30,4 +30,17 @@ pub trait SpectrumReader: Send + Sync {
     /// Returns [`SpectrumIoError::ScanNotFound`] if the scan number
     /// does not exist in the file.
     fn read_spectrum(&self, path: &Path, scan: u32) -> Result<Spectrum, SpectrumIoError>;
+
+    /// Streams spectra one at a time, calling `handler` for each.
+    ///
+    /// The handler returns `Ok(true)` to continue or `Ok(false)` to stop early.
+    /// Returns the number of spectra processed (including the one that stopped).
+    ///
+    /// This avoids loading all spectra into memory at once, which is important
+    /// for large DIA files when only extracting specific ion chromatograms.
+    fn for_each_spectrum(
+        &self,
+        path: &Path,
+        handler: &mut dyn FnMut(Spectrum) -> Result<bool, SpectrumIoError>,
+    ) -> Result<u32, SpectrumIoError>;
 }
