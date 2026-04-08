@@ -95,6 +95,7 @@ crates/
 
 详细计划：`tasks/001-mvp-proteomics-search-platform.md`
 架构设计：`docs/architecture.md`
+架构演示：`docs/architecture.html`
 
 ## License
 

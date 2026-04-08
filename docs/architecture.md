@@ -3,6 +3,10 @@
 > 本文档从 Architect 视角，定义项目第一版 Rust workspace 的 crate 划分、职责边界、
 > 共享 schema 设计、确定性逻辑与 LLM 编排的分层方案，以及关键架构决策。
 
+> 演示版可视化页面见：`docs/architecture.html`
+>
+> `docs/architecture.md` 保留为完整的架构说明和决策记录。
+
 ---
 
 ## 1. 系统上下文
