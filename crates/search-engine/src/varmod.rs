@@ -153,8 +153,7 @@ pub fn enumerate_combinations(
         });
 
         if current_sites.len() < max_k {
-            for j in (last_idx + 1)..items.len() {
-                let (mod_idx, pos, mass) = items[j];
+            for (j, &(mod_idx, pos, mass)) in items.iter().enumerate().skip(last_idx + 1) {
                 // Skip if same residue position already modified
                 let pos_conflict = if pos == usize::MAX {
                     current_sites

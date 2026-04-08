@@ -598,6 +598,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "protein-copilot-core",
+ "protein-copilot-fdr",
  "protein-copilot-param-recommend",
  "protein-copilot-report",
  "protein-copilot-spectrum-io",
