@@ -253,6 +253,10 @@ impl SimpleSearchEngine {
                         psms[idx].q_value = Some(q);
                     }
                 }
+            } else {
+                tracing::warn!(
+                    "FDR calculation failed (likely no decoy hits); q-values not assigned"
+                );
             }
 
             // Remove decoy PSMs from final results
@@ -557,10 +561,22 @@ fn aggregate_proteins(psms: &[Psm], proteins: &[crate::fasta::FastaEntry]) -> Ve
 fn build_summary(psms: &[Psm], total_spectra: u64, duration: f64) -> SearchResultSummary {
     let total_psms = psms.len() as u64;
 
-    // Without FDR, treat all PSMs as passing
-    let unique_peptides: std::collections::HashSet<&str> =
-        psms.iter().map(|p| p.peptide_sequence.as_str()).collect();
-    let unique_proteins: std::collections::HashSet<&str> = psms
+    // FDR-filtered counts: if q-values are available, count only PSMs at ≤1% FDR
+    let has_qvalues = psms.iter().any(|p| p.q_value.is_some());
+    let fdr_filtered: Vec<&Psm> = if has_qvalues {
+        psms.iter()
+            .filter(|p| p.q_value.is_some_and(|q| q <= 0.01))
+            .collect()
+    } else {
+        psms.iter().collect()
+    };
+
+    let psms_at_fdr = fdr_filtered.len() as u64;
+    let unique_peptides_fdr: std::collections::HashSet<&str> = fdr_filtered
+        .iter()
+        .map(|p| p.peptide_sequence.as_str())
+        .collect();
+    let unique_proteins_fdr: std::collections::HashSet<&str> = fdr_filtered
         .iter()
         .flat_map(|p| p.protein_accessions.iter().map(|a| a.as_str()))
         .collect();
@@ -589,7 +605,7 @@ fn build_summary(psms: &[Psm], total_spectra: u64, duration: f64) -> SearchResul
     let median_score = protein_copilot_core::util::compute_median(&scores);
     let median_delta = protein_copilot_core::util::compute_median(&delta_ppms);
     let id_rate = if total_spectra > 0 {
-        total_psms as f64 / total_spectra as f64
+        psms_at_fdr as f64 / total_spectra as f64
     } else {
         0.0
     };
@@ -597,9 +613,9 @@ fn build_summary(psms: &[Psm], total_spectra: u64, duration: f64) -> SearchResul
     SearchResultSummary {
         total_spectra_searched: total_spectra,
         total_psms,
-        psms_at_1pct_fdr: total_psms, // no FDR filtering
-        unique_peptides_at_1pct_fdr: unique_peptides.len() as u64,
-        protein_groups_at_1pct_fdr: unique_proteins.len() as u64,
+        psms_at_1pct_fdr: psms_at_fdr,
+        unique_peptides_at_1pct_fdr: unique_peptides_fdr.len() as u64,
+        protein_groups_at_1pct_fdr: unique_proteins_fdr.len() as u64,
         median_score,
         median_delta_mass_ppm: median_delta,
         identification_rate: id_rate,

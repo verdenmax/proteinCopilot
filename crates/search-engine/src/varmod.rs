@@ -154,11 +154,11 @@ pub fn enumerate_combinations(
 
         if current_sites.len() < max_k {
             for (j, &(mod_idx, pos, mass)) in items.iter().enumerate().skip(last_idx + 1) {
-                // Skip if same residue position already modified
+                // Skip if position already occupied.
+                // For terminal mods (usize::MAX): only one mod per terminus allowed,
+                // regardless of which modification — a terminus is a single chemical site.
                 let pos_conflict = if pos == usize::MAX {
-                    current_sites
-                        .iter()
-                        .any(|s| s.residue_pos == usize::MAX && s.mod_index == mod_idx)
+                    current_sites.iter().any(|s| s.residue_pos == usize::MAX)
                 } else {
                     current_sites.iter().any(|s| s.residue_pos == pos)
                 };
@@ -318,5 +318,35 @@ mod tests {
         assert_eq!(combos.len(), 2);
         let acetyl = combos.iter().find(|c| c.sites.len() == 1).unwrap();
         assert!((acetyl.mass_delta - 42.010565).abs() < 1e-6);
+    }
+
+    #[test]
+    fn enumerate_two_terminal_mods_mutually_exclusive() {
+        // Two different N-term mods should NOT both apply — a terminus is one site
+        let formyl = Modification {
+            name: "Formyl".to_string(),
+            mass_delta: 27.994915,
+            residues: vec![],
+            position: ModPosition::AnyNTerm,
+        };
+        let acetyl_nterm = Modification {
+            name: "Acetyl".to_string(),
+            mass_delta: 42.010565,
+            residues: vec![],
+            position: ModPosition::AnyNTerm,
+        };
+        let mods = vec![formyl, acetyl_nterm];
+        let sites = find_applicable_sites("PEPTIDEK", &mods, false, false);
+        // Both mods apply to AnyNTerm → both have usize::MAX positions
+        assert_eq!(sites.len(), 2);
+
+        let combos = enumerate_combinations(&mods, &sites, 3);
+        // Expected: empty + Formyl alone + Acetyl alone = 3 (NOT 4 with both)
+        assert_eq!(combos.len(), 3);
+        // No combination should have 2 sites (both on same terminus)
+        assert!(
+            combos.iter().all(|c| c.sites.len() <= 1),
+            "two terminal mods must not co-occur on the same terminus"
+        );
     }
 }
