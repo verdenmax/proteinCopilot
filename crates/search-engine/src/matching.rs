@@ -49,6 +49,9 @@ pub struct PeptideMatch {
 pub fn within_tolerance(observed: f64, theoretical: f64, tolerance: &MassTolerance) -> bool {
     match tolerance.unit {
         ToleranceUnit::Ppm => {
+            if theoretical <= 0.0 {
+                return false;
+            }
             let ppm_diff = ((observed - theoretical) / theoretical).abs() * 1e6;
             ppm_diff <= tolerance.value
         }
@@ -108,21 +111,38 @@ pub(crate) fn mod_delta_fragment(
 /// Generates theoretical singly-charged b-ion m/z values for a peptide,
 /// applying fixed modifications to each fragment.
 pub fn generate_b_ions(sequence: &str, fixed_mods: &[Modification]) -> Vec<f64> {
+    generate_b_ions_with_charge(sequence, fixed_mods, 1)
+}
+
+/// Generates theoretical b-ion m/z values at multiple charge states.
+///
+/// For `max_charge = 1`, identical to `generate_b_ions`.
+/// For `max_charge = 2`, generates both b¹⁺ and b²⁺ ions (useful when
+/// precursor charge ≥ 3).
+pub fn generate_b_ions_with_charge(
+    sequence: &str,
+    fixed_mods: &[Modification],
+    max_charge: i32,
+) -> Vec<f64> {
     let chars: Vec<char> = sequence.chars().collect();
-    let mut ions = Vec::with_capacity(chars.len().saturating_sub(1));
+    let n = chars.len().saturating_sub(1);
+    let max_z = max_charge.max(1) as usize;
+    let mut ions = Vec::with_capacity(n * max_z);
     let mut cumulative = 0.0;
 
-    for &aa in &chars[..chars.len().saturating_sub(1)] {
-        // Skip entire generation if non-standard residue encountered
+    for (frag_idx, &aa) in chars[..chars.len().saturating_sub(1)].iter().enumerate() {
         let mass = match residue_mass(aa) {
             Some(m) => m,
             None => return Vec::new(),
         };
         cumulative += mass;
-        let prefix_len = ions.len() + 1;
+        let prefix_len = frag_idx + 1;
         let mod_delta = mod_delta_fragment(&chars[..prefix_len], fixed_mods, true);
-        // b-ion m/z (singly charged) = cumulative residues + mod delta + proton
-        ions.push(cumulative + mod_delta + PROTON_MASS);
+        let neutral = cumulative + mod_delta;
+
+        for z in 1..=max_z {
+            ions.push((neutral + z as f64 * PROTON_MASS) / z as f64);
+        }
     }
 
     ions
@@ -131,9 +151,22 @@ pub fn generate_b_ions(sequence: &str, fixed_mods: &[Modification]) -> Vec<f64> 
 /// Generates theoretical singly-charged y-ion m/z values for a peptide,
 /// applying fixed modifications to each fragment.
 pub fn generate_y_ions(sequence: &str, fixed_mods: &[Modification]) -> Vec<f64> {
+    generate_y_ions_with_charge(sequence, fixed_mods, 1)
+}
+
+/// Generates theoretical y-ion m/z values at multiple charge states.
+///
+/// For `max_charge = 1`, identical to `generate_y_ions`.
+/// For `max_charge = 2`, generates both y¹⁺ and y²⁺ ions.
+pub fn generate_y_ions_with_charge(
+    sequence: &str,
+    fixed_mods: &[Modification],
+    max_charge: i32,
+) -> Vec<f64> {
     let chars: Vec<char> = sequence.chars().collect();
     let n = chars.len();
-    let mut ions = Vec::with_capacity(n.saturating_sub(1));
+    let max_z = max_charge.max(1) as usize;
+    let mut ions = Vec::with_capacity(n.saturating_sub(1) * max_z);
     let mut cumulative = WATER_MASS;
 
     for (i, &aa) in chars.iter().rev().enumerate() {
@@ -147,8 +180,11 @@ pub fn generate_y_ions(sequence: &str, fixed_mods: &[Modification]) -> Vec<f64> 
         cumulative += mass;
         let suffix_start = n - 1 - i;
         let mod_delta = mod_delta_fragment(&chars[suffix_start..], fixed_mods, false);
-        // y-ion m/z (singly charged) = cumulative residues + water + mod delta + proton
-        ions.push(cumulative + mod_delta + PROTON_MASS);
+        let neutral = cumulative + mod_delta;
+
+        for z in 1..=max_z {
+            ions.push((neutral + z as f64 * PROTON_MASS) / z as f64);
+        }
     }
 
     ions
@@ -321,8 +357,18 @@ pub fn match_spectrum(
                         &peptide.sequence,
                     );
 
-                    let b_ions = generate_b_ions(&peptide.sequence, &combined_mods);
-                    let y_ions = generate_y_ions(&peptide.sequence, &combined_mods);
+                    // Generate fragment ions: include doubly-charged when precursor z ≥ 3
+                    let max_frag_charge = if charge >= 3 { 2 } else { 1 };
+                    let b_ions = generate_b_ions_with_charge(
+                        &peptide.sequence,
+                        &combined_mods,
+                        max_frag_charge,
+                    );
+                    let y_ions = generate_y_ions_with_charge(
+                        &peptide.sequence,
+                        &combined_mods,
+                        max_frag_charge,
+                    );
 
                     let total_theoretical = (b_ions.len() + y_ions.len()) as u32;
                     if total_theoretical == 0 {
@@ -432,8 +478,17 @@ pub fn match_spectrum_all(
                             &peptide.sequence,
                         );
 
-                        let b_ions = generate_b_ions(&peptide.sequence, &combined_mods);
-                        let y_ions = generate_y_ions(&peptide.sequence, &combined_mods);
+                        let max_frag_charge = if charge >= 3 { 2 } else { 1 };
+                        let b_ions = generate_b_ions_with_charge(
+                            &peptide.sequence,
+                            &combined_mods,
+                            max_frag_charge,
+                        );
+                        let y_ions = generate_y_ions_with_charge(
+                            &peptide.sequence,
+                            &combined_mods,
+                            max_frag_charge,
+                        );
 
                         let total_theoretical = (b_ions.len() + y_ions.len()) as u32;
                         if total_theoretical == 0 {
@@ -877,5 +932,132 @@ mod tests {
             "score should be ~1.0 with correct mod handling: {}",
             m.score
         );
+    }
+
+    // ---- FW-4: Multi-charge fragment ion tests ----
+
+    #[test]
+    fn b_ions_singly_charged_by_default() {
+        // "GAS" → b1 = G, b2 = GA (2 b-ions for 3-residue peptide)
+        let b1 = generate_b_ions("GAS", &[]);
+        let b2 = generate_b_ions_with_charge("GAS", &[], 1);
+        assert_eq!(b1.len(), 2);
+        assert_eq!(b1, b2, "generate_b_ions should equal _with_charge(1)");
+    }
+
+    #[test]
+    fn b_ions_doubly_charged() {
+        let b = generate_b_ions_with_charge("GAS", &[], 2);
+        // 2 fragment positions × 2 charges = 4 ions
+        assert_eq!(b.len(), 4);
+
+        let b_single = generate_b_ions("GAS", &[]);
+        // First ion at z=1 should match singly-charged b1
+        assert!((b[0] - b_single[0]).abs() < 1e-6, "z=1 should match");
+        // Second ion at z=2 should be roughly half the neutral mass
+        let b1_neutral = b_single[0] - PROTON_MASS;
+        let expected_z2 = (b1_neutral + 2.0 * PROTON_MASS) / 2.0;
+        assert!(
+            (b[1] - expected_z2).abs() < 1e-6,
+            "z=2 b-ion m/z mismatch: {} vs {}",
+            b[1],
+            expected_z2
+        );
+    }
+
+    #[test]
+    fn y_ions_doubly_charged() {
+        let y = generate_y_ions_with_charge("GAS", &[], 2);
+        assert_eq!(y.len(), 4); // 2 positions × 2 charges
+
+        let y_single = generate_y_ions("GAS", &[]);
+        assert!((y[0] - y_single[0]).abs() < 1e-6, "z=1 should match");
+    }
+
+    #[test]
+    fn multicharge_scoring_z3_precursor() {
+        // Peptide with z=3 precursor should use b²⁺/y²⁺ ions for scoring
+        let peptide = make_peptide("PEPTIDEK", "P001");
+        let mass = peptide.neutral_mass;
+        let mz_z3 = peptide_mz(mass, 3);
+
+        // Generate peaks including both z=1 and z=2 fragment ions
+        let b = generate_b_ions_with_charge("PEPTIDEK", &[], 2);
+        let y = generate_y_ions_with_charge("PEPTIDEK", &[], 2);
+        let mut peaks: Vec<f64> = b.iter().chain(y.iter()).copied().collect();
+        peaks.sort_by(|a, b| a.total_cmp(b));
+
+        let spectrum = make_spectrum(mz_z3, Some(3), peaks);
+        let result = match_spectrum(
+            &spectrum,
+            &[peptide],
+            &default_tolerance(),
+            &fragment_tolerance(),
+            &[],
+            &[],
+            0,
+        );
+
+        assert!(result.is_some());
+        let m = result.unwrap();
+        assert!(
+            m.score > 0.99,
+            "z=3 with b²⁺/y²⁺ peaks should score ~1.0: {}",
+            m.score
+        );
+    }
+
+    #[test]
+    fn z2_precursor_uses_only_singly_charged_fragments() {
+        // z=2 precursor: only z=1 fragment ions, NOT z=2
+        let peptide = make_peptide("PEPTIDEK", "P001");
+        let mass = peptide.neutral_mass;
+        let mz_z2 = peptide_mz(mass, 2);
+
+        // Provide ONLY singly-charged peaks
+        let b = generate_b_ions("PEPTIDEK", &[]);
+        let y = generate_y_ions("PEPTIDEK", &[]);
+        let total_z1 = (b.len() + y.len()) as u32;
+        let mut peaks: Vec<f64> = b.into_iter().chain(y).collect();
+        peaks.sort_by(|a, b| a.total_cmp(b));
+
+        let spectrum = make_spectrum(mz_z2, Some(2), peaks);
+        let result = match_spectrum(
+            &spectrum,
+            &[peptide],
+            &default_tolerance(),
+            &fragment_tolerance(),
+            &[],
+            &[],
+            0,
+        );
+
+        assert!(result.is_some());
+        let m = result.unwrap();
+        // total_ions should be only z=1 ions (not doubled)
+        assert_eq!(
+            m.total_ions, total_z1,
+            "z=2 precursor should only generate z=1 fragments"
+        );
+        assert!(m.score > 0.99, "should match all z=1 fragments: {}", m.score);
+    }
+
+    #[test]
+    fn multicharge_empty_and_single_residue() {
+        assert!(generate_b_ions_with_charge("", &[], 2).is_empty());
+        assert!(generate_b_ions_with_charge("G", &[], 2).is_empty());
+        assert!(generate_y_ions_with_charge("", &[], 2).is_empty());
+        assert!(generate_y_ions_with_charge("G", &[], 2).is_empty());
+    }
+
+    #[test]
+    fn within_tolerance_ppm_zero_theoretical() {
+        let tol = MassTolerance {
+            value: 20.0,
+            unit: ToleranceUnit::Ppm,
+        };
+        assert!(!within_tolerance(0.0, 0.0, &tol));
+        assert!(!within_tolerance(100.0, 0.0, &tol));
+        assert!(!within_tolerance(0.0, -1.0, &tol));
     }
 }

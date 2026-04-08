@@ -244,7 +244,7 @@ struct AnnotateSpectrumInput {
     /// Output HTML file path. Default: ./annotation_scan{N}.html
     #[serde(default)]
     output_path: Option<String>,
-    /// Fragment mass tolerance. Default: 0.02 Da.
+    /// Fragment mass tolerance. Default: 20 ppm.
     #[serde(default, deserialize_with = "deserialize_tolerance")]
     fragment_tolerance: Option<protein_copilot_core::search_params::MassTolerance>,
 }
@@ -1338,8 +1338,8 @@ impl ProteinCopilotServer {
             .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
 
         let frag_tol = input.fragment_tolerance.unwrap_or(MassTolerance {
-            value: 0.02,
-            unit: ToleranceUnit::Da,
+            value: 20.0,
+            unit: ToleranceUnit::Ppm,
         });
 
         // Perform annotation
