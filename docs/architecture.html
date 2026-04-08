@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ProteinCopilot Architecture</title>
+  <style>
+    :root {
+      --bg: #08111f;
+      --bg-soft: #0f1b33;
+      --surface: #ffffff;
+      --surface-soft: #f8fafc;
+      --ink: #0f172a;
+      --ink-soft: #475569;
+      --border: #dbe3ef;
+      --llm: #7c3aed;
+      --mcp: #0891b2;
+      --rust: #2563eb;
+      --ext: #ea580c;
+      --shadow: 0 18px 40px rgba(15, 23, 42, 0.12);
+      --radius: 24px;
+      --max-width: 1180px;
+    }
+
+    * { box-sizing: border-box; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      margin: 0;
+      font-family: Inter, "Noto Sans SC", "PingFang SC", sans-serif;
+      color: var(--ink);
+      background: linear-gradient(180deg, #020617 0%, #08111f 26%, #eef4ff 26%, #eef4ff 100%);
+    }
+
+    a { color: inherit; }
+
+    .skip-link {
+      position: absolute;
+      left: 16px;
+      top: -48px;
+      padding: 10px 14px;
+      border-radius: 999px;
+      background: #fff;
+    }
+
+    .skip-link:focus { top: 16px; }
+
+    .hero,
+    .page-section,
+    .page-footer {
+      width: min(var(--max-width), calc(100% - 32px));
+      margin: 0 auto;
+    }
+
+    .hero {
+      padding: 56px 0 48px;
+      color: #fff;
+    }
+
+    .hero-card {
+      padding: 40px;
+      border-radius: 32px;
+      background:
+        radial-gradient(circle at top right, rgba(124, 58, 237, 0.24), transparent 30%),
+        radial-gradient(circle at left center, rgba(8, 145, 178, 0.28), transparent 24%),
+        linear-gradient(135deg, #0f172a, #111c34 62%, #16233f);
+      box-shadow: 0 24px 60px rgba(2, 6, 23, 0.45);
+    }
+
+    .eyebrow {
+      margin: 0 0 12px;
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      opacity: 0.78;
+    }
+
+    .hero h1,
+    .page-section h2 {
+      margin: 0;
+    }
+
+    .hero p {
+      max-width: 720px;
+      line-height: 1.7;
+    }
+
+    .hero-nav {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-top: 24px;
+    }
+
+    .hero-nav a,
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 10px 14px;
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.08);
+      text-decoration: none;
+    }
+
+    main {
+      padding: 8px 0 64px;
+    }
+
+    .page-section {
+      margin-top: 24px;
+      padding: 32px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: rgba(255, 255, 255, 0.9);
+      box-shadow: var(--shadow);
+    }
+
+    .page-section p {
+      color: var(--ink-soft);
+      line-height: 1.7;
+    }
+
+    .section-grid {
+      display: grid;
+      gap: 24px;
+    }
+
+    .detail-panel {
+      margin-top: 24px;
+      padding: 20px;
+      border-radius: 20px;
+      background: var(--surface-soft);
+      border: 1px solid var(--border);
+    }
+
+    .reveal {
+      opacity: 1;
+      transform: none;
+    }
+
+    @media (max-width: 800px) {
+      .hero-card,
+      .page-section { padding: 24px; }
+    }
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header id="hero" class="hero">
+    <div class="hero-card">
+      <p class="eyebrow">ProteinCopilot</p>
+      <h1>架构总览</h1>
+      <p>Rust 负责确定性科学计算，LLM 负责编排、理解用户意图与解释结果。MCP Server 把两者连接成一条可扩展的蛋白质组学工作流。</p>
+      <nav class="hero-nav" aria-label="Architecture sections">
+        <a href="#mcp">MCP 是什么</a>
+        <a href="#layers">分层架构</a>
+        <a href="#pipeline">工作流</a>
+        <a href="#extensibility">扩展路径</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main">
+    <section id="mcp" class="page-section reveal">
+      <p class="eyebrow">Section 01</p>
+      <h2>MCP 是什么？</h2>
+      <p>MCP 是 LLM 客户端与 Rust 工具之间的结构化协议层：LLM 不直接做数值计算，而是通过标准化 tool 调用把任务交给确定性代码执行。</p>
+    </section>
+
+    <section id="layers" class="page-section reveal">
+      <p class="eyebrow">Section 02</p>
+      <h2>分层架构</h2>
+      <p>这一层会展示用户 / MCP Client / LLM、ProteinCopilot MCP Server、Rust crates 与搜索引擎之间的职责边界。</p>
+    </section>
+
+    <section id="pipeline" class="page-section reveal">
+      <p class="eyebrow">Section 03</p>
+      <h2>端到端工作流</h2>
+      <p>这一层会把 read spectra、recommend params、run search、generate/export report 串成一条从输入到结果的故事线。</p>
+    </section>
+
+    <section id="extensibility" class="page-section reveal">
+      <p class="eyebrow">Section 04</p>
+      <h2>可扩展性</h2>
+      <p>这一层会说明如何新增搜索引擎 adapter、增加 MCP 模块，以及在未来把领域拆成更多 MCP Server。</p>
+    </section>
+
+    <aside class="page-section detail-panel" id="detail-panel" aria-live="polite">
+      <p class="eyebrow">Detail</p>
+      <h2 id="detail-title">讲解提示</h2>
+      <p id="detail-body">点击架构图中的热点后，这里会显示对应模块的职责说明。即使不点击，页面本身也必须完整可读。</p>
+    </aside>
+  </main>
+
+  <script>
+    const detailData = {};
+  </script>
+</body>
+</html>
