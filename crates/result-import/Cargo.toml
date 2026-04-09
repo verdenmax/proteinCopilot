@@ -20,7 +20,7 @@ chrono = { workspace = true }
 quick-xml = { workspace = true }
 regex = "1"
 arrow = { version = "54", default-features = false, features = ["prettyprint"] }
-parquet = { version = "54", default-features = false, features = ["arrow"] }
+parquet = { version = "54", default-features = false, features = ["arrow", "zstd", "snap", "lz4"] }
 
 [dev-dependencies]
 tokio = { workspace = true }

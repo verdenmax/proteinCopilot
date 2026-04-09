@@ -28,12 +28,18 @@ pub struct DiannParser {
     pub run_filter: Option<String>,
 }
 
-impl DiannParser {
-    pub fn new() -> Self {
+impl Default for DiannParser {
+    fn default() -> Self {
         Self {
             filter_qvalue: Some(0.01),
             run_filter: None,
         }
+    }
+}
+
+impl DiannParser {
+    pub fn new() -> Self {
+        Self::default()
     }
 }
 
