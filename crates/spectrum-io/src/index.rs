@@ -242,6 +242,7 @@ fn parse_index_list(xml: &str, path: &Path) -> Result<HashMap<u32, u64>, Spectru
             Ok(Event::End(ref e)) => match e.local_name().as_ref() {
                 b"offset" => in_offset = false,
                 b"index" => in_spectrum_index = false,
+                b"indexList" => break,
                 _ => {}
             },
             Err(e) => {
@@ -429,5 +430,74 @@ mod tests {
         assert_eq!(idx.source(), IndexSource::BuiltFromScan);
         assert!(idx.get_offset(1).is_some());
         assert!(idx.get_offset(10).is_some());
+    }
+
+    #[test]
+    fn build_index_from_native_indexed_mzml() {
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/small_indexed.mzml");
+        if !path.exists() {
+            generate_indexed_fixture(&path);
+        }
+        let result = build_index_from_native_mzml(&path).unwrap();
+        let idx = result.expect("should find native index");
+        assert_eq!(idx.len(), 10);
+        assert_eq!(idx.source(), IndexSource::NativeIndex);
+        for scan in 1..=10 {
+            assert!(idx.get_offset(scan).is_some(), "missing scan {scan}");
+        }
+    }
+
+    fn generate_indexed_fixture(output_path: &std::path::Path) {
+        use std::io::Write;
+
+        let source_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/small.mzml");
+        let source = std::fs::read_to_string(&source_path).unwrap();
+
+        let mzml_content = source
+            .strip_prefix("<?xml version=\"1.0\" encoding=\"utf-8\"?>\n")
+            .unwrap_or(&source);
+
+        let header = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<indexedmzML xmlns=\"http://psi.hupo.org/ms/mzml\">\n";
+
+        let body = format!("{}{}", header, mzml_content);
+
+        let mut offsets: Vec<(u32, usize)> = Vec::new();
+        let mut search_start = 0;
+        let mut fallback_scan = 0u32;
+        while let Some(pos) = body[search_start..].find("<spectrum ") {
+            let abs_pos = search_start + pos;
+            fallback_scan += 1;
+            let tag_end = body[abs_pos..].find('>').unwrap_or(200) + abs_pos;
+            let tag_text = &body[abs_pos..tag_end];
+            let scan = extract_id_attr(tag_text)
+                .and_then(|id| parse_scan_from_id_ref(&id))
+                .unwrap_or(fallback_scan);
+            offsets.push((scan, abs_pos));
+            search_start = abs_pos + 1;
+        }
+
+        let mut index_entries = String::new();
+        for (scan, offset) in &offsets {
+            index_entries.push_str(&format!(
+                "      <offset idRef=\"scan={scan}\">{offset}</offset>\n"
+            ));
+        }
+
+        let index_list_offset = body.len();
+        let index_list = format!(
+            "  <indexList count=\"{}\">\n    <index name=\"spectrum\">\n{}    </index>\n  </indexList>\n",
+            offsets.len(),
+            index_entries,
+        );
+
+        let footer = format!(
+            "{}  <indexListOffset>{}</indexListOffset>\n</indexedmzML>\n",
+            index_list, index_list_offset,
+        );
+
+        let mut out = std::fs::File::create(output_path).unwrap();
+        write!(out, "{}{}", body, footer).unwrap();
     }
 }
