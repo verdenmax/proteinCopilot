@@ -1,0 +1,25 @@
+[package]
+name = "protein-copilot-result-import"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Import external proteomics search results (DIA-NN, custom JSON, pFind)"
+
+[dependencies]
+protein-copilot-core = { workspace = true }
+protein-copilot-spectrum-io = { workspace = true }
+
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+quick-xml = { workspace = true }
+regex = "1"
+arrow = { version = "54", default-features = false, features = ["prettyprint"] }
+parquet = { version = "54", default-features = false, features = ["arrow"] }
+
+[dev-dependencies]
+tokio = { workspace = true }
