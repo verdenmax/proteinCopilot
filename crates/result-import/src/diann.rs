@@ -187,7 +187,7 @@ impl ResultParser for DiannParser {
                     precursor_mz: get_f64(&mz_col, row),
                     rt_sec: get_f64(&rt_col, row) * 60.0, // minutes → seconds
                     modifications,
-                    score: Some(qvalue), // DIA-NN: Q.Value (lower = better)
+                    score: Some(1.0 - qvalue), // invert: Q.Value (lower=better) → score (higher=better)
                     q_value: Some(qvalue),
                     protein_accessions: proteins,
                     raw_name: run,
