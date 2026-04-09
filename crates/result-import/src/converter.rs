@@ -83,15 +83,27 @@ pub fn build_search_result(
         unique_peptide_count as u64
     };
 
+    // Total MS2 spectra from all raw files (not just matched PSMs)
+    let total_ms2: u64 = match_report
+        .per_file
+        .values()
+        .map(|f| f.ms2_count as u64)
+        .sum();
+    let total_spectra = if total_ms2 > 0 { total_ms2 } else { core_psms.len() as u64 };
+
     let summary = SearchResultSummary {
-        total_spectra_searched: core_psms.len() as u64,
+        total_spectra_searched: total_spectra,
         total_psms: core_psms.len() as u64,
         psms_at_1pct_fdr: psms_at_fdr,
         unique_peptides_at_1pct_fdr: peptides_at_fdr,
         protein_groups_at_1pct_fdr: unique_protein_count as u64,
         median_score,
         median_delta_mass_ppm: median_delta,
-        identification_rate: 1.0, // all imported PSMs are "identified"
+        identification_rate: if total_spectra > 0 {
+            psms_at_fdr as f64 / total_spectra as f64
+        } else {
+            0.0
+        },
         modification_distribution: mod_dist,
         charge_distribution: charge_dist,
         search_duration_sec: 0.0,

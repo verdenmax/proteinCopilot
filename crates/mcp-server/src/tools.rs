@@ -36,7 +36,7 @@ use protein_copilot_search_engine::{SearchProgress, SimpleSearchEngine};
 
 use protein_copilot_result_import::{
     custom_json::CustomJsonParser, converter::build_search_result,
-    diann::DiannParser, pfind::PFindParser, scan_matcher::{ScanMatcherConfig, match_scans},
+    diann::DiannParser, scan_matcher::{ScanMatcherConfig, match_scans},
     unimod::UnimodDb, ImportFormat, ImportResult, ResultParser,
 };
 
@@ -1862,9 +1862,13 @@ impl ProteinCopilotServer {
                     .parse(&result_path, &unimod)
                     .map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, e.to_string()))?
             }
-            ImportFormat::PFindSpectra => PFindParser
-                .parse(&result_path, &unimod)
-                .map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, e.to_string()))?,
+            ImportFormat::PFindSpectra => {
+                return Err(mcp_err(
+                    ErrorCode::INVALID_PARAMS,
+                    "pFind .spectra format import is not yet supported. \
+                     Supported formats: custom_json, diann_parquet",
+                ));
+            }
         };
 
         if psms.is_empty() {
