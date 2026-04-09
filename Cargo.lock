@@ -1089,6 +1089,7 @@ dependencies = [
  "chrono",
  "parquet",
  "protein-copilot-core",
+ "protein-copilot-search-engine",
  "protein-copilot-spectrum-io",
  "quick-xml",
  "regex",

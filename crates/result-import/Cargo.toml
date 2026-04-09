@@ -8,6 +8,7 @@ description = "Import external proteomics search results (DIA-NN, custom JSON, p
 
 [dependencies]
 protein-copilot-core = { workspace = true }
+protein-copilot-search-engine = { workspace = true }
 protein-copilot-spectrum-io = { workspace = true }
 
 serde = { workspace = true }
