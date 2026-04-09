@@ -1,1 +1,349 @@
-//! RT-based scan matching for imported PSMs.
+//! Scan matching: associates imported PSMs with mzML MS2 scans.
+//!
+//! Algorithm:
+//! 1. Pre-scan mzML to collect (scan_number, rt_sec, isolation_window) for all MS2 spectra
+//! 2. Sort by RT
+//! 3. For each PSM: binary search for RT-proximate candidates, filter by isolation window,
+//!    pick the closest RT match
+
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+
+use protein_copilot_core::spectrum::MsLevel;
+use protein_copilot_spectrum_io::reader::SpectrumReader;
+
+use crate::{FileMatchStats, ImportedPsm, MatchReport, ResultImportError};
+
+/// MS2 spectrum info extracted from mzML for scan matching.
+#[derive(Debug, Clone)]
+struct Ms2Info {
+    scan_number: u32,
+    rt_sec: f64,
+    /// (target_mz, lower_offset, upper_offset)
+    isolation_window: Option<(f64, f64, f64)>,
+}
+
+/// Scan matcher configuration.
+pub struct ScanMatcherConfig {
+    pub rt_tolerance_sec: f64,
+    pub mzml_dir: PathBuf,
+}
+
+/// Match imported PSMs to mzML MS2 scans.
+///
+/// PSMs are matched by:
+/// 1. `raw_name` → mzML file (raw_name + ".mzML" in `mzml_dir`)
+/// 2. RT proximity (within `rt_tolerance_sec`)
+/// 3. precursor_mz falls within the MS2's isolation window
+///
+/// Returns the mutated PSMs (with `matched_scan` and `rt_delta_sec` filled)
+/// and a `MatchReport` with quality statistics.
+pub fn match_scans(
+    psms: &mut [ImportedPsm],
+    config: &ScanMatcherConfig,
+    reader_factory: &dyn Fn(&Path) -> Result<Box<dyn SpectrumReader>, ResultImportError>,
+) -> Result<MatchReport, ResultImportError> {
+    // Group PSMs by raw_name
+    let mut groups: HashMap<String, Vec<usize>> = HashMap::new();
+    for (i, psm) in psms.iter().enumerate() {
+        groups.entry(psm.raw_name.clone()).or_default().push(i);
+    }
+
+    let mut per_file = HashMap::new();
+    let mut all_rt_deltas: Vec<f64> = Vec::new();
+    let mut total_matched = 0usize;
+    let mut total_unmatched = 0usize;
+
+    for (raw_name, indices) in &groups {
+        let mzml_path = config.mzml_dir.join(format!("{raw_name}.mzML"));
+        let mzml_path_lower = config.mzml_dir.join(format!("{raw_name}.mzml"));
+
+        let actual_path = if mzml_path.exists() {
+            mzml_path
+        } else if mzml_path_lower.exists() {
+            mzml_path_lower
+        } else {
+            let available = list_mzml_files(&config.mzml_dir);
+            return Err(ResultImportError::MzmlNotFound {
+                raw_name: raw_name.clone(),
+                dir: config.mzml_dir.clone(),
+                available,
+            });
+        };
+
+        let reader = reader_factory(&actual_path)?;
+
+        // Pre-scan all MS2 spectra
+        let ms2_infos = collect_ms2_info(&*reader, &actual_path)?;
+        let ms2_count = ms2_infos.len();
+
+        // Sort by RT for binary search
+        let mut sorted_ms2 = ms2_infos;
+        sorted_ms2.sort_by(|a, b| {
+            a.rt_sec
+                .partial_cmp(&b.rt_sec)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        let mut file_matched = 0usize;
+        let mut file_unmatched = 0usize;
+
+        for &idx in indices {
+            let psm = &psms[idx];
+            if let Some((scan, delta)) = find_best_match(
+                &sorted_ms2,
+                psm.rt_sec,
+                psm.precursor_mz,
+                config.rt_tolerance_sec,
+            ) {
+                let psm_mut = &mut psms[idx];
+                psm_mut.matched_scan = Some(scan);
+                psm_mut.rt_delta_sec = Some(delta);
+                all_rt_deltas.push(delta.abs());
+                file_matched += 1;
+            } else {
+                file_unmatched += 1;
+            }
+        }
+
+        total_matched += file_matched;
+        total_unmatched += file_unmatched;
+
+        per_file.insert(
+            raw_name.clone(),
+            FileMatchStats {
+                total: indices.len(),
+                matched: file_matched,
+                ms2_count,
+            },
+        );
+    }
+
+    all_rt_deltas.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let median_rt_delta = if all_rt_deltas.is_empty() {
+        0.0
+    } else {
+        all_rt_deltas[all_rt_deltas.len() / 2]
+    };
+    let max_rt_delta = all_rt_deltas.last().copied().unwrap_or(0.0);
+
+    Ok(MatchReport {
+        total_psms: psms.len(),
+        matched: total_matched,
+        unmatched: total_unmatched,
+        median_rt_delta_sec: median_rt_delta,
+        max_rt_delta_sec: max_rt_delta,
+        per_file,
+    })
+}
+
+/// Collect (scan, rt, isolation_window) for all MS2 spectra from a reader.
+fn collect_ms2_info(
+    reader: &dyn SpectrumReader,
+    path: &Path,
+) -> Result<Vec<Ms2Info>, ResultImportError> {
+    let spectra = reader
+        .read_all(path)
+        .map_err(|e| ResultImportError::SpectrumIo(e.to_string()))?;
+    let mut infos = Vec::new();
+    for spec in &spectra {
+        if spec.ms_level == MsLevel::MS2 {
+            let isolation = spec.precursors.first().and_then(|p| {
+                p.isolation_window
+                    .as_ref()
+                    .map(|w| (w.target_mz, w.lower_offset, w.upper_offset))
+            });
+            infos.push(Ms2Info {
+                scan_number: spec.scan_number,
+                rt_sec: spec.retention_time_sec,
+                isolation_window: isolation,
+            });
+        }
+    }
+    Ok(infos)
+}
+
+/// Find the best matching MS2 for a given PSM.
+///
+/// Returns `(scan_number, rt_delta_sec)` or `None` if no match found.
+fn find_best_match(
+    sorted_ms2: &[Ms2Info],
+    psm_rt_sec: f64,
+    psm_precursor_mz: f64,
+    rt_tolerance_sec: f64,
+) -> Option<(u32, f64)> {
+    if sorted_ms2.is_empty() {
+        return None;
+    }
+
+    // Binary search for the start of the RT window
+    let insert_pos =
+        sorted_ms2.partition_point(|m| m.rt_sec < psm_rt_sec - rt_tolerance_sec);
+
+    let mut best: Option<(u32, f64)> = None;
+
+    for ms2 in sorted_ms2[insert_pos..].iter() {
+        let delta = ms2.rt_sec - psm_rt_sec;
+        if delta > rt_tolerance_sec {
+            break; // past the RT window
+        }
+        if delta.abs() > rt_tolerance_sec {
+            continue;
+        }
+
+        // Check isolation window
+        if let Some((target, lower, upper)) = ms2.isolation_window {
+            let low = target - lower;
+            let high = target + upper;
+            if psm_precursor_mz < low || psm_precursor_mz > high {
+                continue; // precursor_mz outside isolation window
+            }
+        }
+        // else: no isolation window info → accept based on RT only (DDA fallback)
+
+        match &best {
+            None => best = Some((ms2.scan_number, delta)),
+            Some((_, best_delta)) => {
+                if delta.abs() < best_delta.abs() {
+                    best = Some((ms2.scan_number, delta));
+                }
+            }
+        }
+    }
+
+    best
+}
+
+/// List .mzML files in a directory for error messages.
+fn list_mzml_files(dir: &Path) -> String {
+    match std::fs::read_dir(dir) {
+        Ok(entries) => {
+            let files: Vec<String> = entries
+                .filter_map(|e| e.ok())
+                .filter(|e| {
+                    e.path()
+                        .extension()
+                        .is_some_and(|ext| ext.eq_ignore_ascii_case("mzml"))
+                })
+                .map(|e| e.file_name().to_string_lossy().to_string())
+                .collect();
+            if files.is_empty() {
+                "none".to_string()
+            } else {
+                files.join(", ")
+            }
+        }
+        Err(_) => "directory not readable".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_ms2_infos() -> Vec<Ms2Info> {
+        vec![
+            Ms2Info {
+                scan_number: 10,
+                rt_sec: 100.0,
+                isolation_window: Some((500.0, 12.5, 12.5)),
+            },
+            Ms2Info {
+                scan_number: 20,
+                rt_sec: 200.0,
+                isolation_window: Some((600.0, 12.5, 12.5)),
+            },
+            Ms2Info {
+                scan_number: 30,
+                rt_sec: 300.0,
+                isolation_window: Some((500.0, 12.5, 12.5)),
+            },
+            Ms2Info {
+                scan_number: 40,
+                rt_sec: 400.0,
+                isolation_window: Some((700.0, 12.5, 12.5)),
+            },
+            Ms2Info {
+                scan_number: 50,
+                rt_sec: 500.0,
+                isolation_window: Some((500.0, 25.0, 25.0)),
+            },
+        ]
+    }
+
+    #[test]
+    fn find_best_match_exact_rt_and_mz() {
+        let ms2s = make_ms2_infos();
+        let result = find_best_match(&ms2s, 100.0, 500.0, 30.0);
+        assert_eq!(result, Some((10, 0.0)));
+    }
+
+    #[test]
+    fn find_best_match_within_tolerance() {
+        let ms2s = make_ms2_infos();
+        // RT=198, mz=605 → should match scan 20 (RT=200, window 587.5–612.5)
+        let result = find_best_match(&ms2s, 198.0, 605.0, 30.0);
+        assert_eq!(result.unwrap().0, 20);
+        assert!((result.unwrap().1 - 2.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn find_best_match_mz_outside_window() {
+        let ms2s = make_ms2_infos();
+        // RT=100, mz=550 → scan 10 has window 487.5–512.5, mz=550 is outside
+        let result = find_best_match(&ms2s, 100.0, 550.0, 30.0);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn find_best_match_rt_outside_tolerance() {
+        let ms2s = make_ms2_infos();
+        // RT=150, tolerance=30 → nearest scan 10 (RT=100) is 50s away
+        let result = find_best_match(&ms2s, 150.0, 500.0, 30.0);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn find_best_match_wide_dia_window() {
+        let ms2s = make_ms2_infos();
+        // scan 50: RT=500, window 475–525 (wide DIA)
+        let result = find_best_match(&ms2s, 502.0, 520.0, 30.0);
+        assert_eq!(result.unwrap().0, 50);
+    }
+
+    #[test]
+    fn find_best_match_picks_closest_rt() {
+        let ms2s = vec![
+            Ms2Info {
+                scan_number: 1,
+                rt_sec: 100.0,
+                isolation_window: Some((500.0, 25.0, 25.0)),
+            },
+            Ms2Info {
+                scan_number: 2,
+                rt_sec: 105.0,
+                isolation_window: Some((500.0, 25.0, 25.0)),
+            },
+        ];
+        // PSM at RT=103 → closer to scan 2 (105)
+        let result = find_best_match(&ms2s, 103.0, 500.0, 30.0);
+        assert_eq!(result.unwrap().0, 2);
+    }
+
+    #[test]
+    fn find_best_match_no_isolation_window_fallback() {
+        let ms2s = vec![Ms2Info {
+            scan_number: 1,
+            rt_sec: 100.0,
+            isolation_window: None,
+        }];
+        let result = find_best_match(&ms2s, 105.0, 999.0, 30.0);
+        assert_eq!(result.unwrap().0, 1);
+    }
+
+    #[test]
+    fn find_best_match_empty_ms2_list() {
+        let result = find_best_match(&[], 100.0, 500.0, 30.0);
+        assert!(result.is_none());
+    }
+}
