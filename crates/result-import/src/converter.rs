@@ -31,7 +31,7 @@ pub fn build_search_result(
     let core_psms: Vec<Psm> = psms
         .iter()
         .filter(|p| p.matched_scan.is_some())
-        .map(|p| to_core_psm(p))
+        .map(to_core_psm)
         .collect();
 
     let peptides = aggregate_peptides(&core_psms);
@@ -188,33 +188,45 @@ fn to_core_psm(imported: &ImportedPsm) -> Psm {
     }
 }
 
+struct PeptideAgg<'a> {
+    proteins: Vec<&'a str>,
+    best_score: f64,
+    psm_count: u64,
+    best_q: Option<f64>,
+}
+
 fn aggregate_peptides(psms: &[Psm]) -> Vec<PeptideResult> {
-    let mut map: HashMap<&str, (Vec<&str>, f64, u64, Option<f64>)> = HashMap::new();
+    let mut map: HashMap<&str, PeptideAgg<'_>> = HashMap::new();
     for psm in psms {
         let entry = map
             .entry(psm.peptide_sequence.as_str())
-            .or_insert_with(|| (Vec::new(), f64::MIN, 0, None));
+            .or_insert_with(|| PeptideAgg {
+                proteins: Vec::new(),
+                best_score: f64::MIN,
+                psm_count: 0,
+                best_q: None,
+            });
         for acc in &psm.protein_accessions {
-            if !entry.0.contains(&acc.as_str()) {
-                entry.0.push(acc.as_str());
+            if !entry.proteins.contains(&acc.as_str()) {
+                entry.proteins.push(acc.as_str());
             }
         }
-        if psm.score > entry.1 {
-            entry.1 = psm.score;
+        if psm.score > entry.best_score {
+            entry.best_score = psm.score;
         }
-        entry.2 += 1;
+        entry.psm_count += 1;
         if let Some(q) = psm.q_value {
-            entry.3 = Some(entry.3.map_or(q, |prev: f64| prev.min(q)));
+            entry.best_q = Some(entry.best_q.map_or(q, |prev: f64| prev.min(q)));
         }
     }
 
     map.into_iter()
-        .map(|(seq, (proteins, best_score, count, q))| PeptideResult {
+        .map(|(seq, agg)| PeptideResult {
             sequence: seq.to_string(),
-            protein_accessions: proteins.into_iter().map(|s| s.to_string()).collect(),
-            best_score: if best_score == f64::MIN { 0.0 } else { best_score },
-            q_value: q,
-            psm_count: count,
+            protein_accessions: agg.proteins.into_iter().map(|s| s.to_string()).collect(),
+            best_score: if agg.best_score == f64::MIN { 0.0 } else { agg.best_score },
+            q_value: agg.best_q,
+            psm_count: agg.psm_count,
         })
         .collect()
 }

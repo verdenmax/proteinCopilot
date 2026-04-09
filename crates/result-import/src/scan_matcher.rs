@@ -38,10 +38,12 @@ pub struct ScanMatcherConfig {
 ///
 /// Returns the mutated PSMs (with `matched_scan` and `rt_delta_sec` filled)
 /// and a `MatchReport` with quality statistics.
+pub type ReaderFactory = dyn Fn(&Path) -> Result<Box<dyn SpectrumReader>, ResultImportError>;
+
 pub fn match_scans(
     psms: &mut [ImportedPsm],
     config: &ScanMatcherConfig,
-    reader_factory: &dyn Fn(&Path) -> Result<Box<dyn SpectrumReader>, ResultImportError>,
+    reader_factory: &ReaderFactory,
 ) -> Result<MatchReport, ResultImportError> {
     // Group PSMs by raw_name
     let mut groups: HashMap<String, Vec<usize>> = HashMap::new();
