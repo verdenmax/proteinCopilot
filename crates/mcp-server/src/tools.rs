@@ -18,6 +18,8 @@ use rmcp::{ErrorData, ServerHandler};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use protein_copilot_spectrum_io::reader::SpectrumReader;
+
 use protein_copilot_core::ai_decision::AiDecision;
 use protein_copilot_core::engine::{HealthStatus, SearchEngineAdapter};
 use protein_copilot_core::search_params::SearchParams;
@@ -526,6 +528,8 @@ pub struct ProteinCopilotServer {
     run_cache: RunCache,
     /// Cache of DIA-extracted spectra, keyed by run_id from extract_dia_precursors.
     dia_cache: Arc<Mutex<OrderedDiaCache>>,
+    /// LRU cache of indexed spectrum readers for O(1) scan lookup.
+    reader_cache: Arc<Mutex<lru::LruCache<PathBuf, Arc<dyn SpectrumReader>>>>,
 }
 
 impl ProteinCopilotServer {
@@ -537,7 +541,40 @@ impl ProteinCopilotServer {
             registry,
             run_cache: Arc::new(Mutex::new(OrderedRunCache::new())),
             dia_cache: Arc::new(Mutex::new(OrderedDiaCache::new())),
+            reader_cache: Arc::new(Mutex::new(lru::LruCache::new(
+                std::num::NonZeroUsize::new(8).unwrap(),
+            ))),
         }
+    }
+
+    /// Get or create a cached indexed reader for the given file path.
+    fn get_or_create_reader(
+        &self,
+        path: &Path,
+    ) -> Result<Arc<dyn SpectrumReader>, ErrorData> {
+        let canonical = path.to_path_buf();
+
+        // Check cache first
+        {
+            let mut cache = self.reader_cache.lock().unwrap();
+            if let Some(reader) = cache.get(&canonical) {
+                return Ok(Arc::clone(reader));
+            }
+        }
+
+        // Create new indexed reader
+        let reader: Arc<dyn SpectrumReader> = Arc::from(
+            protein_copilot_spectrum_io::create_indexed_reader(path)
+                .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?,
+        );
+
+        // Insert into cache
+        {
+            let mut cache = self.reader_cache.lock().unwrap();
+            cache.put(canonical, Arc::clone(&reader));
+        }
+
+        Ok(reader)
     }
 
     /// Resolve a SearchResult from direct input or cached run_id.
@@ -651,9 +688,7 @@ impl ProteinCopilotServer {
         validate_file_path(&input.file_path)?;
         validate_scan_number(input.scan_number)?;
         let path = Path::new(&input.file_path);
-        let info = protein_copilot_spectrum_io::detect_format(path)
-            .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
-        let reader = protein_copilot_spectrum_io::create_reader(&info);
+        let reader = self.get_or_create_reader(path)?;
         let spectrum = reader
             .read_spectrum(path, input.scan_number)
             .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
@@ -1394,9 +1429,7 @@ impl ProteinCopilotServer {
         };
 
         // Read the spectrum
-        let info = protein_copilot_spectrum_io::detect_format(&spectrum_file)
-            .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
-        let reader = protein_copilot_spectrum_io::create_reader(&info);
+        let reader = self.get_or_create_reader(&spectrum_file)?;
         let spectrum = reader
             .read_spectrum(&spectrum_file, input.scan_number)
             .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
