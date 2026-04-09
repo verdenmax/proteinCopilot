@@ -43,11 +43,11 @@ pub struct MzMLReader;
 // ---------------------------------------------------------------------------
 
 #[derive(Default)]
-struct BinaryArrayMeta {
-    is_mz: bool,
-    is_intensity: bool,
-    is_64bit: bool,
-    is_zlib: bool,
+pub(crate) struct BinaryArrayMeta {
+    pub(crate) is_mz: bool,
+    pub(crate) is_intensity: bool,
+    pub(crate) is_64bit: bool,
+    pub(crate) is_zlib: bool,
 }
 
 #[derive(Default)]
@@ -136,7 +136,7 @@ impl SpectrumBuilder {
 // Binary data decoding
 // ---------------------------------------------------------------------------
 
-fn decode_binary_array(
+pub(crate) fn decode_binary_array(
     b64_text: &str,
     meta: &BinaryArrayMeta,
     path: &Path,
@@ -211,7 +211,7 @@ fn decode_binary_array(
 // XML attribute helpers
 // ---------------------------------------------------------------------------
 
-fn get_attr<'a>(e: &'a quick_xml::events::BytesStart<'a>, name: &[u8]) -> Option<String> {
+pub(crate) fn get_attr<'a>(e: &'a quick_xml::events::BytesStart<'a>, name: &[u8]) -> Option<String> {
     e.attributes()
         .filter_map(|a| a.ok())
         .find(|a| a.key.as_ref() == name)
@@ -219,7 +219,7 @@ fn get_attr<'a>(e: &'a quick_xml::events::BytesStart<'a>, name: &[u8]) -> Option
 }
 
 /// Extract scan number from spectrum id attribute (e.g., "scan=123").
-fn parse_scan_from_id(id: &str) -> Option<u32> {
+pub(crate) fn parse_scan_from_id(id: &str) -> Option<u32> {
     id.split("scan=")
         .nth(1)
         .and_then(|s| s.split_whitespace().next())
@@ -230,7 +230,7 @@ fn parse_scan_from_id(id: &str) -> Option<u32> {
 ///
 /// Typical format: `"controllerType=0 controllerNumber=1 scan=1234"`.
 /// Falls back to parsing the whole string as a plain number.
-fn parse_scan_from_spectrum_ref(spectrum_ref: &str) -> Option<u32> {
+pub(crate) fn parse_scan_from_spectrum_ref(spectrum_ref: &str) -> Option<u32> {
     if let Some(after) = spectrum_ref.split("scan=").nth(1) {
         // Take only leading digits after "scan="
         let digits: String = after.chars().take_while(|c| c.is_ascii_digit()).collect();

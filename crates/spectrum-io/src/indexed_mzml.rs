@@ -1,0 +1,460 @@
+//! Indexed mzML reader with O(1) scan lookup via [`ScanIndex`].
+//!
+//! Uses byte offsets to seek directly to a `<spectrum>` node and parse
+//! only the requested spectrum, avoiding a full file scan.
+
+use std::io::{BufReader, Seek, SeekFrom};
+use std::path::{Path, PathBuf};
+
+use protein_copilot_core::spectrum::{
+    IsolationWindow, MsLevel, PrecursorInfo, Spectrum, SpectrumSummary,
+};
+use quick_xml::events::Event;
+use quick_xml::Reader;
+
+use crate::error::SpectrumIoError;
+use crate::index::{build_index_by_scanning, build_index_from_native_mzml, ScanIndex};
+use crate::mzml::{
+    decode_binary_array, get_attr, parse_scan_from_id, parse_scan_from_spectrum_ref,
+    BinaryArrayMeta, MzMLReader,
+};
+use crate::reader::SpectrumReader;
+
+/// mzML reader backed by a [`ScanIndex`] for O(1) scan lookup.
+///
+/// Bulk operations (`read_all`, `read_summary`, `for_each_spectrum`) delegate
+/// to the standard streaming [`MzMLReader`]; only `read_spectrum` uses the
+/// seek-based path.
+pub struct IndexedMzMLReader {
+    index: ScanIndex,
+    path: PathBuf,
+}
+
+impl IndexedMzMLReader {
+    /// Opens an mzML file and builds a scan index.
+    ///
+    /// Tries the native `<indexList>` first (fast, reads only EOF).
+    /// Falls back to scanning all `<spectrum>` tags if no native index exists.
+    pub fn open(path: &Path) -> Result<Self, SpectrumIoError> {
+        let index = if let Some(native) = build_index_from_native_mzml(path)? {
+            native
+        } else {
+            build_index_by_scanning(path)?
+        };
+        Ok(Self {
+            index,
+            path: path.to_path_buf(),
+        })
+    }
+
+    /// Returns a reference to the underlying scan index.
+    pub fn index(&self) -> &ScanIndex {
+        &self.index
+    }
+
+    /// Seeks to `offset` in the file and parses the single `<spectrum>` node
+    /// found there.
+    fn read_spectrum_at_offset(
+        &self,
+        scan: u32,
+        offset: u64,
+    ) -> Result<Spectrum, SpectrumIoError> {
+        let file = std::fs::File::open(&self.path).map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                SpectrumIoError::FileNotFound {
+                    path: self.path.clone(),
+                }
+            } else {
+                SpectrumIoError::IoError {
+                    path: self.path.clone(),
+                    source: e,
+                }
+            }
+        })?;
+
+        let mut buf_reader = BufReader::new(file);
+        buf_reader
+            .seek(SeekFrom::Start(offset))
+            .map_err(|e| SpectrumIoError::IoError {
+                path: self.path.clone(),
+                source: e,
+            })?;
+
+        let mut xml_reader = Reader::from_reader(buf_reader);
+        xml_reader.config_mut().trim_text(true);
+
+        parse_single_spectrum(&mut xml_reader, &self.path, scan)
+    }
+}
+
+impl SpectrumReader for IndexedMzMLReader {
+    fn read_all(&self, path: &Path) -> Result<Vec<Spectrum>, SpectrumIoError> {
+        MzMLReader.read_all(path)
+    }
+
+    fn read_summary(&self, path: &Path) -> Result<SpectrumSummary, SpectrumIoError> {
+        MzMLReader.read_summary(path)
+    }
+
+    fn read_spectrum(&self, _path: &Path, scan: u32) -> Result<Spectrum, SpectrumIoError> {
+        let offset = self.index.get_offset(scan).ok_or_else(|| {
+            SpectrumIoError::ScanNotFound {
+                path: self.path.clone(),
+                scan,
+            }
+        })?;
+        self.read_spectrum_at_offset(scan, offset)
+    }
+
+    fn for_each_spectrum(
+        &self,
+        path: &Path,
+        handler: &mut dyn FnMut(Spectrum) -> Result<bool, SpectrumIoError>,
+    ) -> Result<u32, SpectrumIoError> {
+        MzMLReader.for_each_spectrum(path, handler)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Single-spectrum parser
+// ---------------------------------------------------------------------------
+
+/// Parses exactly one `<spectrum>` node from the current XML reader position.
+///
+/// The reader must be positioned at (or just before) a `<spectrum>` start tag.
+/// Returns the fully constructed [`Spectrum`] when `</spectrum>` is reached.
+fn parse_single_spectrum<R: std::io::BufRead>(
+    xml_reader: &mut Reader<R>,
+    path: &Path,
+    expected_scan: u32,
+) -> Result<Spectrum, SpectrumIoError> {
+    let mut buf = Vec::new();
+
+    // State flags
+    let mut in_spectrum = false;
+    let mut in_precursor = false;
+    let mut in_isolation_window = false;
+    let mut in_selected_ion = false;
+    let mut in_binary_data_array = false;
+    let mut in_binary = false;
+    let mut in_scan = false;
+
+    // Spectrum fields
+    let mut scan_number: Option<u32> = None;
+    let mut ms_level: Option<u8> = None;
+    let mut rt_sec: Option<f64> = None;
+
+    let mut precursors: Vec<PrecursorInfo> = Vec::new();
+    let mut cur_precursor_mz: Option<f64> = None;
+    let mut cur_precursor_charge: Option<i32> = None;
+    let mut cur_precursor_intensity: Option<f64> = None;
+    let mut cur_isolation_target_mz: Option<f64> = None;
+    let mut cur_isolation_lower: Option<f64> = None;
+    let mut cur_isolation_upper: Option<f64> = None;
+    let mut cur_precursor_source_scan: Option<u32> = None;
+
+    let mut mz_array: Vec<f64> = Vec::new();
+    let mut intensity_array: Vec<f64> = Vec::new();
+    let mut array_meta = BinaryArrayMeta::default();
+    let mut binary_text = String::new();
+
+    loop {
+        match xml_reader.read_event_into(&mut buf) {
+            Ok(Event::Eof) => {
+                return Err(SpectrumIoError::XmlError {
+                    path: path.to_path_buf(),
+                    detail: format!(
+                        "unexpected EOF while parsing spectrum at scan {expected_scan}"
+                    ),
+                });
+            }
+            Ok(Event::Start(ref e)) => {
+                let local = e.local_name();
+                let tag = local.as_ref();
+
+                match tag {
+                    b"spectrum" => {
+                        in_spectrum = true;
+                        if let Some(id) = get_attr(e, b"id") {
+                            scan_number = parse_scan_from_id(&id);
+                        }
+                        if scan_number.is_none() {
+                            scan_number = Some(expected_scan);
+                        }
+                    }
+                    b"scan" if in_spectrum => {
+                        in_scan = true;
+                    }
+                    b"precursor" if in_spectrum => {
+                        in_precursor = true;
+                        if let Some(spectrum_ref) = get_attr(e, b"spectrumRef") {
+                            cur_precursor_source_scan =
+                                parse_scan_from_spectrum_ref(&spectrum_ref);
+                        }
+                    }
+                    b"isolationWindow" if in_precursor => {
+                        in_isolation_window = true;
+                    }
+                    b"selectedIon" if in_precursor => {
+                        in_selected_ion = true;
+                    }
+                    b"binaryDataArray" if in_spectrum => {
+                        in_binary_data_array = true;
+                        array_meta = BinaryArrayMeta::default();
+                        binary_text.clear();
+                    }
+                    b"binary" if in_binary_data_array => {
+                        in_binary = true;
+                        binary_text.clear();
+                    }
+                    _ => {}
+                }
+            }
+            Ok(Event::Empty(ref e)) => {
+                let local = e.local_name();
+                let tag = local.as_ref();
+
+                if tag == b"cvParam" {
+                    let acc = get_attr(e, b"accession").unwrap_or_default();
+                    let value = get_attr(e, b"value").unwrap_or_default();
+
+                    match acc.as_str() {
+                        "MS:1000511" if in_spectrum && !in_precursor => {
+                            ms_level = value.parse().ok();
+                        }
+                        "MS:1000016" if in_scan => {
+                            if let Ok(rt_val) = value.parse::<f64>() {
+                                let unit_acc =
+                                    get_attr(e, b"unitAccession").unwrap_or_default();
+                                rt_sec = Some(if unit_acc == "UO:0000031" {
+                                    rt_val * 60.0
+                                } else {
+                                    rt_val
+                                });
+                            }
+                        }
+                        "MS:1000827" if in_isolation_window => {
+                            cur_isolation_target_mz = value.parse().ok();
+                        }
+                        "MS:1000828" if in_isolation_window => {
+                            cur_isolation_lower = value.parse().ok();
+                        }
+                        "MS:1000829" if in_isolation_window => {
+                            cur_isolation_upper = value.parse().ok();
+                        }
+                        "MS:1000744" if in_selected_ion => {
+                            cur_precursor_mz = value.parse().ok();
+                        }
+                        "MS:1000041" if in_selected_ion => {
+                            cur_precursor_charge = value.parse().ok();
+                        }
+                        "MS:1000042" if in_selected_ion => {
+                            cur_precursor_intensity = value.parse().ok();
+                        }
+                        "MS:1000514" if in_binary_data_array => {
+                            array_meta.is_mz = true;
+                        }
+                        "MS:1000515" if in_binary_data_array => {
+                            array_meta.is_intensity = true;
+                        }
+                        "MS:1000523" if in_binary_data_array => {
+                            array_meta.is_64bit = true;
+                        }
+                        "MS:1000521" if in_binary_data_array => {
+                            array_meta.is_64bit = false;
+                        }
+                        "MS:1000574" if in_binary_data_array => {
+                            array_meta.is_zlib = true;
+                        }
+                        "MS:1000576" if in_binary_data_array => {
+                            array_meta.is_zlib = false;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            Ok(Event::End(ref e)) => {
+                let local = e.local_name();
+                let tag = local.as_ref();
+
+                match tag {
+                    b"spectrum" => {
+                        // Build and return the spectrum
+                        let scan = scan_number.unwrap_or(expected_scan);
+                        let level = match ms_level.unwrap_or(2) {
+                            1 => MsLevel::MS1,
+                            2 => MsLevel::MS2,
+                            n => MsLevel::Other(n),
+                        };
+
+                        crate::util::sort_peaks_by_mz(&mut mz_array, &mut intensity_array);
+
+                        return Spectrum::new(
+                            scan,
+                            level,
+                            rt_sec.unwrap_or(0.0),
+                            precursors,
+                            mz_array,
+                            intensity_array,
+                        )
+                        .map_err(|e| SpectrumIoError::ValidationError {
+                            scan,
+                            detail: e.to_string(),
+                        });
+                    }
+                    b"scan" => {
+                        in_scan = false;
+                    }
+                    b"precursor" => {
+                        in_precursor = false;
+                        // Flush the current precursor
+                        if let Some(mz) = cur_precursor_mz.take() {
+                            let isolation_window = match (
+                                cur_isolation_target_mz.take(),
+                                cur_isolation_lower.take(),
+                                cur_isolation_upper.take(),
+                            ) {
+                                (Some(t), Some(l), Some(u)) => Some(IsolationWindow {
+                                    target_mz: t,
+                                    lower_offset: l,
+                                    upper_offset: u,
+                                }),
+                                _ => None,
+                            };
+                            precursors.push(PrecursorInfo {
+                                mz,
+                                charge: cur_precursor_charge.take(),
+                                intensity: cur_precursor_intensity.take(),
+                                isolation_window,
+                                source_scan: cur_precursor_source_scan.take(),
+                            });
+                        } else {
+                            cur_precursor_charge = None;
+                            cur_precursor_intensity = None;
+                            cur_isolation_target_mz = None;
+                            cur_isolation_lower = None;
+                            cur_isolation_upper = None;
+                            cur_precursor_source_scan = None;
+                        }
+                    }
+                    b"isolationWindow" => {
+                        in_isolation_window = false;
+                    }
+                    b"selectedIon" => {
+                        in_selected_ion = false;
+                    }
+                    b"binary" => {
+                        in_binary = false;
+                    }
+                    b"binaryDataArray" => {
+                        if !binary_text.is_empty() {
+                            let decoded =
+                                decode_binary_array(&binary_text, &array_meta, path)?;
+                            if array_meta.is_mz {
+                                mz_array = decoded;
+                            } else if array_meta.is_intensity {
+                                intensity_array = decoded;
+                            }
+                        }
+                        in_binary_data_array = false;
+                    }
+                    _ => {}
+                }
+            }
+            Ok(Event::Text(ref t)) => {
+                if in_binary {
+                    let text = t.unescape().map_err(|e| SpectrumIoError::XmlError {
+                        path: path.to_path_buf(),
+                        detail: format!("text unescape error: {e}"),
+                    })?;
+                    binary_text.push_str(&text);
+                }
+            }
+            Err(e) => {
+                return Err(SpectrumIoError::XmlError {
+                    path: path.to_path_buf(),
+                    detail: format!(
+                        "XML parse error at position {}: {e}",
+                        xml_reader.error_position()
+                    ),
+                });
+            }
+            _ => {}
+        }
+        buf.clear();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::index::IndexSource;
+
+    fn fixture_path() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/small.mzml")
+    }
+
+    fn indexed_fixture_path() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/small_indexed.mzml")
+    }
+
+    #[test]
+    fn open_plain_mzml_builds_scan_index() {
+        let reader = IndexedMzMLReader::open(&fixture_path()).unwrap();
+        assert_eq!(reader.index().len(), 10);
+        assert_eq!(reader.index().source(), IndexSource::BuiltFromScan);
+    }
+
+    #[test]
+    fn open_indexed_mzml_uses_native_index() {
+        let path = indexed_fixture_path();
+        if !path.exists() {
+            return;
+        }
+        let reader = IndexedMzMLReader::open(&path).unwrap();
+        assert_eq!(reader.index().len(), 10);
+        assert_eq!(reader.index().source(), IndexSource::NativeIndex);
+    }
+
+    #[test]
+    fn read_spectrum_by_index_returns_correct_scan() {
+        let reader = IndexedMzMLReader::open(&fixture_path()).unwrap();
+        let spec = reader.read_spectrum(&fixture_path(), 1).unwrap();
+        assert_eq!(spec.scan_number, 1);
+    }
+
+    #[test]
+    fn read_spectrum_by_index_scan_7_correct() {
+        let reader = IndexedMzMLReader::open(&fixture_path()).unwrap();
+        let spec = reader.read_spectrum(&fixture_path(), 7).unwrap();
+        assert_eq!(spec.scan_number, 7);
+        let standard = MzMLReader.read_spectrum(&fixture_path(), 7).unwrap();
+        assert_eq!(spec.mz_array.len(), standard.mz_array.len());
+        assert!((spec.retention_time_sec - standard.retention_time_sec).abs() < 0.01);
+    }
+
+    #[test]
+    fn read_spectrum_not_found() {
+        let reader = IndexedMzMLReader::open(&fixture_path()).unwrap();
+        let err = reader.read_spectrum(&fixture_path(), 999).unwrap_err();
+        assert!(err.to_string().contains("999"));
+    }
+
+    #[test]
+    fn indexed_vs_standard_all_scans_match() {
+        let indexed = IndexedMzMLReader::open(&fixture_path()).unwrap();
+        for scan in 1..=10 {
+            let idx_spec = indexed.read_spectrum(&fixture_path(), scan).unwrap();
+            let std_spec = MzMLReader.read_spectrum(&fixture_path(), scan).unwrap();
+            assert_eq!(idx_spec.scan_number, std_spec.scan_number);
+            assert_eq!(idx_spec.mz_array.len(), std_spec.mz_array.len());
+            assert_eq!(
+                idx_spec.intensity_array.len(),
+                std_spec.intensity_array.len()
+            );
+            assert!(
+                (idx_spec.retention_time_sec - std_spec.retention_time_sec).abs() < 0.001
+            );
+        }
+    }
+}

@@ -26,8 +26,10 @@ pub mod mzml;
 pub mod reader;
 mod util;
 pub mod index;
+pub mod indexed_mzml;
 
 pub use error::SpectrumIoError;
+pub use indexed_mzml::IndexedMzMLReader;
 pub use reader::SpectrumReader;
 
 use std::path::Path;
