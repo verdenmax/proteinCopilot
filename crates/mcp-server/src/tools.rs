@@ -1910,6 +1910,15 @@ impl ProteinCopilotServer {
             })
             .collect();
 
+        if mzml_files.len() > 1 {
+            tracing::warn!(
+                "imported PSMs span {} raw files — annotate_spectrum/extract_xic currently \
+                 only use the first file. Use run_filter to limit to a single raw file \
+                 for reliable downstream annotation.",
+                mzml_files.len()
+            );
+        }
+
         // Convert to SearchResult
         let format_name = match format {
             ImportFormat::CustomJson => "custom_json",
