@@ -25,8 +25,13 @@ pub mod mgf;
 pub mod mzml;
 pub mod reader;
 mod util;
+pub mod index;
+pub mod indexed_mgf;
+pub mod indexed_mzml;
 
 pub use error::SpectrumIoError;
+pub use indexed_mgf::IndexedMgfReader;
+pub use indexed_mzml::IndexedMzMLReader;
 pub use reader::SpectrumReader;
 
 use std::path::Path;
@@ -81,6 +86,28 @@ pub fn create_reader(info: &SpectrumFileInfo) -> Box<dyn SpectrumReader> {
     match info.format {
         SpectrumFormat::Mgf => Box::new(mgf::MgfReader),
         SpectrumFormat::MzML => Box::new(mzml::MzMLReader),
+    }
+}
+
+/// Creates an [`IndexedMzMLReader`] or [`IndexedMgfReader`] for the given file.
+///
+/// Indexed readers build a scan→offset map on first open, enabling
+/// O(1) `read_spectrum()` calls. For operations that need all spectra
+/// (read_all, for_each_spectrum), they delegate to the standard reader.
+///
+/// Prefer this over [`create_reader`] when you'll call `read_spectrum()`
+/// multiple times on the same file.
+pub fn create_indexed_reader(path: &Path) -> Result<Box<dyn SpectrumReader>, SpectrumIoError> {
+    let info = detect_format(path)?;
+    match info.format {
+        SpectrumFormat::MzML => {
+            let reader = IndexedMzMLReader::open(path)?;
+            Ok(Box::new(reader))
+        }
+        SpectrumFormat::Mgf => {
+            let reader = IndexedMgfReader::open(path)?;
+            Ok(Box::new(reader))
+        }
     }
 }
 
@@ -147,5 +174,23 @@ mod tests {
             file_size_bytes: 100,
         };
         let _reader = create_reader(&mzml_info);
+    }
+
+    #[test]
+    fn create_indexed_reader_mzml() {
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/small.mzml");
+        let reader = create_indexed_reader(&path).unwrap();
+        let spec = reader.read_spectrum(&path, 5).unwrap();
+        assert_eq!(spec.scan_number, 5);
+    }
+
+    #[test]
+    fn create_indexed_reader_mgf() {
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/small.mgf");
+        let reader = create_indexed_reader(&path).unwrap();
+        let spec = reader.read_spectrum(&path, 3).unwrap();
+        assert_eq!(spec.scan_number, 3);
     }
 }

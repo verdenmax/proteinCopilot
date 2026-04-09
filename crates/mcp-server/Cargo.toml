@@ -29,3 +29,4 @@ chrono = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 dirs = "6"
+lru = "0.12"
