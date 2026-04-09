@@ -96,7 +96,17 @@ impl SpectrumReader for IndexedMzMLReader {
         MzMLReader.read_summary(path)
     }
 
-    fn read_spectrum(&self, _path: &Path, scan: u32) -> Result<Spectrum, SpectrumIoError> {
+    fn read_spectrum(&self, path: &Path, scan: u32) -> Result<Spectrum, SpectrumIoError> {
+        if path != self.path {
+            let canonical_self = std::fs::canonicalize(&self.path).unwrap_or_else(|_| self.path.clone());
+            let canonical_path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+            if canonical_self != canonical_path {
+                tracing::warn!(
+                    "IndexedMzMLReader opened for {:?} but read_spectrum called with {:?}; using indexed file",
+                    self.path, path
+                );
+            }
+        }
         let offset = self.index.get_offset(scan).ok_or_else(|| {
             SpectrumIoError::ScanNotFound {
                 path: self.path.clone(),

@@ -115,12 +115,13 @@ pub fn build_index_from_native_mzml(path: &Path) -> Result<Option<ScanIndex>, Sp
             source: e,
         })?;
 
-    let mut tail = String::new();
-    file.read_to_string(&mut tail)
+    let mut tail_bytes = Vec::new();
+    file.read_to_end(&mut tail_bytes)
         .map_err(|e| SpectrumIoError::IoError {
             path: path.to_path_buf(),
             source: e,
         })?;
+    let tail = String::from_utf8_lossy(&tail_bytes);
 
     // Look for <indexListOffset>NNN</indexListOffset>
     let offset_str = match extract_between(&tail, "<indexListOffset>", "</indexListOffset>") {
@@ -236,7 +237,12 @@ fn parse_index_list(xml: &str, path: &Path) -> Result<HashMap<u32, u64>, Spectru
                 })?;
                 if let Ok(byte_offset) = text.trim().parse::<u64>() {
                     let scan = parse_scan_from_id_ref(&current_id_ref).unwrap_or(fallback_scan);
-                    offsets.insert(scan, byte_offset);
+                    if let Some(prev_offset) = offsets.insert(scan, byte_offset) {
+                        tracing::warn!(
+                            "duplicate scan {} in index: offset {} replaced by {}",
+                            scan, prev_offset, byte_offset
+                        );
+                    }
                 }
             }
             Ok(Event::End(ref e)) => match e.local_name().as_ref() {
@@ -318,7 +324,12 @@ pub fn build_index_by_scanning(path: &Path) -> Result<ScanIndex, SpectrumIoError
             let scan = extract_id_attr(trimmed)
                 .and_then(|id| parse_scan_from_id_ref(&id))
                 .unwrap_or(fallback_scan);
-            offsets.insert(scan, line_start);
+            if let Some(prev_offset) = offsets.insert(scan, line_start) {
+                tracing::warn!(
+                    "duplicate scan {} found while scanning: offset {} replaced by {}",
+                    scan, prev_offset, line_start
+                );
+            }
         }
     }
 
@@ -327,10 +338,16 @@ pub fn build_index_by_scanning(path: &Path) -> Result<ScanIndex, SpectrumIoError
 
 /// Extracts the value of the `id` attribute from an XML tag string.
 fn extract_id_attr(tag_text: &str) -> Option<String> {
-    let after_id = tag_text
-        .split("id=\"")
-        .nth(1)
-        .or_else(|| tag_text.split("id='").nth(1))?;
+    // Match " id=" with leading space to avoid suffix matches (e.g., "nativeID=")
+    let search_dq = " id=\"";
+    let search_sq = " id='";
+    let after_id = if let Some(pos) = tag_text.find(search_dq) {
+        &tag_text[pos + search_dq.len()..]
+    } else if let Some(pos) = tag_text.find(search_sq) {
+        &tag_text[pos + search_sq.len()..]
+    } else {
+        return None;
+    };
     let end = after_id.find('"').or_else(|| after_id.find('\''))?;
     Some(after_id[..end].to_string())
 }

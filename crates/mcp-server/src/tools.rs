@@ -552,11 +552,11 @@ impl ProteinCopilotServer {
         &self,
         path: &Path,
     ) -> Result<Arc<dyn SpectrumReader>, ErrorData> {
-        let canonical = path.to_path_buf();
+        let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
 
         // Check cache first
         {
-            let mut cache = self.reader_cache.lock().unwrap();
+            let mut cache = self.reader_cache.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(reader) = cache.get(&canonical) {
                 return Ok(Arc::clone(reader));
             }
@@ -570,7 +570,7 @@ impl ProteinCopilotServer {
 
         // Insert into cache
         {
-            let mut cache = self.reader_cache.lock().unwrap();
+            let mut cache = self.reader_cache.lock().unwrap_or_else(|e| e.into_inner());
             cache.put(canonical, Arc::clone(&reader));
         }
 
