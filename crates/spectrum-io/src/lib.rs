@@ -25,6 +25,7 @@ pub mod mgf;
 pub mod mzml;
 pub mod reader;
 mod util;
+pub mod index;
 
 pub use error::SpectrumIoError;
 pub use reader::SpectrumReader;

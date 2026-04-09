@@ -85,6 +85,15 @@ pub enum SpectrumIoError {
         /// The requested scan number.
         scan: u32,
     },
+
+    /// Index parsing error (mzML indexList).
+    #[error("index parse error in {path}: {detail}")]
+    IndexParseError {
+        /// The file path.
+        path: PathBuf,
+        /// What went wrong.
+        detail: String,
+    },
 }
 
 // Note: No blanket From<std::io::Error> — all I/O errors are mapped
@@ -157,6 +166,14 @@ impl From<SpectrumIoError> for protein_copilot_core::error::CoreError {
                         .unwrap_or_default(),
                     detail: format!("scan {scan} not found in {}", path.display()),
                     suggestion: "Verify the scan number exists in the file".to_string(),
+                }
+            }
+            SpectrumIoError::IndexParseError { path, detail } => {
+                protein_copilot_core::error::CoreError::SpectrumParseError {
+                    format: "mzML".to_string(),
+                    detail: format!("{}: {detail}", path.display()),
+                    suggestion: "The mzML index may be corrupted. Try re-converting the file."
+                        .to_string(),
                 }
             }
         }
