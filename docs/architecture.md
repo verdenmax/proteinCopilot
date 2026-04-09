@@ -134,6 +134,8 @@ proteinCopilot/
 │   ├── report/                        ← [lib] 结果摘要与导出
 │   ├── dia-extraction/                ← [lib] DIA 前体离子提取
 │   ├── fdr/                           ← [lib] FDR 计算（decoy 生成 + TDA + q-value）
+│   ├── xic/                           ← [lib] XIC 提取与可视化（Plotly.js HTML）
+│   ├── result-import/                 ← [lib] 外部搜索结果导入（DIA-NN / custom JSON）
 │   └── mcp-server/                    ← [bin] MCP Server（组装所有 tool）
 ```
 
@@ -463,7 +465,7 @@ fdr::
 
 **职责**：唯一的二进制入口。组装所有 library，注册为 MCP Tools，启动 stdio server。
 
-**注册的 14 个 MCP Tools**：
+**注册的 16 个 MCP Tools**：
 
 | Tool | 功能 | 对应 Library |
 |------|------|-------------|
@@ -481,13 +483,16 @@ fdr::
 | `annotate_spectrum` | 谱图碎片离子注释 | search-engine |
 | `extract_dia_precursors` | DIA MS1 前体提取 | dia-extraction |
 | `extract_spectrum_precursors` | 单张 MS2 母离子提取（调试用） | dia-extraction |
+| `extract_xic` | XIC 碎片离子色谱图（支持 SILAC 轻重标记） | xic |
+| `import_search_results` | 导入外部搜索结果（DIA-NN / custom JSON） | result-import |
 
 **内部结构**：
 ```text
 mcp-server/src/
 ├── main.rs       ← 入口：tracing 初始化 + ProteinCopilotServer + serve(stdio)
-└── tools.rs      ← 14 个 tool 定义 + EngineRegistry 初始化
-                     使用 #[rmcp::tool_router] + #[rmcp::tool_handler] 宏
+├── tools.rs      ← 16 个 tool 定义 + EngineRegistry 初始化
+│                    使用 #[rmcp::tool_router] + #[rmcp::tool_handler] 宏
+└── history.rs    ← 搜索历史持久化（磁盘 JSON）
 ```
 
 **关键实现细节**：
@@ -496,6 +501,61 @@ mcp-server/src/
 - `EngineRegistry` 在启动时注册 SimpleSearchEngine
 - 错误通过 `mcp_core_err()` 统一转换，包含 `CoreError::suggestion()`
 - `run_search` 入口显式调用 `params.validate()` 提前拦截无效参数
+- `reader_cache: Arc<Mutex<HashMap<PathBuf, Arc<dyn IndexedSpectrumReader>>>>` 缓存已创建的索引读取器
+- `RunCache = Arc<Mutex<OrderedRunCache>>` — FIFO 驱逐，最多 100 条
+
+### 3.9 `xic`（lib crate）
+
+**职责**：从 mzML 原始数据提取碎片离子的 XIC（Extracted Ion Chromatogram），支持 SILAC 重标记轻重离子对。
+
+**对外暴露**：
+```text
+xic::
+├── extract_xic()        ← 核心函数：肽段序列 + 电荷 + mzML → XIC 数据
+├── XicResult            ← XIC 结果（per-ion RT-intensity 时间序列）
+├── render_xic_html()    ← Plotly.js 交互式 HTML 可视化
+└── SilacLabel           ← SILAC 重标记定义（heavy K+8, R+10 等）
+```
+
+**依赖**：`core`, `spectrum-io`
+**不依赖**：`rmcp`（纯 library）
+
+**设计要点**：
+- 从 MS1 谱图中按 m/z 窗口提取 XIC（而非 MS2）
+- 对每个 b/y 碎片离子，计算理论 m/z，在 RT 范围内扫描 MS1 谱图提取强度
+- SILAC 模式下自动生成轻重碎片离子对，同一 HTML 中并排展示
+- 输出 Plotly.js HTML，支持缩放、悬停显示离子信息
+
+### 3.10 `result-import`（lib crate）
+
+**职责**：将外部搜索引擎的结果（DIA-NN、自定义 JSON 等）导入为 ProteinCopilot 标准 `SearchResult`，并匹配 mzML 扫描号。
+
+**对外暴露**：
+```text
+result-import::
+├── detect_format()      ← 自动检测结果格式（parquet / JSON / pFind）
+├── ResultParser trait    ← 统一解析接口
+├── DiannParser          ← DIA-NN report.parquet 解析器
+├── CustomJsonParser     ← hela.json 自定义格式解析器
+├── PFindParser          ← pFind 结果解析（预留骨架）
+├── ScanMatcher          ← RT + isolation window 匹配 mzML scan number
+├── Converter            ← ImportedPsm → core::Psm → SearchResult
+├── UnimodDb             ← 22 内置修饰 + Unimod XML 解析器
+├── ImportedPsm          ← 中间表示（format-agnostic）
+├── ImportResult         ← 解析后结果（PSMs + metadata）
+└── MatchReport          ← 匹配统计（per-file matched/unmatched/total MS2）
+```
+
+**依赖**：`core`, `spectrum-io`, `arrow`, `parquet`, `regex`, `serde_json`, `quick-xml`
+**不依赖**：`rmcp`（纯 library）
+
+**设计要点**：
+- **格式检测**：`detect_format()` 基于文件扩展名 + magic bytes 自动识别
+- **RT 单位转换**：外部数据 RT（分钟）在解析阶段自动 ×60 转为秒（项目内部统一秒）
+- **扫描匹配**：`ScanMatcher` 对 MS2 谱图 RT 排序后二分查找最近匹配，DIA 模式额外检查 isolation window 包含性
+- **score 方向**：DIA-NN Q.Value (lower=better) 存为 `1.0 - qvalue` 以满足 "higher=better" 约定
+- **UnimodDb**：支持从名称/record_id 查找修饰质量偏移，解析 DIA-NN 带修饰序列（如 `M(UniMod:35)`）
+- **下游兼容**：转换后的 SearchResult 与 run_search 产生的结果结构完全一致，可直接用于所有下游 tool
 - 返回类型统一使用 `Result<Json<T>, ErrorData>`
 
 **依赖**：`core`, `spectrum-io`, `param-recommend`, `search-engine`, `dia-extraction`, `report`, `rmcp` v1.3, `tokio`, `tracing`
@@ -851,6 +911,8 @@ Layer 0: 用户
 | `export_results` | report | search_result, format, output_path | ExportResult | 导出结果文件 |
 | `extract_dia_precursors` | dia-extraction | file_path, params? | RunId + ExtractionSummary | DIA 前体提取 |
 | `extract_spectrum_precursors` | dia-extraction | file_path, scan_number | SingleSpectrumExtractionResult | 单谱图母离子提取 |
+| `extract_xic` | xic | run_id?, file_path?, scan_number, peptide?, charge? | HTML file path | XIC 碎片离子色谱图（支持 SILAC 轻重标记） |
+| `import_search_results` | result-import | result_path, mzml_files, format? | RunId + ImportSummary | 导入外部搜索结果（DIA-NN / custom JSON） |
 
 ---
 
