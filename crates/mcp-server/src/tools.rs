@@ -1894,6 +1894,17 @@ impl ProteinCopilotServer {
         })
         .map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, e.to_string()))?;
 
+        if match_report.matched == 0 {
+            return Err(mcp_err(
+                ErrorCode::INVALID_PARAMS,
+                format!(
+                    "parsed {} PSMs but matched 0 to mzML scans — check that mzML files \
+                     correspond to the search results and RT values are correct",
+                    match_report.total_psms
+                ),
+            ));
+        }
+
         // Collect actual mzML paths used (for downstream annotate_spectrum/extract_xic)
         let mzml_files: Vec<PathBuf> = psms
             .iter()

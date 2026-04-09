@@ -82,6 +82,17 @@ pub fn build_search_result(
     } else {
         unique_peptide_count as u64
     };
+    // Protein groups at 1% FDR: count from FDR-filtered subset only
+    let proteins_at_fdr = if has_qvalues {
+        core_psms
+            .iter()
+            .filter(|p| p.q_value.is_some_and(|q| q <= 0.01))
+            .flat_map(|p| p.protein_accessions.iter().map(|a| a.as_str()))
+            .collect::<HashSet<_>>()
+            .len()
+    } else {
+        unique_protein_count
+    };
 
     // Total MS2 spectra from all raw files (not just matched PSMs)
     let total_ms2: u64 = match_report
@@ -96,7 +107,7 @@ pub fn build_search_result(
         total_psms: core_psms.len() as u64,
         psms_at_1pct_fdr: psms_at_fdr,
         unique_peptides_at_1pct_fdr: peptides_at_fdr,
-        protein_groups_at_1pct_fdr: unique_protein_count as u64,
+        protein_groups_at_1pct_fdr: proteins_at_fdr as u64,
         median_score,
         median_delta_mass_ppm: median_delta,
         identification_rate: if total_spectra > 0 {
@@ -174,10 +185,15 @@ fn to_core_psm(imported: &ImportedPsm) -> Psm {
     let scan = imported.matched_scan.unwrap_or(0);
 
     // Calculate theoretical m/z from sequence + modification masses
+    // Guard against invalid charge (<=0) which would panic in peptide_mz
     let mod_mass: f64 = imported.modifications.iter().map(|m| m.mass_delta).sum();
-    let calculated_mz = peptide_mass(&imported.sequence)
-        .map(|neutral| peptide_mz(neutral + mod_mass, imported.charge))
-        .unwrap_or(imported.precursor_mz); // fallback for non-standard AAs
+    let calculated_mz = if imported.charge > 0 {
+        peptide_mass(&imported.sequence)
+            .map(|neutral| peptide_mz(neutral + mod_mass, imported.charge))
+            .unwrap_or(imported.precursor_mz)
+    } else {
+        imported.precursor_mz // fallback for invalid charge
+    };
 
     let delta_ppm = if calculated_mz > 0.0 {
         (imported.precursor_mz - calculated_mz) / calculated_mz * 1e6

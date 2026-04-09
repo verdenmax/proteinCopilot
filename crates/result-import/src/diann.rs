@@ -12,7 +12,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use arrow::array::{Float32Array, Float64Array, Int32Array, StringArray};
+use arrow::array::{Array, Float32Array, Float64Array, Int32Array, StringArray};
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use regex::Regex;
 
@@ -128,6 +128,8 @@ impl ResultParser for DiannParser {
         let mut psms = Vec::new();
         let mut filtered_count = 0u64;
 
+        let mut null_skip_count = 0u64;
+
         for batch_result in reader {
             let batch = batch_result?;
             let schema = batch.schema();
@@ -141,7 +143,10 @@ impl ResultParser for DiannParser {
             let protein_col = get_string_column_optional(&batch, &schema, "Protein.Names");
 
             for row in 0..batch.num_rows() {
-                let qvalue = get_f64(&qvalue_col, row);
+                let qvalue = match get_f64(&qvalue_col, row) {
+                    Some(v) => v,
+                    None => { null_skip_count += 1; continue; }
+                };
                 if let Some(max_q) = self.filter_qvalue {
                     if qvalue > max_q {
                         filtered_count += 1;
@@ -149,7 +154,12 @@ impl ResultParser for DiannParser {
                     }
                 }
 
-                let run = get_str(&run_col, row).to_string();
+                let run = get_str(&run_col, row);
+                if run.is_empty() {
+                    null_skip_count += 1;
+                    continue;
+                }
+                let run = run.to_string();
 
                 if let Some(ref filter) = self.run_filter {
                     if &run != filter {
@@ -158,7 +168,24 @@ impl ResultParser for DiannParser {
                 }
 
                 let mod_seq = get_str(&mod_seq_col, row);
+                if mod_seq.is_empty() {
+                    null_skip_count += 1;
+                    continue;
+                }
                 let (sequence, mod_positions) = parse_modified_sequence(mod_seq);
+
+                let charge = match get_i32(&charge_col, row) {
+                    Some(c) if c > 0 => c,
+                    _ => { null_skip_count += 1; continue; }
+                };
+                let precursor_mz = match get_f64(&mz_col, row) {
+                    Some(v) if v > 0.0 => v,
+                    _ => { null_skip_count += 1; continue; }
+                };
+                let rt_min = match get_f64(&rt_col, row) {
+                    Some(v) => v,
+                    None => { null_skip_count += 1; continue; }
+                };
 
                 let mut modifications = Vec::new();
                 for (pos, id) in &mod_positions {
@@ -183,9 +210,9 @@ impl ResultParser for DiannParser {
 
                 psms.push(ImportedPsm {
                     sequence,
-                    charge: get_i32(&charge_col, row),
-                    precursor_mz: get_f64(&mz_col, row),
-                    rt_sec: get_f64(&rt_col, row) * 60.0, // minutes → seconds
+                    charge,
+                    precursor_mz,
+                    rt_sec: rt_min * 60.0, // minutes → seconds
                     modifications,
                     score: Some(1.0 - qvalue), // invert: Q.Value (lower=better) → score (higher=better)
                     q_value: Some(qvalue),
@@ -195,6 +222,10 @@ impl ResultParser for DiannParser {
                     rt_delta_sec: None,
                 });
             }
+        }
+
+        if null_skip_count > 0 {
+            tracing::warn!("skipped {null_skip_count} rows with null/invalid required fields");
         }
 
         if filtered_count > 0 {
@@ -279,30 +310,40 @@ fn get_float_column(
 }
 
 fn get_str(col: &Arc<StringArray>, row: usize) -> &str {
-    col.value(row)
+    if col.is_null(row) {
+        ""
+    } else {
+        col.value(row)
+    }
 }
 
-fn get_i32(col: &Arc<dyn arrow::array::Array>, row: usize) -> i32 {
+fn get_i32(col: &Arc<dyn arrow::array::Array>, row: usize) -> Option<i32> {
+    if col.is_null(row) {
+        return None;
+    }
     if let Some(a) = col.as_any().downcast_ref::<Int32Array>() {
-        return a.value(row);
+        return Some(a.value(row));
     }
     if let Some(a) = col.as_any().downcast_ref::<arrow::array::Int64Array>() {
-        return a.value(row) as i32;
+        return Some(a.value(row) as i32);
     }
     if let Some(a) = col.as_any().downcast_ref::<arrow::array::Int16Array>() {
-        return a.value(row) as i32;
+        return Some(a.value(row) as i32);
     }
-    0
+    None
 }
 
-fn get_f64(col: &Arc<dyn arrow::array::Array>, row: usize) -> f64 {
+fn get_f64(col: &Arc<dyn arrow::array::Array>, row: usize) -> Option<f64> {
+    if col.is_null(row) {
+        return None;
+    }
     if let Some(a) = col.as_any().downcast_ref::<Float64Array>() {
-        return a.value(row);
+        return Some(a.value(row));
     }
     if let Some(a) = col.as_any().downcast_ref::<Float32Array>() {
-        return a.value(row) as f64;
+        return Some(a.value(row) as f64);
     }
-    0.0
+    None
 }
 
 #[cfg(test)]
