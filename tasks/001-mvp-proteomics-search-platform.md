@@ -3,7 +3,7 @@
 > **文件名**：`prd-mvp-proteomics-search.md`
 > **版本**：1.0
 > **创建日期**：2026-03-27
-> **状态**：In Progress — M1.1 ✅ M1.2 ✅ M1.3 ✅ M1.4 ✅ M1.5 ✅ M1.6 ✅ M1.7 ✅（412 tests, 0 warnings）— MVP 完成 + Post-MVP 功能（异步搜索优化、搜索历史持久化、谱图注释可视化）+ DIA 数据支持（前体提取 + 搜索集成 + 端到端工作流 + 单谱图母离子提取）+ Biology Audit 完成 + BUG-1 已修复（碎片离子固定修饰）+ 14 MCP Tools + FW-1 ✅ ProteinNTerm 修饰过滤 + FW-2 ✅ 可变修饰枚举 + FW-6 ✅ 原生 FDR 计算（fdr crate + decoy 生成 + q-value 单调化）
+> **状态**：In Progress — M1.1 ✅ M1.2 ✅ M1.3 ✅ M1.4 ✅ M1.5 ✅ M1.6 ✅ M1.7 ✅（499 tests, 0 warnings）— MVP 完成 + Post-MVP 功能（异步搜索优化、搜索历史持久化、谱图注释可视化）+ DIA 数据支持（前体提取 + 搜索集成 + 端到端工作流 + 单谱图母离子提取）+ Biology Audit 完成 + BUG-1 已修复（碎片离子固定修饰）+ 16 MCP Tools + FW-1 ✅ ProteinNTerm 修饰过滤 + FW-2 ✅ 可变修饰枚举 + FW-3 ✅ ppm 碎片离子容差 + FW-4 ✅ 多电荷碎片离子 + FW-6 ✅ 原生 FDR 计算（fdr crate + decoy 生成 + q-value 单调化）+ XIC 可视化（xic crate + extract_xic tool + SILAC 重标轻重离子 + Plotly.js HTML）+ 索引谱图读取（IndexedMzMLReader / IndexedMgfReader + scan offset 随机访问）+ 外部搜索结果导入（result-import crate + import_search_results tool + DIA-NN parquet / custom JSON / RT 扫描匹配）
 
 ---
 
@@ -1065,8 +1065,8 @@ M1.7 (集成验证)    ← 需要所有 MVP Milestone
 |---|--------|--------|------|------|
 | FW-1 | **ProteinNTerm 修饰枚举** | 高 | FW-2 | ✅ 已实现。`varmod.rs::find_applicable_sites()` 根据 `DigestedPeptide.is_protein_nterm` 过滤 ProteinNTerm/ProteinCTerm 修饰，集成测试 `protein_nterm_acetylation_fw1` 验证通过 |
 | FW-2 | **可变修饰组合枚举** | 高 | — | ✅ 已实现。新增 `varmod.rs` 模块（站点发现 + 栈式 DFS 组合枚举），`matching.rs` 集成可变修饰评分，`simple_engine.rs` 管线完整支持。13 单元测试 + 2 集成测试 |
-| FW-3 | **ppm 碎片离子容差** | 中 | — | 预设改用 ppm（20 ppm）代替 Da（0.02 Da），对高分辨 Orbitrap HCD 更准确 |
-| FW-4 | **多电荷碎片离子** | 中 | — | 对高电荷母离子（z≥3），生成 b²⁺/y²⁺ 碎片离子提高匹配率 |
+| FW-3 | **ppm 碎片离子容差** | 中 | — | ✅ 已实现。`matching.rs` 的 `is_match()` 支持 `Ppm` 和 `Da` 两种容差单位，`annotate.rs` 同步支持 ppm 注释。默认仍为 0.02 Da，高分辨数据可切换 20 ppm |
+| FW-4 | **多电荷碎片离子** | 中 | — | ✅ 已实现。`matching.rs` 的 `generate_theoretical_fragments()` 为高电荷母离子（z≥3）生成 b²⁺/y²⁺ 碎片离子，`annotate.rs` 同步支持多电荷碎片注释与 HTML 可视化 |
 | FW-5 | **a/c/x/z 离子系列** | 低 | — | ETD/ECD 碎裂模式需要 c/z 离子；CID 辅助可加 a 离子 |
 | FW-6 | **原生 FDR 计算** | 高 | — | ✅ 已实现。新增 `crates/fdr/` 独立 crate：decoy 生成（reverse 保留末尾 AA / shuffle 种子 42）、竞争式 TDA FDR 计算、q-value 单调化。`simple_engine.rs` 自动生成 decoy 肽段、计算 q-value、移除 decoy PSM。14 单元测试 + 1 集成测试 |
 | FW-7 | **负离子模式** | 低 | — | 当前仅支持正离子 [M+nH]ⁿ⁺，负模式需要 [M-nH]ⁿ⁻ |
@@ -1078,3 +1078,30 @@ M1.7 (集成验证)    ← 需要所有 MVP Milestone
 | # | 问题 | 修复方案 | 状态 |
 |---|------|----------|------|
 | BUG-1 | **碎片离子评分不应用固定修饰** | `matching.rs` 的 `generate_b_ions()`/`generate_y_ions()` 现已接受 `fixed_mods: &[Modification]` 参数，通过 `mod_delta_fragment()` 为每个碎片离子计算修饰质量偏移。逻辑与 `annotate.rs` 中的实现一致，支持残基特异修饰 + N/C 端修饰。 | ✅ 已修复 |
+
+### Post-MVP 已完成功能 ✅
+
+#### XIC 可视化（xic crate + extract_xic tool）
+
+- **crate**: `crates/xic/` — 独立 lib crate
+- **MCP tool**: `extract_xic` — 基于 run_id + scan_number 或手动指定肽段序列
+- **功能**: 从 mzML 原始数据提取 b/y 碎片离子的 XIC（Extracted Ion Chromatogram），支持 SILAC 重标记（heavy label）自动生成轻重碎片离子对，输出 Plotly.js 交互式 HTML
+- **测试**: 通过，集成到 mcp-server
+
+#### 索引谱图读取（spectrum-io 增强）
+
+- **IndexedMzMLReader**: 解析 mzML 原生 `<indexList>` 中的 scan offset，支持 `seek()` 随机访问单张谱图，无需全量加载
+- **IndexedMgfReader**: 一次扫描构建 scan→offset 映射，后续按需 seek 读取
+- **create_indexed_reader()**: 统一工厂函数，自动检测格式并创建索引读取器
+- **reader_cache**: mcp-server 中 `Arc<Mutex<HashMap>>` 缓存已创建的 reader，避免重复解析
+
+#### 外部搜索结果导入（result-import crate + import_search_results tool）
+
+- **crate**: `crates/result-import/` — 独立 lib crate
+- **MCP tool**: `import_search_results` — 导入外部搜索引擎（DIA-NN、自定义 JSON 等）的结果到 ProteinCopilot
+- **支持格式**: DIA-NN report.parquet、自定义 JSON（hela.json 格式）、pFind（预留骨架）
+- **流程**: 格式检测 → 解析 PSM → RT+isolation window 匹配 mzML 扫描号 → 转换为标准 SearchResult → 缓存到 RunCache
+- **UnimodDb**: 内置 22 种常见修饰 + Unimod XML 解析器，自动将修饰名称转为 Modification 结构体
+- **单位规范**: 外部数据 RT（分钟）自动转为内部标准（秒），DIA-NN Q.Value（lower=better）自动转为 score（higher=better）
+- **下游兼容**: 导入结果可直接用于 annotate_spectrum、extract_xic、generate_summary、export_results
+- **测试**: 32 tests 通过
