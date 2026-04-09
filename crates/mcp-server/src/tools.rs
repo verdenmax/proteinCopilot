@@ -34,6 +34,12 @@ use protein_copilot_param_recommend::{ParamRecommender, SearchPreset, UserHints}
 use protein_copilot_report::ReportGenerator;
 use protein_copilot_search_engine::{SearchProgress, SimpleSearchEngine};
 
+use protein_copilot_result_import::{
+    custom_json::CustomJsonParser, converter::build_search_result,
+    diann::DiannParser, pfind::PFindParser, scan_matcher::{ScanMatcherConfig, match_scans},
+    unimod::UnimodDb, ImportFormat, ImportResult, ResultParser,
+};
+
 // ---------------------------------------------------------------------------
 // Tool input types
 // ---------------------------------------------------------------------------
@@ -378,6 +384,40 @@ struct ExtractXicResult {
 #[derive(Debug, Serialize, schemars::JsonSchema)]
 struct PresetsResponse {
     presets: Vec<SearchPreset>,
+}
+
+/// Input for the import_search_results tool.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct ImportSearchResultsInput {
+    /// Path to external search result file (.json, .parquet, .spectra).
+    result_file: String,
+    /// Result file format. 'auto' detects from extension. Options: auto, custom_json, diann_parquet, pfind_spectra.
+    #[serde(default = "default_import_format")]
+    format: String,
+    /// Directory containing mzML files. File association: raw_name + '.mzML'.
+    mzml_dir: String,
+    /// Path to unimod.xml. If not provided, uses builtin modification database (~22 common mods).
+    #[serde(default)]
+    unimod_path: Option<String>,
+    /// RT tolerance in seconds for scan matching. Default: 30.
+    #[serde(default = "default_rt_tolerance")]
+    rt_tolerance_sec: f64,
+    /// Q-value threshold for filtering (DIA-NN). Default: 0.01.
+    #[serde(default = "default_filter_qvalue")]
+    filter_qvalue: f64,
+    /// Optional: only import PSMs from this specific run/raw_title.
+    #[serde(default)]
+    run_filter: Option<String>,
+}
+
+fn default_import_format() -> String {
+    "auto".to_string()
+}
+fn default_rt_tolerance() -> f64 {
+    30.0
+}
+fn default_filter_qvalue() -> f64 {
+    0.01
 }
 
 /// Helper to create MCP error with suggestion from CoreError
@@ -1740,5 +1780,187 @@ impl ProteinCopilotServer {
             has_ms1_xic: xic_data.ms1_precursor_xic.is_some(),
             summary,
         }))
+    }
+
+    /// Import external search results and match to mzML scans.
+    #[rmcp::tool(
+        name = "import_search_results",
+        description = "Import external search results (DIA-NN, custom JSON, pFind) and match to mzML scans. Returns a run_id for use with annotate_spectrum, extract_xic, and generate_summary."
+    )]
+    fn import_search_results(
+        &self,
+        Parameters(input): Parameters<ImportSearchResultsInput>,
+    ) -> Result<Json<ImportResult>, ErrorData> {
+        let start = Instant::now();
+        let result_path = PathBuf::from(&input.result_file);
+        let mzml_dir = PathBuf::from(&input.mzml_dir);
+
+        if !result_path.exists() {
+            return Err(mcp_err(
+                ErrorCode::INVALID_PARAMS,
+                format!("result file not found: {}", result_path.display()),
+            ));
+        }
+        if !mzml_dir.is_dir() {
+            return Err(mcp_err(
+                ErrorCode::INVALID_PARAMS,
+                format!("mzml_dir is not a directory: {}", mzml_dir.display()),
+            ));
+        }
+        if input.rt_tolerance_sec < 0.0 || !input.rt_tolerance_sec.is_finite() {
+            return Err(mcp_err(
+                ErrorCode::INVALID_PARAMS,
+                "rt_tolerance_sec must be a non-negative finite number",
+            ));
+        }
+        if !(0.0..=1.0).contains(&input.filter_qvalue) {
+            return Err(mcp_err(
+                ErrorCode::INVALID_PARAMS,
+                "filter_qvalue must be between 0.0 and 1.0",
+            ));
+        }
+
+        // Load Unimod database
+        let unimod = if let Some(ref xml_path) = input.unimod_path {
+            UnimodDb::from_xml(Path::new(xml_path)).map_err(|e| {
+                mcp_err(
+                    ErrorCode::INVALID_PARAMS,
+                    format!("unimod.xml error: {e}"),
+                )
+            })?
+        } else {
+            UnimodDb::builtin()
+        };
+
+        // Detect format
+        let format = match input.format.as_str() {
+            "auto" => protein_copilot_result_import::detect_format(&result_path)
+                .map_err(|e| mcp_err(ErrorCode::INVALID_PARAMS, e.to_string()))?,
+            "custom_json" => ImportFormat::CustomJson,
+            "diann_parquet" => ImportFormat::DiannParquet,
+            "pfind_spectra" => ImportFormat::PFindSpectra,
+            other => {
+                return Err(mcp_err(
+                    ErrorCode::INVALID_PARAMS,
+                    format!(
+                        "unknown format: '{other}'. Supported: auto, custom_json, diann_parquet, pfind_spectra"
+                    ),
+                ));
+            }
+        };
+
+        // Parse
+        let mut psms = match format {
+            ImportFormat::CustomJson => CustomJsonParser
+                .parse(&result_path, &unimod)
+                .map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, e.to_string()))?,
+            ImportFormat::DiannParquet => {
+                let mut parser = DiannParser::new();
+                parser.filter_qvalue = Some(input.filter_qvalue);
+                parser.run_filter = input.run_filter.clone();
+                parser
+                    .parse(&result_path, &unimod)
+                    .map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, e.to_string()))?
+            }
+            ImportFormat::PFindSpectra => PFindParser
+                .parse(&result_path, &unimod)
+                .map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, e.to_string()))?,
+        };
+
+        if psms.is_empty() {
+            return Err(mcp_err(
+                ErrorCode::INVALID_PARAMS,
+                "no PSMs parsed from the result file (check format and filters)",
+            ));
+        }
+
+        // Scan matching
+        let config = ScanMatcherConfig {
+            rt_tolerance_sec: input.rt_tolerance_sec,
+            mzml_dir: mzml_dir.clone(),
+        };
+
+        let match_report = match_scans(&mut psms, &config, &|path| {
+            protein_copilot_spectrum_io::create_indexed_reader(path).map_err(|e| {
+                protein_copilot_result_import::ResultImportError::SpectrumIo(format!(
+                    "failed to open {}: {e}",
+                    path.display(),
+                ))
+            })
+        })
+        .map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, e.to_string()))?;
+
+        // Collect actual mzML paths used (for downstream annotate_spectrum/extract_xic)
+        let mzml_files: Vec<PathBuf> = psms
+            .iter()
+            .map(|p| p.raw_name.as_str())
+            .collect::<std::collections::HashSet<_>>()
+            .into_iter()
+            .map(|raw| {
+                let mzml = mzml_dir.join(format!("{raw}.mzML"));
+                if mzml.exists() {
+                    mzml
+                } else {
+                    mzml_dir.join(format!("{raw}.mzml"))
+                }
+            })
+            .collect();
+
+        // Convert to SearchResult
+        let format_name = match format {
+            ImportFormat::CustomJson => "custom_json",
+            ImportFormat::DiannParquet => "diann_parquet",
+            ImportFormat::PFindSpectra => "pfind_spectra",
+        };
+        let (mut search_result, import_result) =
+            build_search_result(&psms, match_report, format_name, mzml_files);
+
+        // Fix metadata: set status to Completed and record duration
+        let duration = start.elapsed().as_secs_f64();
+        search_result.metadata.status =
+            protein_copilot_core::run_metadata::RunStatus::Completed;
+        search_result.metadata.duration_sec = Some(duration);
+
+        // Store in run_cache
+        let run_id = search_result.run_id;
+        {
+            let mut cache = self.run_cache.lock().map_err(|_| {
+                mcp_err(ErrorCode::INTERNAL_ERROR, "run cache lock poisoned")
+            })?;
+            cache.evict_if_full();
+            cache.insert(
+                run_id,
+                RunState {
+                    progress: SearchProgress {
+                        run_id,
+                        status: "Completed".to_string(),
+                        stage: Some("Imported".to_string()),
+                        progress_pct: Some(1.0),
+                        elapsed_sec: duration,
+                        estimated_remaining_sec: None,
+                    },
+                    result: Some(search_result.clone()),
+                    handle: None,
+                },
+            );
+        }
+
+        // Persist history entry
+        let history_entry = crate::history::SearchHistoryEntry {
+            run_id,
+            status: "Completed".to_string(),
+            created_at: search_result.metadata.created_at,
+            elapsed_sec: duration,
+            engine_info: search_result.engine_info.clone(),
+            input_files: search_result.metadata.input_files.clone(),
+            params_used: search_result.params_used.clone(),
+            total_psms: Some(search_result.summary.total_psms),
+            psms_at_1pct_fdr: Some(search_result.summary.psms_at_1pct_fdr),
+            identification_rate: Some(search_result.summary.identification_rate),
+            protein_groups: Some(search_result.summary.protein_groups_at_1pct_fdr),
+        };
+        crate::history::save_entry(&history_entry);
+
+        Ok(Json(import_result))
     }
 }

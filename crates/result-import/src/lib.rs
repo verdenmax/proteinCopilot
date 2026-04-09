@@ -47,7 +47,7 @@ pub struct ImportedPsm {
 }
 
 /// Result of the import operation.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ImportResult {
     pub run_id: String,
     pub match_report: MatchReport,
@@ -58,7 +58,7 @@ pub struct ImportResult {
 }
 
 /// Scan matching quality report.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct MatchReport {
     pub total_psms: usize,
     pub matched: usize,
@@ -69,7 +69,7 @@ pub struct MatchReport {
 }
 
 /// Per-file matching statistics.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct FileMatchStats {
     pub total: usize,
     pub matched: usize,
