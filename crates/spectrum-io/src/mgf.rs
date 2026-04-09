@@ -240,6 +240,14 @@ impl SpectrumReader for MgfReader {
             scan,
         })
     }
+
+    fn for_each_spectrum(
+        &self,
+        path: &Path,
+        handler: &mut dyn FnMut(Spectrum) -> Result<bool, SpectrumIoError>,
+    ) -> Result<u32, SpectrumIoError> {
+        parse_mgf_streaming(path, handler)
+    }
 }
 
 #[cfg(test)]
@@ -442,5 +450,31 @@ mod tests {
         assert!((spectra[0].precursors[0].mz - 500.25).abs() < 0.01);
         assert_eq!(spectra[0].num_peaks(), 2);
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn for_each_spectrum_streams_all() {
+        let reader = MgfReader;
+        let path = fixture_path();
+        let mut count = 0u32;
+        let result = reader.for_each_spectrum(&path, &mut |_spec| {
+            count += 1;
+            Ok(true)
+        });
+        assert!(result.is_ok());
+        let all = reader.read_all(&path).unwrap();
+        assert_eq!(count, all.len() as u32);
+    }
+
+    #[test]
+    fn for_each_spectrum_early_stop() {
+        let reader = MgfReader;
+        let path = fixture_path();
+        let mut count = 0u32;
+        let _ = reader.for_each_spectrum(&path, &mut |_spec| {
+            count += 1;
+            Ok(count < 2)
+        });
+        assert_eq!(count, 2);
     }
 }

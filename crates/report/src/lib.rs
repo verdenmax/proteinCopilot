@@ -12,6 +12,7 @@ pub mod error;
 pub mod export;
 pub mod summary;
 pub mod visualize;
+pub mod xic_visualize;
 
 pub use error::ReportError;
 
@@ -53,5 +54,14 @@ impl ReportGenerator {
         output_path: &Path,
     ) -> Result<(), ReportError> {
         visualize::render_annotation_html(annotation, output_path)
+    }
+
+    /// Renders XIC data as a self-contained HTML file with Plotly.js charts.
+    pub fn render_xic(
+        xic_data: &protein_copilot_xic::XicData,
+        output_path: &Path,
+        plotly_mode: protein_copilot_xic::PlotlyMode,
+    ) -> Result<(), ReportError> {
+        xic_visualize::render_xic_html(xic_data, output_path, plotly_mode)
     }
 }

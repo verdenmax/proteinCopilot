@@ -508,6 +508,15 @@ impl SpectrumReader for MzMLReader {
             scan,
         })
     }
+
+    fn for_each_spectrum(
+        &self,
+        path: &Path,
+        handler: &mut dyn FnMut(Spectrum) -> Result<bool, SpectrumIoError>,
+    ) -> Result<u32, SpectrumIoError> {
+        let mut xml_reader = open_xml_reader(path)?;
+        parse_mzml_streaming(&mut xml_reader, path, handler)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -843,5 +852,31 @@ mod tests {
         assert!((iw1.target_mz - 600.0).abs() < 1e-4);
         assert!((iw1.lower_offset - 1.0).abs() < 0.01);
         assert!((iw1.upper_offset - 1.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn for_each_spectrum_streams_all() {
+        let reader = MzMLReader;
+        let path = fixture_path();
+        let mut count = 0u32;
+        let result = reader.for_each_spectrum(&path, &mut |_spec| {
+            count += 1;
+            Ok(true)
+        });
+        assert!(result.is_ok());
+        let all = reader.read_all(&path).unwrap();
+        assert_eq!(count, all.len() as u32);
+    }
+
+    #[test]
+    fn for_each_spectrum_early_stop() {
+        let reader = MzMLReader;
+        let path = fixture_path();
+        let mut count = 0u32;
+        let _ = reader.for_each_spectrum(&path, &mut |_spec| {
+            count += 1;
+            Ok(count < 2)
+        });
+        assert_eq!(count, 2);
     }
 }

@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>XIC — __PEPTIDE_PLACEHOLDER__</title>
+    <script src="__PLOTLY_SRC__"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #fafafa; color: #333; }
+        .header { background: #1a1a2e; color: #eee; padding: 16px 24px; }
+        .header h1 { font-size: 18px; font-weight: 600; }
+        .header .meta { font-size: 13px; color: #aaa; margin-top: 4px; }
+        .header .meta span { margin-right: 16px; }
+        .controls { padding: 8px 24px; background: #f0f0f0; border-bottom: 1px solid #ddd; display: flex; gap: 12px; align-items: center; }
+        .controls label { font-size: 13px; cursor: pointer; }
+        .controls select, .controls button { font-size: 13px; padding: 4px 8px; }
+        .plot-container { padding: 16px 24px; }
+        #ms1-plot { height: 200px; margin-bottom: 8px; }
+        #ms2-plot { height: 400px; }
+        .params { padding: 12px 24px; font-size: 12px; color: #666; border-top: 1px solid #eee; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>XIC: <span id="peptide-seq"></span></h1>
+        <div class="meta">
+            <span>Charge: <strong id="charge-val"></strong></span>
+            <span>Precursor m/z: <strong id="mz-val"></strong></span>
+            <span>Target RT: <strong id="rt-val"></strong>s</span>
+            <span>Target Scan: <strong id="scan-val"></strong></span>
+        </div>
+    </div>
+    <div class="controls">
+        <label>Mode:
+            <select id="mode-select">
+                <option value="overlay">Overlay</option>
+                <option value="split">Split (Light / Heavy)</option>
+            </select>
+        </label>
+    </div>
+    <div class="plot-container">
+        <div id="ms1-plot"></div>
+        <div id="ms2-plot"></div>
+    </div>
+    <div class="params" id="params-info"></div>
+
+    <script type="application/json" id="xic-data">/*__XIC_JSON__*/</script>
+    <script>
+    (function() {
+        var data = JSON.parse(document.getElementById('xic-data').textContent);
+
+        // Header
+        document.getElementById('peptide-seq').textContent = data.peptide_sequence;
+        document.getElementById('charge-val').textContent = data.charge + '+';
+        document.getElementById('mz-val').textContent = data.precursor_mz.toFixed(4);
+        document.getElementById('rt-val').textContent = data.target_rt_sec.toFixed(1);
+        document.getElementById('scan-val').textContent = data.target_scan;
+
+        // Color palette for ions
+        var colors = ['#1f77b4','#ff7f0e','#2ca02c','#d62728','#9467bd','#8c564b','#e377c2','#7f7f7f','#bcbd22','#17becf'];
+
+        function makeTrace(xicTrace, colorIdx, dash) {
+            return {
+                x: xicTrace.data_points.map(function(p) { return p.retention_time_sec; }),
+                y: xicTrace.data_points.map(function(p) { return p.intensity; }),
+                name: xicTrace.ion_label + (xicTrace.is_heavy ? ' (H)' : ''),
+                mode: 'lines+markers',
+                line: { color: colors[colorIdx % colors.length], width: 2, dash: dash || 'solid' },
+                marker: { size: 3 },
+                hovertemplate: xicTrace.ion_label + '<br>RT: %{x:.1f}s<br>Intensity: %{y:.0f}<br>m/z: ' + xicTrace.theoretical_mz.toFixed(4) + '<extra></extra>'
+            };
+        }
+
+        // MS1 plot
+        var ms1Traces = [];
+        if (data.ms1_precursor_xic) {
+            ms1Traces.push(makeTrace(data.ms1_precursor_xic, 0, 'solid'));
+        }
+        if (data.ms1_heavy_precursor_xic) {
+            ms1Traces.push(makeTrace(data.ms1_heavy_precursor_xic, 0, 'dash'));
+        }
+
+        if (ms1Traces.length > 0) {
+            Plotly.newPlot('ms1-plot', ms1Traces, {
+                title: { text: 'MS1 Precursor XIC', font: { size: 14 } },
+                xaxis: { title: 'RT (s)' },
+                yaxis: { title: 'Intensity' },
+                shapes: [{ type: 'line', x0: data.target_rt_sec, x1: data.target_rt_sec, y0: 0, y1: 1, yref: 'paper', line: { color: 'red', width: 1, dash: 'dot' } }],
+                margin: { t: 40, b: 40, l: 60, r: 20 },
+                showlegend: true,
+                legend: { orientation: 'h', y: 1.15 }
+            }, { responsive: true });
+        } else {
+            document.getElementById('ms1-plot').innerHTML = '<p style="text-align:center;color:#999;padding:20px;">No MS1 precursor XIC data</p>';
+        }
+
+        // MS2 fragment plot
+        function renderMS2(mode) {
+            var traces = [];
+            data.fragment_xic_traces.forEach(function(t, i) {
+                traces.push(makeTrace(t, i, 'solid'));
+            });
+            if (mode === 'overlay') {
+                data.heavy_fragment_xic_traces.forEach(function(t, i) {
+                    traces.push(makeTrace(t, i, 'dash'));
+                });
+            }
+
+            var layout = {
+                title: { text: 'MS2 Fragment Ion XIC', font: { size: 14 } },
+                xaxis: { title: 'RT (s)' },
+                yaxis: { title: 'Intensity' },
+                shapes: [{ type: 'line', x0: data.target_rt_sec, x1: data.target_rt_sec, y0: 0, y1: 1, yref: 'paper', line: { color: 'red', width: 1, dash: 'dot' } }],
+                margin: { t: 40, b: 40, l: 60, r: 20 },
+                showlegend: true,
+                legend: { orientation: 'h', y: 1.2 }
+            };
+
+            Plotly.newPlot('ms2-plot', traces, layout, { responsive: true });
+        }
+
+        renderMS2('overlay');
+
+        document.getElementById('mode-select').addEventListener('change', function() {
+            renderMS2(this.value);
+        });
+
+        // Params info
+        var ep = data.extraction_params;
+        document.getElementById('params-info').textContent =
+            'Tolerance: ' + ep.mz_tolerance.value + ' ' + ep.mz_tolerance.unit +
+            ' | Cycles: \u00b1' + ep.n_cycles +
+            ' | Top-N: ' + ep.top_n_ions +
+            ' | Intensity: ' + ep.intensity_rule +
+            (ep.label_type ? ' | Label: SILAC' : '');
+    })();
+    </script>
+</body>
+</html>
