@@ -19,6 +19,13 @@ pub mod unified_visualize;
 
 pub use error::ReportError;
 
+/// Escapes `</script>` sequences in JSON to prevent XSS when embedded in HTML `<script>` tags.
+pub fn escape_json_for_html(json: &str) -> String {
+    json.replace("</script>", "<\\/script>")
+        .replace("</Script>", "<\\/Script>")
+        .replace("</SCRIPT>", "<\\/SCRIPT>")
+}
+
 use std::path::Path;
 
 use protein_copilot_core::run_metadata::RunMetadata;

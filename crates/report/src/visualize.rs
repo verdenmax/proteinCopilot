@@ -23,6 +23,7 @@ pub fn render_annotation_html(
 ) -> Result<(), ReportError> {
     let json = serde_json::to_string(annotation)
         .map_err(|e| ReportError::SerializationError(e.to_string()))?;
+    let json = crate::escape_json_for_html(&json);
 
     let html = TEMPLATE.replace(
         "/*__ANNOTATION_JSON__*/",
