@@ -258,7 +258,7 @@ struct AnnotateSpectrumInput {
     /// Number of DIA cycles before/after target for XIC (default: 5).
     #[serde(default)]
     n_cycles: Option<u32>,
-    /// Number of top fragment ions for XIC (default: 6).
+    /// Number of top fragment ions for XIC (default: all, zero-intensity traces excluded).
     #[serde(default)]
     top_n_ions: Option<usize>,
     /// Heavy-label type for SILAC comparison.
@@ -356,7 +356,7 @@ struct ExtractXicInput {
     #[schemars(description = "Number of DIA cycles before and after target scan. Default: 5.")]
     n_cycles: Option<u32>,
     /// Number of top ions to display (default: 6).
-    #[schemars(description = "Number of top fragment ions to display. Default: 6.")]
+    #[schemars(description = "Number of top fragment ions to display. Default: all (zero-intensity excluded).")]
     top_n_ions: Option<usize>,
     /// Heavy-label type for SILAC comparison.
     #[schemars(description = "Heavy-label configuration. Use {\"Silac\": {\"heavy_k_delta\": 8.014199, \"heavy_r_delta\": 10.008269}} for standard SILAC.")]
@@ -1558,7 +1558,7 @@ impl ProteinCopilotServer {
                     unit: ToleranceUnit::Ppm,
                 }),
                 n_cycles: input.n_cycles.unwrap_or(5),
-                top_n_ions: input.top_n_ions.unwrap_or(6),
+                top_n_ions: input.top_n_ions.unwrap_or(usize::MAX),
                 label_type: input.label_type.clone(),
                 intensity_rule: protein_copilot_xic::IntensityRule::MaxInWindow,
             };
@@ -1889,7 +1889,7 @@ impl ProteinCopilotServer {
                 unit: ToleranceUnit::Ppm,
             }),
             n_cycles: input.n_cycles.unwrap_or(5),
-            top_n_ions: input.top_n_ions.unwrap_or(6),
+            top_n_ions: input.top_n_ions.unwrap_or(usize::MAX),
             label_type: input.label_type.clone(),
             intensity_rule: input
                 .intensity_rule

@@ -416,6 +416,8 @@ pub fn extract_xic(
 
     let top_n = params.top_n_ions.min(fragment_traces.len());
     fragment_traces.truncate(top_n);
+    // Remove traces with zero total intensity (no signal detected)
+    fragment_traces.retain(|t| t.data_points.iter().any(|p| p.intensity > 0.0));
 
     // Build heavy traces (matching top-N selection)
     let heavy_traces: Vec<XicTrace> = if heavy_ions.is_empty() {
@@ -771,6 +773,7 @@ pub fn extract_xic_with_raw(
 
     let top_n = params.top_n_ions.min(fragment_traces.len());
     fragment_traces.truncate(top_n);
+    fragment_traces.retain(|t| t.data_points.iter().any(|p| p.intensity > 0.0));
 
     let heavy_traces: Vec<XicTrace> = if heavy_ions.is_empty() {
         Vec::new()
