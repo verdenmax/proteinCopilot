@@ -21,6 +21,13 @@ pub enum ResultImportError {
         available: String,
     },
 
+    #[error("no MS2 scan found near RT={rt_min:.3} min (±{tolerance_min} min) with precursor_mz={precursor_mz:.4}")]
+    NoMatchingScan {
+        rt_min: f64,
+        tolerance_min: f64,
+        precursor_mz: f64,
+    },
+
     #[error("missing required column '{column}' in parquet file — expected columns: {expected}")]
     MissingColumn { column: String, expected: String },
 

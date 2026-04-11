@@ -16,11 +16,11 @@ use crate::{FileMatchStats, ImportedPsm, MatchReport, ResultImportError};
 
 /// MS2 spectrum info extracted from mzML for scan matching.
 #[derive(Debug, Clone)]
-struct Ms2Info {
-    scan_number: u32,
-    rt_min: f64,
+pub struct Ms2Info {
+    pub scan_number: u32,
+    pub rt_min: f64,
     /// (target_mz, lower_offset, upper_offset)
-    isolation_window: Option<(f64, f64, f64)>,
+    pub isolation_window: Option<(f64, f64, f64)>,
 }
 
 /// Scan matcher configuration.
@@ -139,8 +139,43 @@ pub fn match_scans(
     })
 }
 
+/// Find the best MS2 scan matching a given RT and precursor m/z.
+///
+/// Single-lookup convenience wrapper around `collect_ms2_info` + `find_best_match`.
+/// Used by `annotate_spectrum` and `extract_xic` when the user provides RT instead
+/// of scan_number.
+///
+/// # Arguments
+/// * `file` — path to the mzML file
+/// * `rt_min` — target retention time in minutes
+/// * `precursor_mz` — precursor m/z to match against isolation windows
+/// * `rt_tolerance_min` — RT tolerance in minutes (default: 0.5)
+/// * `reader` — spectrum reader for the file
+pub fn find_scan_by_rt(
+    file: &Path,
+    rt_min: f64,
+    precursor_mz: f64,
+    rt_tolerance_min: f64,
+    reader: &dyn SpectrumReader,
+) -> Result<u32, ResultImportError> {
+    let mut ms2_infos = collect_ms2_info(reader, file)?;
+    ms2_infos.sort_by(|a, b| {
+        a.rt_min
+            .partial_cmp(&b.rt_min)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    find_best_match(&ms2_infos, rt_min, precursor_mz, rt_tolerance_min)
+        .map(|(scan, _delta)| scan)
+        .ok_or(ResultImportError::NoMatchingScan {
+            rt_min,
+            tolerance_min: rt_tolerance_min,
+            precursor_mz,
+        })
+}
+
 /// Collect (scan, rt, isolation_window) for all MS2 spectra from a reader.
-fn collect_ms2_info(
+pub fn collect_ms2_info(
     reader: &dyn SpectrumReader,
     path: &Path,
 ) -> Result<Vec<Ms2Info>, ResultImportError> {
@@ -165,10 +200,10 @@ fn collect_ms2_info(
     Ok(infos)
 }
 
-/// Find the best matching MS2 for a given PSM.
+/// Find the best matching MS2 for a given RT and precursor m/z.
 ///
 /// Returns `(scan_number, rt_delta_min)` or `None` if no match found.
-fn find_best_match(
+pub fn find_best_match(
     sorted_ms2: &[Ms2Info],
     psm_rt_min: f64,
     psm_precursor_mz: f64,
