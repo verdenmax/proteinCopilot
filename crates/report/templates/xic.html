@@ -64,11 +64,12 @@
             return {
                 x: xicTrace.data_points.map(function(p) { return p.retention_time_min; }),
                 y: xicTrace.data_points.map(function(p) { return p.intensity; }),
+                customdata: xicTrace.data_points.map(function(p) { return p.scan_number; }),
                 name: xicTrace.ion_label + (xicTrace.is_heavy ? ' (H)' : ''),
                 mode: 'lines+markers',
                 line: { color: colors[colorIdx % colors.length], width: 2, dash: dash || 'solid' },
                 marker: { size: 3 },
-                hovertemplate: xicTrace.ion_label + '<br>RT: %{x:.1f}s<br>Intensity: %{y:.0f}<br>m/z: ' + xicTrace.theoretical_mz.toFixed(4) + '<extra></extra>'
+                hovertemplate: xicTrace.ion_label + '<br>RT: %{x:.2f} min (Scan %{customdata})<br>Intensity: %{y:.0f}<br>m/z: ' + xicTrace.theoretical_mz.toFixed(4) + '<extra></extra>'
             };
         }
 
@@ -84,7 +85,7 @@
         if (ms1Traces.length > 0) {
             Plotly.newPlot('ms1-plot', ms1Traces, {
                 title: { text: 'MS1 Precursor XIC', font: { size: 14 } },
-                xaxis: { title: 'RT (s)' },
+                xaxis: { title: 'RT (min)' },
                 yaxis: { title: 'Intensity' },
                 shapes: [{ type: 'line', x0: data.target_rt_min, x1: data.target_rt_min, y0: 0, y1: 1, yref: 'paper', line: { color: 'red', width: 1, dash: 'dot' } }],
                 margin: { t: 40, b: 40, l: 60, r: 20 },
@@ -109,7 +110,7 @@
 
             var layout = {
                 title: { text: 'MS2 Fragment Ion XIC', font: { size: 14 } },
-                xaxis: { title: 'RT (s)' },
+                xaxis: { title: 'RT (min)' },
                 yaxis: { title: 'Intensity' },
                 shapes: [{ type: 'line', x0: data.target_rt_min, x1: data.target_rt_min, y0: 0, y1: 1, yref: 'paper', line: { color: 'red', width: 1, dash: 'dot' } }],
                 margin: { t: 40, b: 40, l: 60, r: 20 },

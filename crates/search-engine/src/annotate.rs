@@ -89,8 +89,11 @@ pub struct TheoreticalIon {
 pub struct SpectrumAnnotation {
     /// Scan number (1-based).
     pub scan_number: u32,
-    /// Retention time in seconds.
+    /// Retention time in minutes.
     pub retention_time_min: f64,
+    /// Source spectrum file name (e.g. "sample.mzML").
+    #[serde(default)]
+    pub source_file: String,
     /// Identified peptide sequence.
     pub peptide_sequence: String,
     /// Charge state.
@@ -436,6 +439,7 @@ pub fn annotate_spectrum(
     Ok(SpectrumAnnotation {
         scan_number: spectrum.scan_number,
         retention_time_min: spectrum.retention_time_min,
+        source_file: String::new(),
         peptide_sequence: peptide_sequence.to_string(),
         charge,
         precursor_mz: observed_precursor_mz,

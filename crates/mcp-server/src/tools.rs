@@ -1517,6 +1517,13 @@ impl ProteinCopilotServer {
         )
         .map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, e))?;
 
+        // Set source file name on annotation for display
+        let mut annotation = annotation;
+        annotation.source_file = spectrum_file
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+
         let out_path = input.output_path.map(PathBuf::from).unwrap_or_else(|| {
             PathBuf::from(format!("output/annotation_scan{}.html", input.scan_number))
         });

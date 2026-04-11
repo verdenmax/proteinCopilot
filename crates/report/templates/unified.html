@@ -838,29 +838,31 @@
       ms1Traces.push({
         x: X.ms1_precursor_xic.data_points.map(function(p) { return p.retention_time_min; }),
         y: X.ms1_precursor_xic.data_points.map(function(p) { return p.intensity; }),
+        customdata: X.ms1_precursor_xic.data_points.map(function(p) { return p.scan_number; }),
         name: X.ms1_precursor_xic.ion_label + ' (L)',
         mode: 'lines+markers',
         line: { color: colors[0], width: 2, dash: 'solid' },
         marker: { size: 3 },
-        hovertemplate: X.ms1_precursor_xic.ion_label + ' (Light)<br>RT: %{x:.1f}s<br>Intensity: %{y:.0f}<extra></extra>'
+        hovertemplate: X.ms1_precursor_xic.ion_label + ' (Light)<br>RT: %{x:.2f} min (Scan %{customdata})<br>Intensity: %{y:.0f}<extra></extra>'
       });
     }
     if (precVis.heavy && heavyResult && heavyResult.ms1Heavy) {
       ms1Traces.push({
         x: heavyResult.ms1Heavy.map(function(p) { return p.rt; }),
         y: heavyResult.ms1Heavy.map(function(p) { return p.intensity; }),
+        customdata: heavyResult.ms1Heavy.map(function(p) { return p.scan || ''; }),
         name: 'Precursor (H) ' + heavyResult.heavyPrecMz.toFixed(4),
         mode: 'lines+markers',
         line: { color: colors[0], width: 2, dash: 'dash' },
         marker: { size: 3 },
-        hovertemplate: 'Precursor (Heavy)<br>RT: %{x:.1f}s<br>Intensity: %{y:.0f}<extra></extra>'
+        hovertemplate: 'Precursor (Heavy)<br>RT: %{x:.2f} min (Scan %{customdata})<br>Intensity: %{y:.0f}<extra></extra>'
       });
     }
 
     if (ms1Traces.length > 0) {
       Plotly.newPlot('ms1-plot', ms1Traces, {
         title: { text: 'MS1 Precursor XIC', font: { size: 14 } },
-        xaxis: { title: 'RT (s)' },
+        xaxis: { title: 'RT (min)' },
         yaxis: { title: 'Intensity' },
         shapes: rtShape,
         margin: { t: 40, b: 40, l: 60, r: 20 },
@@ -880,11 +882,12 @@
           ms2Traces.push({
             x: t.data_points.map(function(p) { return p.retention_time_min; }),
             y: t.data_points.map(function(p) { return p.intensity; }),
+            customdata: t.data_points.map(function(p) { return p.scan_number; }),
             name: t.ion_label + ' (L)',
             mode: 'lines+markers',
             line: { color: colors[i % colors.length], width: 2, dash: 'solid' },
             marker: { size: 3 },
-            hovertemplate: t.ion_label + ' (Light)<br>RT: %{x:.1f}s<br>Intensity: %{y:.0f}<br>m/z: ' + t.theoretical_mz.toFixed(4) + '<extra></extra>'
+            hovertemplate: t.ion_label + ' (Light)<br>RT: %{x:.2f} min (Scan %{customdata})<br>Intensity: %{y:.0f}<br>m/z: ' + t.theoretical_mz.toFixed(4) + '<extra></extra>'
           });
         }
         if (fragVis.heavy && heavyResult && heavyResult.ms2Heavy && heavyResult.ms2Heavy[i]) {
@@ -894,11 +897,12 @@
             ms2Traces.push({
               x: pts.map(function(p) { return p.rt; }),
               y: pts.map(function(p) { return p.intensity; }),
+              customdata: pts.map(function(p) { return p.scan || ''; }),
               name: ionLabel,
               mode: 'lines+markers',
               line: { color: colors[i % colors.length], width: 2, dash: 'dash' },
               marker: { size: 3 },
-              hovertemplate: ionLabel + '<br>RT: %{x:.1f}s<br>Intensity: %{y:.0f}<extra></extra>'
+              hovertemplate: ionLabel + '<br>RT: %{x:.2f} min (Scan %{customdata})<br>Intensity: %{y:.0f}<extra></extra>'
             });
           }
         }
@@ -908,7 +912,7 @@
     if (ms2Traces.length > 0) {
       Plotly.newPlot('ms2-plot', ms2Traces, {
         title: { text: 'MS2 Fragment Ion XIC', font: { size: 14 } },
-        xaxis: { title: 'RT (s)' },
+        xaxis: { title: 'RT (min)' },
         yaxis: { title: 'Intensity' },
         shapes: rtShape,
         margin: { t: 40, b: 40, l: 60, r: 20 },

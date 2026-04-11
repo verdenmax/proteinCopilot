@@ -57,6 +57,7 @@ mod tests {
         SpectrumAnnotation {
             scan_number: 42,
             retention_time_min: 120.0,
+            source_file: "test_sample.mzML".to_string(),
             peptide_sequence: "PEPTIDE".to_string(),
             charge: 2,
             precursor_mz: 400.6932,
