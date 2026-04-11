@@ -10,6 +10,8 @@ pub use protein_copilot_xic::{IonMetadataEntry, RawScan, RawScanData};
 /// Combined data for the unified HTML template.
 #[derive(Debug, Clone, Serialize)]
 pub struct UnifiedViewData {
+    /// Source spectrum file name (e.g. "sample.mzML").
+    pub source_file: String,
     /// Spectrum annotation (peaks, coverage, metadata).
     pub annotation: SpectrumAnnotation,
     /// Pre-computed XIC data (light + optional heavy traces).

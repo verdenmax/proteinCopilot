@@ -1505,18 +1505,34 @@ impl ProteinCopilotServer {
         )
         .map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, e))?;
 
-        // Try unified rendering with XIC if spectrum file is mzML
         let out_path = input.output_path.map(PathBuf::from).unwrap_or_else(|| {
             PathBuf::from(format!("output/annotation_scan{}.html", input.scan_number))
         });
 
-        let use_unified = spectrum_file
+        let is_mzml = spectrum_file
             .extension()
             .and_then(|e| e.to_str())
             .map(|e| e.eq_ignore_ascii_case("mzml"))
             .unwrap_or(false);
 
-        if use_unified {
+        let source_file = spectrum_file
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| spectrum_file.display().to_string());
+
+        let make_peptide_info = |seq: &str, ch: i32, mz: f64| {
+            protein_copilot_report::unified_types::PeptideInfo {
+                sequence: seq.to_string(),
+                charge: ch,
+                precursor_mz: mz,
+                total_k: seq.chars().filter(|&c| c == 'K').count() as u32,
+                total_r: seq.chars().filter(|&c| c == 'R').count() as u32,
+            }
+        };
+
+        let mut render_mode = "annotation";
+        if is_mzml {
+            // mzML → always try XIC extraction; decide based on result quality
             let xic_params = protein_copilot_xic::ExtractionParams {
                 mz_tolerance: input.extraction_tolerance.unwrap_or(MassTolerance {
                     value: 20.0,
@@ -1528,7 +1544,6 @@ impl ProteinCopilotServer {
                 intensity_rule: protein_copilot_xic::IntensityRule::MaxInWindow,
             };
 
-            // Try XIC extraction, fall back to annotation-only on failure
             match protein_copilot_xic::extract::extract_xic_with_raw(
                 &spectrum_file,
                 input.scan_number,
@@ -1537,41 +1552,87 @@ impl ProteinCopilotServer {
                 annotation.precursor_mz,
                 &modifications,
                 &xic_params,
-                20.0, // ms1_mz_window_da
+                20.0,
             ) {
                 Ok((xic_data, raw_scans, ion_metadata)) => {
-                    let peptide_info = protein_copilot_report::unified_types::PeptideInfo {
-                        sequence: peptide_seq.clone(),
-                        charge,
-                        precursor_mz: annotation.precursor_mz,
-                        total_k: peptide_seq.chars().filter(|&c| c == 'K').count() as u32,
-                        total_r: peptide_seq.chars().filter(|&c| c == 'R').count() as u32,
-                    };
+                    // Check if fragment XIC is meaningful: DDA produces at most
+                    // 1 matching MS2 scan per fragment (unique isolation window),
+                    // while DIA cycles through shared windows → multiple points.
+                    let xic_meaningful = xic_data
+                        .fragment_xic_traces
+                        .first()
+                        .map(|t| t.data_points.len() > 1)
+                        .unwrap_or(false);
 
+                    if xic_meaningful {
+                        let unified_data = protein_copilot_report::unified_types::UnifiedViewData {
+                            source_file: source_file.clone(),
+                            annotation: annotation.clone(),
+                            xic: Some(xic_data),
+                            raw_scans: Some(raw_scans),
+                            ion_metadata,
+                            peptide_info: make_peptide_info(
+                                &peptide_seq,
+                                charge,
+                                annotation.precursor_mz,
+                            ),
+                        };
+
+                        let plotly_mode =
+                            input.plotly_mode.unwrap_or(protein_copilot_xic::PlotlyMode::Cdn);
+                        ReportGenerator::render_unified(&unified_data, &out_path, plotly_mode)
+                            .map_err(|e| {
+                                mcp_core_err(protein_copilot_core::error::CoreError::from(e))
+                            })?;
+                        render_mode = "unified+xic";
+                    } else {
+                        // XIC not meaningful (likely DDA) → unified without XIC
+                        let unified_data = protein_copilot_report::unified_types::UnifiedViewData {
+                            source_file: source_file.clone(),
+                            annotation: annotation.clone(),
+                            xic: None,
+                            raw_scans: None,
+                            ion_metadata: vec![],
+                            peptide_info: make_peptide_info(
+                                &peptide_seq,
+                                charge,
+                                annotation.precursor_mz,
+                            ),
+                        };
+                        let plotly_mode =
+                            input.plotly_mode.unwrap_or(protein_copilot_xic::PlotlyMode::Cdn);
+                        ReportGenerator::render_unified(&unified_data, &out_path, plotly_mode)
+                            .map_err(|e| {
+                                mcp_core_err(protein_copilot_core::error::CoreError::from(e))
+                            })?;
+                        render_mode = "unified";
+                    }
+                }
+                Err(_) => {
+                    // XIC extraction failed → unified without XIC
                     let unified_data = protein_copilot_report::unified_types::UnifiedViewData {
+                        source_file: source_file.clone(),
                         annotation: annotation.clone(),
-                        xic: Some(xic_data),
-                        raw_scans: Some(raw_scans),
-                        ion_metadata,
-                        peptide_info,
+                        xic: None,
+                        raw_scans: None,
+                        ion_metadata: vec![],
+                        peptide_info: make_peptide_info(
+                            &peptide_seq,
+                            charge,
+                            annotation.precursor_mz,
+                        ),
                     };
-
                     let plotly_mode =
                         input.plotly_mode.unwrap_or(protein_copilot_xic::PlotlyMode::Cdn);
                     ReportGenerator::render_unified(&unified_data, &out_path, plotly_mode)
                         .map_err(|e| {
                             mcp_core_err(protein_copilot_core::error::CoreError::from(e))
                         })?;
-                }
-                Err(_) => {
-                    // Fall back to annotation-only
-                    ReportGenerator::render_annotation(&annotation, &out_path).map_err(|e| {
-                        mcp_core_err(protein_copilot_core::error::CoreError::from(e))
-                    })?;
+                    render_mode = "unified";
                 }
             }
         } else {
-            // Non-mzML file — annotation only
+            // Non-mzML file — legacy annotation only
             ReportGenerator::render_annotation(&annotation, &out_path)
                 .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
         }
@@ -1592,10 +1653,10 @@ impl ProteinCopilotServer {
                 annotation.matched_ions,
                 annotation.total_ions,
                 annotation.score,
-                if use_unified {
-                    "Includes XIC + SILAC controls."
-                } else {
-                    "Open in browser to view."
+                match render_mode {
+                    "unified+xic" => "Includes XIC + SILAC controls (DIA).",
+                    "unified" => "Unified view (annotation only, no XIC for DDA).",
+                    _ => "Open in browser to view.",
                 },
             ),
         }))

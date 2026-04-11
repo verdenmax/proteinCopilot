@@ -101,6 +101,41 @@
   #custom-fields button { padding: 4px 12px; border-radius: 4px; border: 1px solid var(--border); cursor: pointer; }
   .info-msg { color: #7f8c8d; font-size: 13px; margin-top: 8px; }
 
+  /* ── Ion toggle grid ────────────────────────────────── */
+  .ion-toggle-card {
+    background: var(--card-bg); border: 1px solid var(--border);
+    border-radius: 8px; padding: 16px 24px; margin-bottom: 20px;
+    box-shadow: 0 1px 3px rgba(0,0,0,.06);
+  }
+  .ion-toggle-card h3 {
+    font-size: 13px; font-weight: 600; margin-bottom: 10px;
+    color: var(--text-muted); text-transform: uppercase; letter-spacing: .4px;
+  }
+  .ion-grid {
+    display: flex; flex-wrap: wrap; gap: 4px;
+  }
+  .ion-col {
+    display: flex; flex-direction: column; align-items: center; gap: 2px;
+    min-width: 64px;
+  }
+  .ion-col-label {
+    font-family: 'Courier New', Courier, monospace; font-size: 12px;
+    font-weight: 600; color: var(--text); margin-bottom: 2px;
+  }
+  .ion-toggle {
+    display: flex; align-items: center; gap: 3px; font-size: 11px; cursor: pointer;
+  }
+  .ion-toggle input { width: 14px; height: 14px; cursor: pointer; accent-color: var(--b-color); }
+  .ion-toggle.heavy input { accent-color: #e67e22; }
+  .ion-toggle-light { color: #2c3e50; }
+  .ion-toggle-heavy { color: #e67e22; font-style: italic; }
+  .ion-btn-row { display: flex; gap: 8px; margin-bottom: 8px; }
+  .ion-btn-row button {
+    font-size: 11px; padding: 2px 10px; border: 1px solid var(--border);
+    border-radius: 4px; cursor: pointer; background: #f8f9fa;
+  }
+  .ion-btn-row button:hover { background: #e9ecef; }
+
   /* ── XIC cards ───────────────────────────────────────── */
   .xic-card {
     background: var(--card-bg); border: 1px solid var(--border);
@@ -143,13 +178,6 @@
           <option value="custom">Custom...</option>
         </select>
       </label>
-      <label>Display:
-        <select id="display-mode">
-          <option value="overlay">Overlay (Light + Heavy)</option>
-          <option value="light">Light Only</option>
-          <option value="heavy">Heavy Only</option>
-        </select>
-      </label>
       <span id="silac-badge" class="silac-badge"></span>
     </div>
     <div id="custom-fields" style="display:none;">
@@ -160,6 +188,20 @@
     <div id="no-kr-message" style="display:none;" class="info-msg">
       &#x2139;&#xFE0F; This peptide contains no K or R residues — heavy label has no effect.
     </div>
+  </div>
+</div>
+
+<!-- Section 4b: Ion Visibility Toggles (hidden if xic is null) -->
+<div id="ion-toggle-section" style="display:none;">
+  <div class="ion-toggle-card">
+    <h3>Ion Visibility</h3>
+    <div class="ion-btn-row">
+      <button id="btn-all-light">All Light</button>
+      <button id="btn-all-heavy">All Heavy</button>
+      <button id="btn-all-on">Show All</button>
+      <button id="btn-all-off">Hide All</button>
+    </div>
+    <div id="ion-grid" class="ion-grid"></div>
   </div>
 </div>
 
@@ -219,6 +261,14 @@
   /* ── 1. Info Panel ────────────────────────────────────── */
   (function renderInfo() {
     var panel = document.getElementById("info-panel");
+    var U = window.__UNIFIED_DATA__;
+
+    // Source file header
+    if (U && U.source_file) {
+      var fileHeader = el("div", { style: "font-size:13px;color:#7f8c8d;margin-bottom:6px;" }, "\uD83D\uDCC4 " + U.source_file);
+      panel.appendChild(fileHeader);
+    }
+
     panel.appendChild(el("h2", null, "Identification"));
     var grid = el("div", { "class": "info-grid" });
     function add(label, value, cls) {
@@ -238,8 +288,7 @@
     scoreWrap.appendChild(badge);
     scoreWrap.appendChild(document.createTextNode("  (" + D.matched_ions + "/" + D.total_ions + " ions)"));
 
-    add("Scan", String(D.scan_number));
-    add("RT", fmt(D.retention_time_sec / 60, 2) + " min");
+    add("Scan / RT", "Scan " + D.scan_number + "  \u2014  " + fmt(D.retention_time_sec / 60, 2) + " min (" + fmt(D.retention_time_sec, 1) + " s)");
     add("Charge", D.charge + "+");
     add("Peptide", D.peptide_sequence, "peptide");
     add("Protein(s)", D.protein_accessions.join(", ") || "\u2014");
@@ -612,7 +661,7 @@
 })();
 
 /* ================================================================
-   Section B — XIC + SILAC Controls + Recomputation Engine
+   Section B — XIC + SILAC Controls + Ion Toggle + Recomputation
    ================================================================ */
 (function () {
   "use strict";
@@ -623,6 +672,7 @@
 
   // Show XIC-related sections
   document.getElementById("silac-section").style.display = "";
+  document.getElementById("ion-toggle-section").style.display = "";
   document.getElementById("ms1-section").style.display = "";
   document.getElementById("ms2-section").style.display = "";
   document.getElementById("params-section").style.display = "";
@@ -635,6 +685,88 @@
   };
 
   var colors = ['#1f77b4','#ff7f0e','#2ca02c','#d62728','#9467bd','#8c564b'];
+
+  /* ── Ion visibility state ──────────────────────────────── */
+  // Build ion list: precursor + fragment traces
+  var ionList = []; // { id, label, hasLight, hasHeavy }
+  ionList.push({ id: 'precursor', label: 'Precursor', hasLight: true, hasHeavy: true });
+  if (X.fragment_xic_traces) {
+    X.fragment_xic_traces.forEach(function(t, i) {
+      ionList.push({ id: 'frag_' + i, label: t.ion_label, hasLight: true, hasHeavy: true });
+    });
+  }
+  // Track visibility per ion: { light: bool, heavy: bool }
+  var ionVis = {};
+  ionList.forEach(function(ion) { ionVis[ion.id] = { light: true, heavy: true }; });
+
+  /* ── Build ion toggle grid ─────────────────────────────── */
+  (function buildIonGrid() {
+    var grid = document.getElementById("ion-grid");
+    ionList.forEach(function(ion) {
+      var col = document.createElement("div");
+      col.className = "ion-col";
+
+      var lbl = document.createElement("span");
+      lbl.className = "ion-col-label";
+      lbl.textContent = ion.label;
+      col.appendChild(lbl);
+
+      // Light checkbox
+      var lightToggle = document.createElement("label");
+      lightToggle.className = "ion-toggle ion-toggle-light";
+      var lightCb = document.createElement("input");
+      lightCb.type = "checkbox"; lightCb.checked = true;
+      lightCb.dataset.ionId = ion.id; lightCb.dataset.channel = "light";
+      lightToggle.appendChild(lightCb);
+      lightToggle.appendChild(document.createTextNode("L"));
+      col.appendChild(lightToggle);
+
+      // Heavy checkbox
+      var heavyToggle = document.createElement("label");
+      heavyToggle.className = "ion-toggle heavy ion-toggle-heavy";
+      var heavyCb = document.createElement("input");
+      heavyCb.type = "checkbox"; heavyCb.checked = true;
+      heavyCb.dataset.ionId = ion.id; heavyCb.dataset.channel = "heavy";
+      heavyToggle.appendChild(heavyCb);
+      heavyToggle.appendChild(document.createTextNode("H"));
+      col.appendChild(heavyToggle);
+
+      grid.appendChild(col);
+    });
+
+    // Checkbox change → update ionVis + re-render
+    grid.addEventListener("change", function(ev) {
+      var cb = ev.target;
+      if (cb.tagName !== "INPUT") return;
+      ionVis[cb.dataset.ionId][cb.dataset.channel] = cb.checked;
+      update();
+    });
+
+    // Bulk buttons
+    document.getElementById("btn-all-light").addEventListener("click", function() {
+      ionList.forEach(function(ion) { ionVis[ion.id].light = true; ionVis[ion.id].heavy = false; });
+      syncCheckboxes(); update();
+    });
+    document.getElementById("btn-all-heavy").addEventListener("click", function() {
+      ionList.forEach(function(ion) { ionVis[ion.id].light = false; ionVis[ion.id].heavy = true; });
+      syncCheckboxes(); update();
+    });
+    document.getElementById("btn-all-on").addEventListener("click", function() {
+      ionList.forEach(function(ion) { ionVis[ion.id].light = true; ionVis[ion.id].heavy = true; });
+      syncCheckboxes(); update();
+    });
+    document.getElementById("btn-all-off").addEventListener("click", function() {
+      ionList.forEach(function(ion) { ionVis[ion.id].light = false; ionVis[ion.id].heavy = false; });
+      syncCheckboxes(); update();
+    });
+
+    function syncCheckboxes() {
+      var cbs = grid.querySelectorAll("input[type=checkbox]");
+      for (var i = 0; i < cbs.length; i++) {
+        cbs[i].checked = ionVis[cbs[i].dataset.ionId][cbs[i].dataset.channel];
+      }
+    }
+  })();
 
   /* ── Binary search for intensity extraction ────────────── */
   function binarySearchLo(arr, val) {
@@ -662,18 +794,15 @@
     if (!info) return { ms1Heavy: null, ms2Heavy: [], heavyIons: [], heavyPrecMz: 0 };
     var tol = X.extraction_params.mz_tolerance.value; // ppm
 
-    // Heavy precursor m/z
     var precDelta = info.total_k * kDelta + info.total_r * rDelta;
     var heavyPrecMz = info.precursor_mz + precDelta / Math.abs(info.charge);
 
-    // Heavy fragment m/z for each ion
     var ionMeta = U.ion_metadata || [];
     var heavyIons = ionMeta.map(function(ion) {
       var d = ion.k_count * kDelta + ion.r_count * rDelta;
       return { label: ion.label, heavy_mz: ion.light_mz + d / ion.charge };
     });
 
-    // Extract intensities from raw scans
     var ms1Heavy = null;
     if (U.raw_scans && U.raw_scans.ms1_scans.length > 0) {
       ms1Heavy = U.raw_scans.ms1_scans.map(function(s) {
@@ -693,32 +822,34 @@
     return { ms1Heavy: ms1Heavy, ms2Heavy: ms2Heavy, heavyIons: heavyIons, heavyPrecMz: heavyPrecMz };
   }
 
-  /* ── Plotly rendering ──────────────────────────────────── */
-  function renderPlots(mode, heavyResult) {
+  /* ── Plotly rendering (uses ionVis for per-ion visibility) ─── */
+  function renderPlots(heavyResult) {
     var targetRt = X.target_rt_sec;
     var rtShape = [{
       type: 'line', x0: targetRt, x1: targetRt, y0: 0, y1: 1,
       yref: 'paper', line: { color: 'red', width: 1, dash: 'dot' }
     }];
 
+    var precVis = ionVis['precursor'] || { light: true, heavy: true };
+
     /* — MS1 Plot — */
     var ms1Traces = [];
-    if (mode !== 'heavy' && X.ms1_precursor_xic) {
+    if (precVis.light && X.ms1_precursor_xic) {
       ms1Traces.push({
         x: X.ms1_precursor_xic.data_points.map(function(p) { return p.retention_time_sec; }),
         y: X.ms1_precursor_xic.data_points.map(function(p) { return p.intensity; }),
-        name: X.ms1_precursor_xic.ion_label,
+        name: X.ms1_precursor_xic.ion_label + ' (L)',
         mode: 'lines+markers',
         line: { color: colors[0], width: 2, dash: 'solid' },
         marker: { size: 3 },
-        hovertemplate: X.ms1_precursor_xic.ion_label + '<br>RT: %{x:.1f}s<br>Intensity: %{y:.0f}<extra></extra>'
+        hovertemplate: X.ms1_precursor_xic.ion_label + ' (Light)<br>RT: %{x:.1f}s<br>Intensity: %{y:.0f}<extra></extra>'
       });
     }
-    if (mode !== 'light' && heavyResult && heavyResult.ms1Heavy) {
+    if (precVis.heavy && heavyResult && heavyResult.ms1Heavy) {
       ms1Traces.push({
         x: heavyResult.ms1Heavy.map(function(p) { return p.rt; }),
         y: heavyResult.ms1Heavy.map(function(p) { return p.intensity; }),
-        name: 'Precursor (Heavy ' + heavyResult.heavyPrecMz.toFixed(4) + ')',
+        name: 'Precursor (H) ' + heavyResult.heavyPrecMz.toFixed(4),
         mode: 'lines+markers',
         line: { color: colors[0], width: 2, dash: 'dash' },
         marker: { size: 3 },
@@ -737,37 +868,40 @@
         legend: { orientation: 'h', y: 1.15 }
       }, { responsive: true });
     } else {
-      document.getElementById('ms1-plot').innerHTML = '<p style="text-align:center;color:#999;padding:20px;">No MS1 precursor XIC data</p>';
+      document.getElementById('ms1-plot').innerHTML = '<p style="text-align:center;color:#999;padding:20px;">No MS1 precursor XIC data (or hidden by toggle)</p>';
     }
 
     /* — MS2 Plot — */
     var ms2Traces = [];
-    if (mode !== 'heavy' && X.fragment_xic_traces) {
+    if (X.fragment_xic_traces) {
       X.fragment_xic_traces.forEach(function(t, i) {
-        ms2Traces.push({
-          x: t.data_points.map(function(p) { return p.retention_time_sec; }),
-          y: t.data_points.map(function(p) { return p.intensity; }),
-          name: t.ion_label,
-          mode: 'lines+markers',
-          line: { color: colors[i % colors.length], width: 2, dash: 'solid' },
-          marker: { size: 3 },
-          hovertemplate: t.ion_label + '<br>RT: %{x:.1f}s<br>Intensity: %{y:.0f}<br>m/z: ' + t.theoretical_mz.toFixed(4) + '<extra></extra>'
-        });
-      });
-    }
-    if (mode !== 'light' && heavyResult && heavyResult.ms2Heavy) {
-      heavyResult.ms2Heavy.forEach(function(pts, i) {
-        if (!pts || pts.length === 0) return;
-        var ionLabel = heavyResult.heavyIons[i] ? heavyResult.heavyIons[i].label + ' (H)' : 'Heavy ion ' + i;
-        ms2Traces.push({
-          x: pts.map(function(p) { return p.rt; }),
-          y: pts.map(function(p) { return p.intensity; }),
-          name: ionLabel,
-          mode: 'lines+markers',
-          line: { color: colors[i % colors.length], width: 2, dash: 'dash' },
-          marker: { size: 3 },
-          hovertemplate: ionLabel + '<br>RT: %{x:.1f}s<br>Intensity: %{y:.0f}<extra></extra>'
-        });
+        var fragVis = ionVis['frag_' + i] || { light: true, heavy: true };
+        if (fragVis.light) {
+          ms2Traces.push({
+            x: t.data_points.map(function(p) { return p.retention_time_sec; }),
+            y: t.data_points.map(function(p) { return p.intensity; }),
+            name: t.ion_label + ' (L)',
+            mode: 'lines+markers',
+            line: { color: colors[i % colors.length], width: 2, dash: 'solid' },
+            marker: { size: 3 },
+            hovertemplate: t.ion_label + ' (Light)<br>RT: %{x:.1f}s<br>Intensity: %{y:.0f}<br>m/z: ' + t.theoretical_mz.toFixed(4) + '<extra></extra>'
+          });
+        }
+        if (fragVis.heavy && heavyResult && heavyResult.ms2Heavy && heavyResult.ms2Heavy[i]) {
+          var pts = heavyResult.ms2Heavy[i];
+          if (pts && pts.length > 0) {
+            var ionLabel = heavyResult.heavyIons[i] ? heavyResult.heavyIons[i].label + ' (H)' : 'Heavy ion ' + i;
+            ms2Traces.push({
+              x: pts.map(function(p) { return p.rt; }),
+              y: pts.map(function(p) { return p.intensity; }),
+              name: ionLabel,
+              mode: 'lines+markers',
+              line: { color: colors[i % colors.length], width: 2, dash: 'dash' },
+              marker: { size: 3 },
+              hovertemplate: ionLabel + '<br>RT: %{x:.1f}s<br>Intensity: %{y:.0f}<extra></extra>'
+            });
+          }
+        }
       });
     }
 
@@ -782,12 +916,11 @@
         legend: { orientation: 'h', y: 1.2 }
       }, { responsive: true });
     } else {
-      document.getElementById('ms2-plot').innerHTML = '<p style="text-align:center;color:#999;padding:20px;">No MS2 fragment XIC data</p>';
+      document.getElementById('ms2-plot').innerHTML = '<p style="text-align:center;color:#999;padding:20px;">No MS2 fragment XIC data (or hidden by toggle)</p>';
     }
   }
 
   /* ── SILAC event handling ──────────────────────────────── */
-  // Hide SILAC if no K/R
   if (U.peptide_info.total_k === 0 && U.peptide_info.total_r === 0) {
     document.getElementById('no-kr-message').style.display = 'block';
     document.getElementById('silac-preset').value = 'none';
@@ -810,11 +943,22 @@
       (kd === 0 && rd === 0) ? 'No label' : 'K+' + kd.toFixed(3) + ' R+' + rd.toFixed(3);
 
     var heavyResult = (kd === 0 && rd === 0) ? null : recomputeHeavy(kd, rd);
-    renderPlots(document.getElementById('display-mode').value, heavyResult);
+
+    // When SILAC is "none", uncheck all heavy toggles
+    var grid = document.getElementById('ion-grid');
+    var heavyCbs = grid.querySelectorAll('input[data-channel="heavy"]');
+    for (var i = 0; i < heavyCbs.length; i++) {
+      heavyCbs[i].parentNode.style.opacity = (kd === 0 && rd === 0) ? '0.3' : '1';
+      if (kd === 0 && rd === 0) {
+        heavyCbs[i].checked = false;
+        ionVis[heavyCbs[i].dataset.ionId].heavy = false;
+      }
+    }
+
+    renderPlots(heavyResult);
   }
 
   document.getElementById('silac-preset').addEventListener('change', update);
-  document.getElementById('display-mode').addEventListener('change', update);
   document.getElementById('apply-custom').addEventListener('click', update);
 
   // Parameters footer

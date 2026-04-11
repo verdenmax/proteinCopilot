@@ -163,6 +163,7 @@ mod tests {
 
     fn sample_unified_data() -> UnifiedViewData {
         UnifiedViewData {
+            source_file: "test_sample.mzML".to_string(),
             annotation: sample_annotation(),
             xic: Some(sample_xic()),
             raw_scans: Some(RawScanData {
