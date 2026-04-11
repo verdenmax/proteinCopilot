@@ -80,14 +80,14 @@ impl ResultParser for CustomJsonParser {
                 sequence: raw.sequence,
                 charge: raw.charge,
                 precursor_mz: raw.precursor_mz,
-                rt_sec: raw.rt * 60.0, // minutes → seconds
+                rt_min: raw.rt, // already in minutes; store as-is
                 modifications,
                 score: None,
                 q_value: None,
                 protein_accessions: raw.protein_names,
                 raw_name: raw.raw_title,
                 matched_scan: None,
-                rt_delta_sec: None,
+                rt_delta_min: None,
             });
         }
 
@@ -155,7 +155,7 @@ mod tests {
         // First PSM: no modifications, RT converted to seconds
         assert_eq!(psms[0].sequence, "AADLLDDVSQK");
         assert_eq!(psms[0].charge, 2);
-        assert!((psms[0].rt_sec - 12.648 * 60.0).abs() < 0.01);
+        assert!((psms[0].rt_min - 12.648).abs() < 0.01);
         assert!(psms[0].modifications.is_empty());
         assert_eq!(psms[0].raw_name, "hela_Rep1");
 
@@ -182,8 +182,8 @@ mod tests {
 
         let db = UnimodDb::builtin();
         let psms = CustomJsonParser.parse(&path, &db).unwrap();
-        // 1 minute = 60 seconds
-        assert!((psms[0].rt_sec - 60.0).abs() < 0.01);
+        // rt=1.0 means 1 minute, stored as 1.0 minutes
+        assert!((psms[0].rt_min - 1.0).abs() < 0.01);
     }
 
     #[test]

@@ -90,7 +90,7 @@ pub struct SpectrumAnnotation {
     /// Scan number (1-based).
     pub scan_number: u32,
     /// Retention time in seconds.
-    pub retention_time_sec: f64,
+    pub retention_time_min: f64,
     /// Identified peptide sequence.
     pub peptide_sequence: String,
     /// Charge state.
@@ -435,7 +435,7 @@ pub fn annotate_spectrum(
 
     Ok(SpectrumAnnotation {
         scan_number: spectrum.scan_number,
-        retention_time_sec: spectrum.retention_time_sec,
+        retention_time_min: spectrum.retention_time_min,
         peptide_sequence: peptide_sequence.to_string(),
         charge,
         precursor_mz: observed_precursor_mz,

@@ -260,7 +260,7 @@ pub fn extract_xic(
         });
     }
 
-    let target_rt = target_spectrum.retention_time_sec;
+    let target_rt = target_spectrum.retention_time_min;
     let target_window = target_spectrum
         .precursors
         .first()
@@ -284,7 +284,7 @@ pub fn extract_xic(
     let mut ms1_heavy_points: Vec<XicDataPoint> = Vec::new();
 
     reader.for_each_spectrum(file_path, &mut |spec| {
-        let rt = spec.retention_time_sec;
+        let rt = spec.retention_time_min;
 
         match spec.ms_level {
             MsLevel::MS1 => {
@@ -296,7 +296,7 @@ pub fn extract_xic(
                     params.intensity_rule,
                 );
                 ms1_light_points.push(XicDataPoint {
-                    retention_time_sec: rt,
+                    retention_time_min: rt,
                     scan_number: spec.scan_number,
                     intensity: light_int,
                 });
@@ -310,7 +310,7 @@ pub fn extract_xic(
                         params.intensity_rule,
                     );
                     ms1_heavy_points.push(XicDataPoint {
-                        retention_time_sec: rt,
+                        retention_time_min: rt,
                         scan_number: spec.scan_number,
                         intensity: heavy_int,
                     });
@@ -396,7 +396,7 @@ pub fn extract_xic(
             data_points: windowed
                 .iter()
                 .map(|(scan, rt, ints, _)| XicDataPoint {
-                    retention_time_sec: *rt,
+                    retention_time_min: *rt,
                     scan_number: *scan,
                     intensity: ints.get(i).copied().unwrap_or(0.0),
                 })
@@ -435,7 +435,7 @@ pub fn extract_xic(
                 data_points: windowed
                     .iter()
                     .map(|(scan, rt, _, heavy_ints)| XicDataPoint {
-                        retention_time_sec: *rt,
+                        retention_time_min: *rt,
                         scan_number: *scan,
                         intensity: heavy_ints.get(i).copied().unwrap_or(0.0),
                     })
@@ -458,7 +458,7 @@ pub fn extract_xic(
         let filtered: Vec<XicDataPoint> = match rt_range {
             Some((lo, hi)) => ms1_light_points
                 .into_iter()
-                .filter(|p| p.retention_time_sec >= lo && p.retention_time_sec <= hi)
+                .filter(|p| p.retention_time_min >= lo && p.retention_time_min <= hi)
                 .collect(),
             None => ms1_light_points,
         };
@@ -483,7 +483,7 @@ pub fn extract_xic(
         let filtered: Vec<XicDataPoint> = match rt_range {
             Some((lo, hi)) => ms1_heavy_points
                 .into_iter()
-                .filter(|p| p.retention_time_sec >= lo && p.retention_time_sec <= hi)
+                .filter(|p| p.retention_time_min >= lo && p.retention_time_min <= hi)
                 .collect(),
             None => ms1_heavy_points,
         };
@@ -504,7 +504,7 @@ pub fn extract_xic(
 
     Ok(XicData {
         peptide_sequence: peptide_sequence.to_string(),
-        target_rt_sec: target_rt,
+        target_rt_min: target_rt,
         target_scan,
         charge,
         precursor_mz,
@@ -568,7 +568,7 @@ pub fn extract_xic_with_raw(
         });
     }
 
-    let target_rt = target_spectrum.retention_time_sec;
+    let target_rt = target_spectrum.retention_time_min;
     let target_window = target_spectrum
         .precursors
         .first()
@@ -605,7 +605,7 @@ pub fn extract_xic_with_raw(
     let mut raw_ms2_scans: Vec<crate::RawScan> = Vec::new();
 
     reader.for_each_spectrum(file_path, &mut |spec| {
-        let rt = spec.retention_time_sec;
+        let rt = spec.retention_time_min;
 
         match spec.ms_level {
             MsLevel::MS1 => {
@@ -617,7 +617,7 @@ pub fn extract_xic_with_raw(
                     params.intensity_rule,
                 );
                 ms1_light_points.push(XicDataPoint {
-                    retention_time_sec: rt,
+                    retention_time_min: rt,
                     scan_number: spec.scan_number,
                     intensity: light_int,
                 });
@@ -631,7 +631,7 @@ pub fn extract_xic_with_raw(
                         params.intensity_rule,
                     );
                     ms1_heavy_points.push(XicDataPoint {
-                        retention_time_sec: rt,
+                        retention_time_min: rt,
                         scan_number: spec.scan_number,
                         intensity: heavy_int,
                     });
@@ -647,7 +647,7 @@ pub fn extract_xic_with_raw(
                 if !trimmed_mz.is_empty() {
                     raw_ms1_scans.push(crate::RawScan {
                         scan_number: spec.scan_number,
-                        retention_time_sec: rt,
+                        retention_time_min: rt,
                         mz_array: trimmed_mz,
                         intensity_array: trimmed_int,
                     });
@@ -705,7 +705,7 @@ pub fn extract_xic_with_raw(
                     if target_window.is_some() || rt_close {
                         raw_ms2_scans.push(crate::RawScan {
                             scan_number: spec.scan_number,
-                            retention_time_sec: rt,
+                            retention_time_min: rt,
                             mz_array: spec.mz_array.clone(),
                             intensity_array: spec.intensity_array.clone(),
                         });
@@ -752,7 +752,7 @@ pub fn extract_xic_with_raw(
             data_points: windowed
                 .iter()
                 .map(|(scan, rt, ints, _)| XicDataPoint {
-                    retention_time_sec: *rt,
+                    retention_time_min: *rt,
                     scan_number: *scan,
                     intensity: ints.get(i).copied().unwrap_or(0.0),
                 })
@@ -790,7 +790,7 @@ pub fn extract_xic_with_raw(
                 data_points: windowed
                     .iter()
                     .map(|(scan, rt, _, heavy_ints)| XicDataPoint {
-                        retention_time_sec: *rt,
+                        retention_time_min: *rt,
                         scan_number: *scan,
                         intensity: heavy_ints.get(i).copied().unwrap_or(0.0),
                     })
@@ -813,7 +813,7 @@ pub fn extract_xic_with_raw(
         let filtered: Vec<XicDataPoint> = match rt_range {
             Some((lo, hi)) => ms1_light_points
                 .into_iter()
-                .filter(|p| p.retention_time_sec >= lo && p.retention_time_sec <= hi)
+                .filter(|p| p.retention_time_min >= lo && p.retention_time_min <= hi)
                 .collect(),
             None => ms1_light_points,
         };
@@ -838,7 +838,7 @@ pub fn extract_xic_with_raw(
         let filtered: Vec<XicDataPoint> = match rt_range {
             Some((lo, hi)) => ms1_heavy_points
                 .into_iter()
-                .filter(|p| p.retention_time_sec >= lo && p.retention_time_sec <= hi)
+                .filter(|p| p.retention_time_min >= lo && p.retention_time_min <= hi)
                 .collect(),
             None => ms1_heavy_points,
         };
@@ -861,7 +861,7 @@ pub fn extract_xic_with_raw(
     let raw_ms1_trimmed = match rt_range {
         Some((lo, hi)) => raw_ms1_scans
             .into_iter()
-            .filter(|s| s.retention_time_sec >= lo && s.retention_time_sec <= hi)
+            .filter(|s| s.retention_time_min >= lo && s.retention_time_min <= hi)
             .collect(),
         None => raw_ms1_scans,
     };
@@ -875,7 +875,7 @@ pub fn extract_xic_with_raw(
 
     let xic_data = XicData {
         peptide_sequence: peptide_sequence.to_string(),
-        target_rt_sec: target_rt,
+        target_rt_min: target_rt,
         target_scan,
         charge,
         precursor_mz,

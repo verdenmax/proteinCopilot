@@ -82,8 +82,8 @@ pub(crate) fn recommend(
         summary.mz_range[0],
         summary.mz_range[1],
         summary.median_peaks_per_spectrum,
-        summary.rt_range_sec[0],
-        summary.rt_range_sec[1],
+        summary.rt_range_min[0],
+        summary.rt_range_min[1],
     );
 
     Ok(AiDecision {
@@ -439,7 +439,7 @@ mod tests {
             ms1_count: 500,
             ms2_count: 9500,
             mz_range: [100.0, 2000.0],
-            rt_range_sec: [0.0, 3600.0],
+            rt_range_min: [0.0, 60.0],
             precursor_charge_distribution: charge_dist,
             median_peaks_per_spectrum: 256,
             median_isolation_window_da: None,
@@ -457,7 +457,7 @@ mod tests {
             ms1_count: 0,
             ms2_count: 5000,
             mz_range: [100.0, 1100.0],
-            rt_range_sec: [0.0, 1800.0],
+            rt_range_min: [0.0, 30.0],
             precursor_charge_distribution: charge_dist,
             median_peaks_per_spectrum: 50,
             median_isolation_window_da: None,
@@ -472,7 +472,7 @@ mod tests {
             ms1_count: 0,
             ms2_count: 0,
             mz_range: [0.0, 0.0],
-            rt_range_sec: [0.0, 0.0],
+            rt_range_min: [0.0, 0.0],
             precursor_charge_distribution: HashMap::new(),
             median_peaks_per_spectrum: 0,
             median_isolation_window_da: None,

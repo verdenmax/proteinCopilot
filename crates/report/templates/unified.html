@@ -288,7 +288,7 @@
     scoreWrap.appendChild(badge);
     scoreWrap.appendChild(document.createTextNode("  (" + D.matched_ions + "/" + D.total_ions + " ions)"));
 
-    add("Scan / RT", "Scan " + D.scan_number + "  \u2014  " + fmt(D.retention_time_sec / 60, 2) + " min (" + fmt(D.retention_time_sec, 1) + " s)");
+    add("Scan / RT", "Scan " + D.scan_number + "  \u2014  " + fmt(D.retention_time_min, 2) + " min");
     add("Charge", D.charge + "+");
     add("Peptide", D.peptide_sequence, "peptide");
     add("Protein(s)", D.protein_accessions.join(", ") || "\u2014");
@@ -806,7 +806,7 @@
     var ms1Heavy = null;
     if (U.raw_scans && U.raw_scans.ms1_scans.length > 0) {
       ms1Heavy = U.raw_scans.ms1_scans.map(function(s) {
-        return { rt: s.retention_time_sec, scan: s.scan_number,
+        return { rt: s.retention_time_min, scan: s.scan_number,
                  intensity: extractIntensity(heavyPrecMz, s.mz_array, s.intensity_array, tol) };
       });
     }
@@ -814,7 +814,7 @@
     var ms2Heavy = heavyIons.map(function(ion) {
       if (!U.raw_scans) return [];
       return U.raw_scans.ms2_scans.map(function(s) {
-        return { rt: s.retention_time_sec, scan: s.scan_number,
+        return { rt: s.retention_time_min, scan: s.scan_number,
                  intensity: extractIntensity(ion.heavy_mz, s.mz_array, s.intensity_array, tol) };
       });
     });
@@ -824,7 +824,7 @@
 
   /* ── Plotly rendering (uses ionVis for per-ion visibility) ─── */
   function renderPlots(heavyResult) {
-    var targetRt = X.target_rt_sec;
+    var targetRt = X.target_rt_min;
     var rtShape = [{
       type: 'line', x0: targetRt, x1: targetRt, y0: 0, y1: 1,
       yref: 'paper', line: { color: 'red', width: 1, dash: 'dot' }
@@ -836,7 +836,7 @@
     var ms1Traces = [];
     if (precVis.light && X.ms1_precursor_xic) {
       ms1Traces.push({
-        x: X.ms1_precursor_xic.data_points.map(function(p) { return p.retention_time_sec; }),
+        x: X.ms1_precursor_xic.data_points.map(function(p) { return p.retention_time_min; }),
         y: X.ms1_precursor_xic.data_points.map(function(p) { return p.intensity; }),
         name: X.ms1_precursor_xic.ion_label + ' (L)',
         mode: 'lines+markers',
@@ -878,7 +878,7 @@
         var fragVis = ionVis['frag_' + i] || { light: true, heavy: true };
         if (fragVis.light) {
           ms2Traces.push({
-            x: t.data_points.map(function(p) { return p.retention_time_sec; }),
+            x: t.data_points.map(function(p) { return p.retention_time_min; }),
             y: t.data_points.map(function(p) { return p.intensity; }),
             name: t.ion_label + ' (L)',
             mode: 'lines+markers',

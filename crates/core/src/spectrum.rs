@@ -184,7 +184,7 @@ pub struct Spectrum {
     /// MS level of this spectrum.
     pub ms_level: MsLevel,
     /// Retention time in seconds.
-    pub retention_time_sec: f64,
+    pub retention_time_min: f64,
     /// Precursor information. DDA: typically 1 entry. DIA: 0 or 1 with wide
     /// isolation window. MS1: empty.
     pub precursors: Vec<PrecursorInfo>,
@@ -201,7 +201,7 @@ impl Spectrum {
     pub fn new(
         scan_number: u32,
         ms_level: MsLevel,
-        retention_time_sec: f64,
+        retention_time_min: f64,
         precursors: Vec<PrecursorInfo>,
         mz_array: Vec<f64>,
         intensity_array: Vec<f64>,
@@ -209,7 +209,7 @@ impl Spectrum {
         let spectrum = Self {
             scan_number,
             ms_level,
-            retention_time_sec,
+            retention_time_min,
             precursors,
             mz_array,
             intensity_array,
@@ -237,14 +237,14 @@ impl Spectrum {
                 intensity_len: self.intensity_array.len(),
             });
         }
-        if !self.retention_time_sec.is_finite() {
+        if !self.retention_time_min.is_finite() {
             return Err(SpectrumError::NonFiniteValue {
-                field: "retention_time_sec",
+                field: "retention_time_min",
             });
         }
-        if self.retention_time_sec < 0.0 {
+        if self.retention_time_min < 0.0 {
             return Err(SpectrumError::NegativeValue {
-                field: "retention_time_sec",
+                field: "retention_time_min",
             });
         }
         for (i, p) in self.precursors.iter().enumerate() {
@@ -393,7 +393,7 @@ pub struct SpectrumSummary {
     /// m/z range: \[min, max\].
     pub mz_range: [f64; 2],
     /// Retention time range: \[min, max\] in seconds.
-    pub rt_range_sec: [f64; 2],
+    pub rt_range_min: [f64; 2],
     /// Distribution of precursor charge states (charge → count).
     pub precursor_charge_distribution: HashMap<i32, u64>,
     /// Median number of peaks per spectrum.
@@ -407,7 +407,7 @@ pub struct SpectrumSummary {
 impl SpectrumSummary {
     /// Returns `true` if the summary represents an empty file (no spectra).
     ///
-    /// When `is_empty()` is true, `mz_range` and `rt_range_sec` are set to
+    /// When `is_empty()` is true, `mz_range` and `rt_range_min` are set to
     /// `(0.0, 0.0)` as sentinel values and should not be interpreted as
     /// real data ranges.
     pub fn is_empty(&self) -> bool {
@@ -418,14 +418,14 @@ impl SpectrumSummary {
     ///
     /// Checks:
     /// - `mz_range` values are finite and min ≤ max
-    /// - `rt_range_sec` values are finite and min ≤ max
+    /// - `rt_range_min` values are finite and min ≤ max
     pub fn validate(&self) -> Result<(), SpectrumError> {
         if !self.mz_range[0].is_finite() || !self.mz_range[1].is_finite() {
             return Err(SpectrumError::NonFiniteValue { field: "mz_range" });
         }
-        if !self.rt_range_sec[0].is_finite() || !self.rt_range_sec[1].is_finite() {
+        if !self.rt_range_min[0].is_finite() || !self.rt_range_min[1].is_finite() {
             return Err(SpectrumError::NonFiniteValue {
-                field: "rt_range_sec",
+                field: "rt_range_min",
             });
         }
         if self.mz_range[0] > self.mz_range[1] {
@@ -435,11 +435,11 @@ impl SpectrumSummary {
                 max: self.mz_range[1],
             });
         }
-        if self.rt_range_sec[0] > self.rt_range_sec[1] {
+        if self.rt_range_min[0] > self.rt_range_min[1] {
             return Err(SpectrumError::InvalidRange {
-                field: "rt_range_sec",
-                min: self.rt_range_sec[0],
-                max: self.rt_range_sec[1],
+                field: "rt_range_min",
+                min: self.rt_range_min[0],
+                max: self.rt_range_min[1],
             });
         }
         if let Some(w) = self.median_isolation_window_da {
@@ -496,7 +496,7 @@ mod tests {
             ms1_count: 2345,
             ms2_count: 10000,
             mz_range: [100.0, 2000.0],
-            rt_range_sec: [0.0, 3600.0],
+            rt_range_min: [0.0, 60.0],
             precursor_charge_distribution: charge_dist,
             median_peaks_per_spectrum: 150,
             median_isolation_window_da: None,
@@ -623,7 +623,7 @@ mod tests {
         assert_eq!(summary.ms1_count, back.ms1_count);
         assert_eq!(summary.ms2_count, back.ms2_count);
         assert_eq!(summary.mz_range, back.mz_range);
-        assert_eq!(summary.rt_range_sec, back.rt_range_sec);
+        assert_eq!(summary.rt_range_min, back.rt_range_min);
         assert_eq!(
             summary.median_peaks_per_spectrum,
             back.median_peaks_per_spectrum
@@ -647,7 +647,7 @@ mod tests {
             ms1_count: 0,
             ms2_count: 0,
             mz_range: [0.0, 0.0],
-            rt_range_sec: [0.0, 0.0],
+            rt_range_min: [0.0, 0.0],
             precursor_charge_distribution: HashMap::new(),
             median_peaks_per_spectrum: 0,
             median_isolation_window_da: None,
@@ -674,13 +674,13 @@ mod tests {
     #[test]
     fn spectrum_summary_validate_rejects_infinity_rt_range() {
         let mut s = sample_summary();
-        s.rt_range_sec = [0.0, f64::INFINITY];
+        s.rt_range_min = [0.0, f64::INFINITY];
         assert!(s.validate().is_err());
         assert!(s
             .validate()
             .unwrap_err()
             .to_string()
-            .contains("rt_range_sec"));
+            .contains("rt_range_min"));
     }
 
     #[test]
@@ -695,16 +695,16 @@ mod tests {
     #[test]
     fn spectrum_summary_validate_rejects_inverted_rt_range() {
         let mut s = sample_summary();
-        s.rt_range_sec = [3600.0, 0.0]; // min > max
+        s.rt_range_min = [60.0, 0.0]; // min > max
         let err = s.validate().unwrap_err();
-        assert!(err.to_string().contains("rt_range_sec"));
+        assert!(err.to_string().contains("rt_range_min"));
     }
 
     #[test]
     fn spectrum_summary_validate_accepts_equal_range() {
         let mut s = sample_summary();
         s.mz_range = [500.0, 500.0]; // min == max is OK (single value)
-        s.rt_range_sec = [100.0, 100.0];
+        s.rt_range_min = [100.0, 100.0];
         assert!(s.validate().is_ok());
     }
 
@@ -747,7 +747,7 @@ mod tests {
         let bad_json = r#"{
             "scan_number": 1,
             "ms_level": "MS2",
-            "retention_time_sec": 10.0,
+            "retention_time_min": 10.0,
             "precursors": [],
             "mz_array": [100.0, 200.0],
             "intensity_array": [1000.0]

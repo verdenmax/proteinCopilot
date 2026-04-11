@@ -31,7 +31,7 @@ struct MgfBlock {
     pepmass_mz: Option<f64>,
     pepmass_intensity: Option<f64>,
     charge: Option<i32>,
-    rt_sec: Option<f64>,
+    rt_min: Option<f64>,
     mz_values: Vec<f64>,
     intensity_values: Vec<f64>,
 }
@@ -67,7 +67,7 @@ impl MgfBlock {
         Spectrum::new(
             scan,
             MsLevel::MS2, // MGF spectra are always MS2
-            self.rt_sec.unwrap_or(0.0),
+            self.rt_min.unwrap_or(0.0),
             precursors,
             mz_values,
             intensity_values,
@@ -175,7 +175,7 @@ where
                         b.charge = parse_charge(value);
                     }
                     "RTINSECONDS" => {
-                        b.rt_sec = value.trim().parse::<f64>().ok();
+                        b.rt_min = value.trim().parse::<f64>().ok().map(|v| v / 60.0);
                     }
                     "SCANS" => {
                         b.scan = value.trim().parse::<u32>().ok();
@@ -302,7 +302,7 @@ mod tests {
 
         assert_eq!(s.scan_number, 1);
         assert_eq!(s.ms_level, MsLevel::MS2);
-        assert!((s.retention_time_sec - 120.5).abs() < 0.01);
+        assert!((s.retention_time_min - 120.5 / 60.0).abs() < 0.01);
         assert_eq!(s.num_peaks(), 5);
         assert_eq!(s.precursors.len(), 1);
         assert!((s.precursors[0].mz - 471.2561).abs() < 1e-4);
@@ -379,9 +379,9 @@ mod tests {
         assert!(summary.mz_range[0] > 0.0);
         assert!(summary.mz_range[1] > summary.mz_range[0]);
 
-        // RT range: 120.5 to 240.0
-        assert!((summary.rt_range_sec[0] - 120.5).abs() < 0.1);
-        assert!((summary.rt_range_sec[1] - 240.0).abs() < 0.1);
+        // RT range: ~2.01 to ~4.0 min
+        assert!((summary.rt_range_min[0] - 120.5 / 60.0).abs() < 0.1);
+        assert!((summary.rt_range_min[1] - 240.0 / 60.0).abs() < 0.1);
 
         // Charge distribution should have entries
         assert!(!summary.precursor_charge_distribution.is_empty());

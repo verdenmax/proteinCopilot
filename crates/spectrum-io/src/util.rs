@@ -113,11 +113,11 @@ impl SummaryAccumulator {
             }
         }
 
-        if s.retention_time_sec < self.rt_min {
-            self.rt_min = s.retention_time_sec;
+        if s.retention_time_min < self.rt_min {
+            self.rt_min = s.retention_time_min;
         }
-        if s.retention_time_sec > self.rt_max {
-            self.rt_max = s.retention_time_sec;
+        if s.retention_time_min > self.rt_max {
+            self.rt_max = s.retention_time_min;
         }
 
         for p in &s.precursors {
@@ -169,7 +169,7 @@ impl SummaryAccumulator {
             ms1_count: self.ms1_count,
             ms2_count: self.ms2_count,
             mz_range: [self.mz_min, self.mz_max],
-            rt_range_sec: [self.rt_min, self.rt_max],
+            rt_range_min: [self.rt_min, self.rt_max],
             precursor_charge_distribution: self.charge_dist,
             median_peaks_per_spectrum: median_peaks,
             median_isolation_window_da: median_iw,

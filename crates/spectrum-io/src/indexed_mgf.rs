@@ -239,7 +239,7 @@ fn parse_single_mgf_block(
     let mut pepmass_mz: Option<f64> = None;
     let mut pepmass_intensity: Option<f64> = None;
     let mut charge: Option<i32> = None;
-    let mut rt_sec: Option<f64> = None;
+    let mut rt_min: Option<f64> = None;
     let mut mz_values: Vec<f64> = Vec::new();
     let mut intensity_values: Vec<f64> = Vec::new();
     let mut in_block = false;
@@ -286,7 +286,7 @@ fn parse_single_mgf_block(
                     charge = parse_charge(value);
                 }
                 "RTINSECONDS" => {
-                    rt_sec = value.trim().parse::<f64>().ok();
+                    rt_min = value.trim().parse::<f64>().ok().map(|v| v / 60.0);
                 }
                 "SCANS" => {
                     scan = value.trim().parse::<u32>().ok();
@@ -325,7 +325,7 @@ fn parse_single_mgf_block(
     Spectrum::new(
         scan_number,
         MsLevel::MS2,
-        rt_sec.unwrap_or(0.0),
+        rt_min.unwrap_or(0.0),
         precursors,
         mz_values,
         intensity_values,
@@ -394,7 +394,7 @@ mod tests {
             assert_eq!(idx_spec.scan_number, std_spec.scan_number);
             assert_eq!(idx_spec.mz_array.len(), std_spec.mz_array.len());
             assert!(
-                (idx_spec.retention_time_sec - std_spec.retention_time_sec).abs() < 0.001,
+                (idx_spec.retention_time_min - std_spec.retention_time_min).abs() < 0.001,
                 "RT mismatch for scan {scan}"
             );
         }

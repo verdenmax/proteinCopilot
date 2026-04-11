@@ -212,14 +212,14 @@ impl ResultParser for DiannParser {
                     sequence,
                     charge,
                     precursor_mz,
-                    rt_sec: rt_min * 60.0, // minutes → seconds
+                    rt_min: rt_min, // DIA-NN reports in minutes; store as-is
                     modifications,
                     score: Some(1.0 - qvalue), // invert: Q.Value (lower=better) → score (higher=better)
                     q_value: Some(qvalue),
                     protein_accessions: proteins,
                     raw_name: run,
                     matched_scan: None,
-                    rt_delta_sec: None,
+                    rt_delta_min: None,
                 });
             }
         }
@@ -399,9 +399,9 @@ mod tests {
         assert!(!psms.is_empty(), "should parse some PSMs");
         for psm in &psms[..5.min(psms.len())] {
             assert!(
-                psm.rt_sec > 60.0,
-                "RT should be in seconds (>60), got {}",
-                psm.rt_sec
+                psm.rt_min > 1.0,
+                "RT should be in minutes (>1), got {}",
+                psm.rt_min
             );
         }
         tracing::info!("parsed {} PSMs from real DIA-NN parquet", psms.len());

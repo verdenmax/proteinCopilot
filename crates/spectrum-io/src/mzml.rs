@@ -54,7 +54,7 @@ pub(crate) struct BinaryArrayMeta {
 struct SpectrumBuilder {
     scan_number: Option<u32>,
     ms_level: Option<u8>,
-    rt_sec: Option<f64>,
+    rt_min: Option<f64>,
     // Accumulated precursors (built at </precursor> end tag)
     precursors: Vec<PrecursorInfo>,
     // Temporary fields for the precursor currently being parsed
@@ -120,7 +120,7 @@ impl SpectrumBuilder {
         Spectrum::new(
             scan,
             ms_level,
-            self.rt_sec.unwrap_or(0.0),
+            self.rt_min.unwrap_or(0.0),
             self.precursors,
             mz_array,
             intensity_array,
@@ -334,18 +334,21 @@ where
                         "MS:1000016" if in_scan => {
                             // Scan start time — check unit
                             // UO:0000010 = second, UO:0000031 = minute
+                            // Internal convention: store in minutes
                             if let Ok(rt_val) = value.parse::<f64>() {
                                 let unit_acc = get_attr(e, b"unitAccession").unwrap_or_default();
-                                builder.rt_sec = Some(if unit_acc == "UO:0000031" {
-                                    rt_val * 60.0 // minutes → seconds
+                                builder.rt_min = Some(if unit_acc == "UO:0000031" {
+                                    rt_val // already minutes
+                                } else if unit_acc == "UO:0000010" {
+                                    rt_val / 60.0 // seconds → minutes
                                 } else {
                                     if unit_acc.is_empty() {
                                         tracing::warn!(
                                             "MS:1000016 scan start time missing unitAccession; \
-                                             assuming seconds (industry convention)"
+                                             assuming minutes (proteomics convention)"
                                         );
                                     }
-                                    rt_val // assume seconds
+                                    rt_val // assume minutes
                                 });
                             }
                         }
@@ -557,7 +560,7 @@ mod tests {
 
         assert_eq!(s.scan_number, 1);
         assert_eq!(s.ms_level, MsLevel::MS2);
-        assert!((s.retention_time_sec - 120.5).abs() < 0.01);
+        assert!((s.retention_time_min - 120.5 / 60.0).abs() < 0.01);
         assert_eq!(s.num_peaks(), 5);
         assert_eq!(s.precursors.len(), 1);
 
@@ -653,8 +656,8 @@ mod tests {
         assert_eq!(summary.total_spectra, 10);
         assert_eq!(summary.ms2_count, 10);
         assert_eq!(summary.format, SpectrumFormat::MzML);
-        assert!((summary.rt_range_sec[0] - 120.5).abs() < 0.1);
-        assert!((summary.rt_range_sec[1] - 240.0).abs() < 0.1);
+        assert!((summary.rt_range_min[0] - 120.5 / 60.0).abs() < 0.1);
+        assert!((summary.rt_range_min[1] - 240.0 / 60.0).abs() < 0.1);
 
         let charge_2 = summary.precursor_charge_distribution.get(&2).unwrap_or(&0);
         assert_eq!(*charge_2, 5);

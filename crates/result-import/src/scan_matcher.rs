@@ -1,7 +1,7 @@
 //! Scan matching: associates imported PSMs with mzML MS2 scans.
 //!
 //! Algorithm:
-//! 1. Pre-scan mzML to collect (scan_number, rt_sec, isolation_window) for all MS2 spectra
+//! 1. Pre-scan mzML to collect (scan_number, rt_min, isolation_window) for all MS2 spectra
 //! 2. Sort by RT
 //! 3. For each PSM: binary search for RT-proximate candidates, filter by isolation window,
 //!    pick the closest RT match
@@ -18,14 +18,14 @@ use crate::{FileMatchStats, ImportedPsm, MatchReport, ResultImportError};
 #[derive(Debug, Clone)]
 struct Ms2Info {
     scan_number: u32,
-    rt_sec: f64,
+    rt_min: f64,
     /// (target_mz, lower_offset, upper_offset)
     isolation_window: Option<(f64, f64, f64)>,
 }
 
 /// Scan matcher configuration.
 pub struct ScanMatcherConfig {
-    pub rt_tolerance_sec: f64,
+    pub rt_tolerance_min: f64,
     pub mzml_dir: PathBuf,
 }
 
@@ -33,10 +33,10 @@ pub struct ScanMatcherConfig {
 ///
 /// PSMs are matched by:
 /// 1. `raw_name` → mzML file (raw_name + ".mzML" in `mzml_dir`)
-/// 2. RT proximity (within `rt_tolerance_sec`)
+/// 2. RT proximity (within `rt_tolerance_min`)
 /// 3. precursor_mz falls within the MS2's isolation window
 ///
-/// Returns the mutated PSMs (with `matched_scan` and `rt_delta_sec` filled)
+/// Returns the mutated PSMs (with `matched_scan` and `rt_delta_min` filled)
 /// and a `MatchReport` with quality statistics.
 pub type ReaderFactory = dyn Fn(&Path) -> Result<Box<dyn SpectrumReader>, ResultImportError>;
 
@@ -82,8 +82,8 @@ pub fn match_scans(
         // Sort by RT for binary search
         let mut sorted_ms2 = ms2_infos;
         sorted_ms2.sort_by(|a, b| {
-            a.rt_sec
-                .partial_cmp(&b.rt_sec)
+            a.rt_min
+                .partial_cmp(&b.rt_min)
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
 
@@ -94,13 +94,13 @@ pub fn match_scans(
             let psm = &psms[idx];
             if let Some((scan, delta)) = find_best_match(
                 &sorted_ms2,
-                psm.rt_sec,
+                psm.rt_min,
                 psm.precursor_mz,
-                config.rt_tolerance_sec,
+                config.rt_tolerance_min,
             ) {
                 let psm_mut = &mut psms[idx];
                 psm_mut.matched_scan = Some(scan);
-                psm_mut.rt_delta_sec = Some(delta);
+                psm_mut.rt_delta_min = Some(delta);
                 all_rt_deltas.push(delta.abs());
                 file_matched += 1;
             } else {
@@ -133,8 +133,8 @@ pub fn match_scans(
         total_psms: psms.len(),
         matched: total_matched,
         unmatched: total_unmatched,
-        median_rt_delta_sec: median_rt_delta,
-        max_rt_delta_sec: max_rt_delta,
+        median_rt_delta_min: median_rt_delta,
+        max_rt_delta_min: max_rt_delta,
         per_file,
     })
 }
@@ -157,7 +157,7 @@ fn collect_ms2_info(
             });
             infos.push(Ms2Info {
                 scan_number: spec.scan_number,
-                rt_sec: spec.retention_time_sec,
+                rt_min: spec.retention_time_min,
                 isolation_window: isolation,
             });
         }
@@ -167,12 +167,12 @@ fn collect_ms2_info(
 
 /// Find the best matching MS2 for a given PSM.
 ///
-/// Returns `(scan_number, rt_delta_sec)` or `None` if no match found.
+/// Returns `(scan_number, rt_delta_min)` or `None` if no match found.
 fn find_best_match(
     sorted_ms2: &[Ms2Info],
-    psm_rt_sec: f64,
+    psm_rt_min: f64,
     psm_precursor_mz: f64,
-    rt_tolerance_sec: f64,
+    rt_tolerance_min: f64,
 ) -> Option<(u32, f64)> {
     if sorted_ms2.is_empty() {
         return None;
@@ -180,16 +180,16 @@ fn find_best_match(
 
     // Binary search for the start of the RT window
     let insert_pos =
-        sorted_ms2.partition_point(|m| m.rt_sec < psm_rt_sec - rt_tolerance_sec);
+        sorted_ms2.partition_point(|m| m.rt_min < psm_rt_min - rt_tolerance_min);
 
     let mut best: Option<(u32, f64)> = None;
 
     for ms2 in sorted_ms2[insert_pos..].iter() {
-        let delta = ms2.rt_sec - psm_rt_sec;
-        if delta > rt_tolerance_sec {
+        let delta = ms2.rt_min - psm_rt_min;
+        if delta > rt_tolerance_min {
             break; // past the RT window
         }
-        if delta.abs() > rt_tolerance_sec {
+        if delta.abs() > rt_tolerance_min {
             continue;
         }
 
@@ -247,27 +247,27 @@ mod tests {
         vec![
             Ms2Info {
                 scan_number: 10,
-                rt_sec: 100.0,
+                rt_min: 100.0,
                 isolation_window: Some((500.0, 12.5, 12.5)),
             },
             Ms2Info {
                 scan_number: 20,
-                rt_sec: 200.0,
+                rt_min: 200.0,
                 isolation_window: Some((600.0, 12.5, 12.5)),
             },
             Ms2Info {
                 scan_number: 30,
-                rt_sec: 300.0,
+                rt_min: 300.0,
                 isolation_window: Some((500.0, 12.5, 12.5)),
             },
             Ms2Info {
                 scan_number: 40,
-                rt_sec: 400.0,
+                rt_min: 400.0,
                 isolation_window: Some((700.0, 12.5, 12.5)),
             },
             Ms2Info {
                 scan_number: 50,
-                rt_sec: 500.0,
+                rt_min: 500.0,
                 isolation_window: Some((500.0, 25.0, 25.0)),
             },
         ]
@@ -300,7 +300,7 @@ mod tests {
     #[test]
     fn find_best_match_rt_outside_tolerance() {
         let ms2s = make_ms2_infos();
-        // RT=150, tolerance=30 → nearest scan 10 (RT=100) is 50s away
+        // RT=150, tolerance=30 → nearest scan 10 (RT=100) is 50 min away
         let result = find_best_match(&ms2s, 150.0, 500.0, 30.0);
         assert!(result.is_none());
     }
@@ -318,12 +318,12 @@ mod tests {
         let ms2s = vec![
             Ms2Info {
                 scan_number: 1,
-                rt_sec: 100.0,
+                rt_min: 100.0,
                 isolation_window: Some((500.0, 25.0, 25.0)),
             },
             Ms2Info {
                 scan_number: 2,
-                rt_sec: 105.0,
+                rt_min: 105.0,
                 isolation_window: Some((500.0, 25.0, 25.0)),
             },
         ];
@@ -336,7 +336,7 @@ mod tests {
     fn find_best_match_no_isolation_window_fallback() {
         let ms2s = vec![Ms2Info {
             scan_number: 1,
-            rt_sec: 100.0,
+            rt_min: 100.0,
             isolation_window: None,
         }];
         let result = find_best_match(&ms2s, 105.0, 999.0, 30.0);

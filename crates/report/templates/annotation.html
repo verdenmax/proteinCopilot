@@ -140,7 +140,7 @@
     scoreWrap.appendChild(document.createTextNode("  (" + D.matched_ions + "/" + D.total_ions + " ions)"));
 
     add("Scan", String(D.scan_number));
-    add("RT", fmt(D.retention_time_sec / 60, 2) + " min");
+    add("RT", fmt(D.retention_time_min, 2) + " min");
     add("Charge", D.charge + "+");
     add("Peptide", D.peptide_sequence, "peptide");
     add("Protein(s)", D.protein_accessions.join(", ") || "\u2014");

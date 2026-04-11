@@ -59,7 +59,7 @@ mod tests {
     fn sample_xic_data() -> XicData {
         XicData {
             peptide_sequence: "PEPTIDEK".to_string(),
-            target_rt_sec: 120.0,
+            target_rt_min: 120.0,
             target_scan: 100,
             charge: 2,
             precursor_mz: 450.25,
@@ -70,9 +70,9 @@ mod tests {
                 charge: 2,
                 theoretical_mz: 450.25,
                 data_points: vec![
-                    XicDataPoint { retention_time_sec: 115.0, scan_number: 90, intensity: 1000.0 },
-                    XicDataPoint { retention_time_sec: 120.0, scan_number: 100, intensity: 5000.0 },
-                    XicDataPoint { retention_time_sec: 125.0, scan_number: 110, intensity: 2000.0 },
+                    XicDataPoint { retention_time_min: 115.0, scan_number: 90, intensity: 1000.0 },
+                    XicDataPoint { retention_time_min: 120.0, scan_number: 100, intensity: 5000.0 },
+                    XicDataPoint { retention_time_min: 125.0, scan_number: 110, intensity: 2000.0 },
                 ],
                 is_heavy: false,
             }),
@@ -85,9 +85,9 @@ mod tests {
                     charge: 1,
                     theoretical_mz: 574.28,
                     data_points: vec![
-                        XicDataPoint { retention_time_sec: 115.0, scan_number: 91, intensity: 800.0 },
-                        XicDataPoint { retention_time_sec: 120.0, scan_number: 101, intensity: 3000.0 },
-                        XicDataPoint { retention_time_sec: 125.0, scan_number: 111, intensity: 1200.0 },
+                        XicDataPoint { retention_time_min: 115.0, scan_number: 91, intensity: 800.0 },
+                        XicDataPoint { retention_time_min: 120.0, scan_number: 101, intensity: 3000.0 },
+                        XicDataPoint { retention_time_min: 125.0, scan_number: 111, intensity: 1200.0 },
                     ],
                     is_heavy: false,
                 },

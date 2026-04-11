@@ -63,7 +63,7 @@ mod tests {
         let data = RawScanData {
             ms1_scans: vec![RawScan {
                 scan_number: 1,
-                retention_time_sec: 10.0,
+                retention_time_min: 10.0,
                 mz_array: vec![450.0],
                 intensity_array: vec![1000.0],
             }],

@@ -66,7 +66,7 @@ async fn main() {
             );
             println!(
                 "  RT range:       {:.1} - {:.1} sec",
-                s.rt_range_sec[0], s.rt_range_sec[1]
+                s.rt_range_min[0], s.rt_range_min[1]
             );
             println!("  Median peaks:   {}", s.median_peaks_per_spectrum);
             s

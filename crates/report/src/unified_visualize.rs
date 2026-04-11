@@ -68,7 +68,7 @@ mod tests {
     fn sample_annotation() -> SpectrumAnnotation {
         SpectrumAnnotation {
             scan_number: 42,
-            retention_time_sec: 120.0,
+            retention_time_min: 120.0,
             peptide_sequence: "PEPTIDEK".to_string(),
             charge: 2,
             precursor_mz: 450.25,
@@ -122,7 +122,7 @@ mod tests {
     fn sample_xic() -> XicData {
         XicData {
             peptide_sequence: "PEPTIDEK".to_string(),
-            target_rt_sec: 120.0,
+            target_rt_min: 120.0,
             target_scan: 100,
             charge: 2,
             precursor_mz: 450.25,
@@ -134,12 +134,12 @@ mod tests {
                 theoretical_mz: 450.25,
                 data_points: vec![
                     XicDataPoint {
-                        retention_time_sec: 115.0,
+                        retention_time_min: 115.0,
                         scan_number: 90,
                         intensity: 1000.0,
                     },
                     XicDataPoint {
-                        retention_time_sec: 120.0,
+                        retention_time_min: 120.0,
                         scan_number: 100,
                         intensity: 5000.0,
                     },
@@ -170,7 +170,7 @@ mod tests {
             raw_scans: Some(RawScanData {
                 ms1_scans: vec![RawScan {
                     scan_number: 90,
-                    retention_time_sec: 115.0,
+                    retention_time_min: 115.0,
                     mz_array: vec![450.0, 450.25, 451.0],
                     intensity_array: vec![100.0, 5000.0, 200.0],
                 }],

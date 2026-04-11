@@ -23,15 +23,15 @@ pub use error::ResultImportError;
 
 /// A PSM imported from an external search result file.
 ///
-/// RT is always in seconds (converted from source format at parse time).
+/// RT is always in minutes (converted from source format at parse time).
 /// `matched_scan` is `None` until scan matching is performed.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImportedPsm {
     pub sequence: String,
     pub charge: i32,
     pub precursor_mz: f64,
-    /// Retention time in seconds (converted from source format at parse time).
-    pub rt_sec: f64,
+    /// Retention time in minutes (converted from source format at parse time).
+    pub rt_min: f64,
     pub modifications: Vec<Modification>,
     /// Search engine score (e.g. DIA-NN Q.Value). `None` if not available.
     pub score: Option<f64>,
@@ -42,8 +42,8 @@ pub struct ImportedPsm {
     pub raw_name: String,
     /// Filled by scan matcher.
     pub matched_scan: Option<u32>,
-    /// RT delta in seconds between PSM and matched MS2 scan.
-    pub rt_delta_sec: Option<f64>,
+    /// RT delta in minutes between PSM and matched MS2 scan.
+    pub rt_delta_min: Option<f64>,
 }
 
 /// Result of the import operation.
@@ -63,8 +63,8 @@ pub struct MatchReport {
     pub total_psms: usize,
     pub matched: usize,
     pub unmatched: usize,
-    pub median_rt_delta_sec: f64,
-    pub max_rt_delta_sec: f64,
+    pub median_rt_delta_min: f64,
+    pub max_rt_delta_min: f64,
     pub per_file: HashMap<String, FileMatchStats>,
 }
 

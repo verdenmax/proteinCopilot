@@ -54,7 +54,7 @@
         document.getElementById('peptide-seq').textContent = data.peptide_sequence;
         document.getElementById('charge-val').textContent = data.charge + '+';
         document.getElementById('mz-val').textContent = data.precursor_mz.toFixed(4);
-        document.getElementById('rt-val').textContent = data.target_rt_sec.toFixed(1);
+        document.getElementById('rt-val').textContent = data.target_rt_min.toFixed(1);
         document.getElementById('scan-val').textContent = data.target_scan;
 
         // Color palette for ions
@@ -62,7 +62,7 @@
 
         function makeTrace(xicTrace, colorIdx, dash) {
             return {
-                x: xicTrace.data_points.map(function(p) { return p.retention_time_sec; }),
+                x: xicTrace.data_points.map(function(p) { return p.retention_time_min; }),
                 y: xicTrace.data_points.map(function(p) { return p.intensity; }),
                 name: xicTrace.ion_label + (xicTrace.is_heavy ? ' (H)' : ''),
                 mode: 'lines+markers',
@@ -86,7 +86,7 @@
                 title: { text: 'MS1 Precursor XIC', font: { size: 14 } },
                 xaxis: { title: 'RT (s)' },
                 yaxis: { title: 'Intensity' },
-                shapes: [{ type: 'line', x0: data.target_rt_sec, x1: data.target_rt_sec, y0: 0, y1: 1, yref: 'paper', line: { color: 'red', width: 1, dash: 'dot' } }],
+                shapes: [{ type: 'line', x0: data.target_rt_min, x1: data.target_rt_min, y0: 0, y1: 1, yref: 'paper', line: { color: 'red', width: 1, dash: 'dot' } }],
                 margin: { t: 40, b: 40, l: 60, r: 20 },
                 showlegend: true,
                 legend: { orientation: 'h', y: 1.15 }
@@ -111,7 +111,7 @@
                 title: { text: 'MS2 Fragment Ion XIC', font: { size: 14 } },
                 xaxis: { title: 'RT (s)' },
                 yaxis: { title: 'Intensity' },
-                shapes: [{ type: 'line', x0: data.target_rt_sec, x1: data.target_rt_sec, y0: 0, y1: 1, yref: 'paper', line: { color: 'red', width: 1, dash: 'dot' } }],
+                shapes: [{ type: 'line', x0: data.target_rt_min, x1: data.target_rt_min, y0: 0, y1: 1, yref: 'paper', line: { color: 'red', width: 1, dash: 'dot' } }],
                 margin: { t: 40, b: 40, l: 60, r: 20 },
                 showlegend: true,
                 legend: { orientation: 'h', y: 1.2 }

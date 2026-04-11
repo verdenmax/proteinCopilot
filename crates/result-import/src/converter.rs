@@ -300,20 +300,20 @@ mod tests {
                 sequence: "PEPTIDE".to_string(),
                 charge: 2,
                 precursor_mz: 400.19,
-                rt_sec: 600.0,
+                rt_min: 10.0,
                 modifications: vec![],
                 score: Some(0.001),
                 q_value: Some(0.001),
                 protein_accessions: vec!["P12345".to_string()],
                 raw_name: "test".to_string(),
                 matched_scan: Some(100),
-                rt_delta_sec: Some(1.5),
+                rt_delta_min: Some(1.5),
             },
             ImportedPsm {
                 sequence: "PEPTMIDE".to_string(),
                 charge: 3,
                 precursor_mz: 310.5,
-                rt_sec: 1200.0,
+                rt_min: 20.0,
                 modifications: vec![Modification {
                     name: "Oxidation".to_string(),
                     mass_delta: 15.994915,
@@ -325,20 +325,20 @@ mod tests {
                 protein_accessions: vec!["P12345".to_string()],
                 raw_name: "test".to_string(),
                 matched_scan: Some(200),
-                rt_delta_sec: Some(0.5),
+                rt_delta_min: Some(0.5),
             },
             ImportedPsm {
                 sequence: "PEPTIDE".to_string(),
                 charge: 2,
                 precursor_mz: 400.19,
-                rt_sec: 1800.0,
+                rt_min: 30.0,
                 modifications: vec![],
                 score: None,
                 q_value: None,
                 protein_accessions: vec!["P67890".to_string()],
                 raw_name: "test".to_string(),
                 matched_scan: None, // unmatched — should be excluded
-                rt_delta_sec: None,
+                rt_delta_min: None,
             },
         ]
     }
@@ -350,8 +350,8 @@ mod tests {
             total_psms: 3,
             matched: 2,
             unmatched: 1,
-            median_rt_delta_sec: 1.0,
-            max_rt_delta_sec: 1.5,
+            median_rt_delta_min: 1.0,
+            max_rt_delta_min: 1.5,
             per_file: HashMap::new(),
         };
         let (result, import) = build_search_result(&psms, report, "custom_json", vec![]);
@@ -366,8 +366,8 @@ mod tests {
             total_psms: 3,
             matched: 2,
             unmatched: 1,
-            median_rt_delta_sec: 0.0,
-            max_rt_delta_sec: 0.0,
+            median_rt_delta_min: 0.0,
+            max_rt_delta_min: 0.0,
             per_file: HashMap::new(),
         };
         let (result, _) = build_search_result(&psms, report, "custom_json", vec![]);
@@ -387,8 +387,8 @@ mod tests {
             total_psms: 3,
             matched: 2,
             unmatched: 1,
-            median_rt_delta_sec: 0.0,
-            max_rt_delta_sec: 0.0,
+            median_rt_delta_min: 0.0,
+            max_rt_delta_min: 0.0,
             per_file: HashMap::new(),
         };
         let (result, _) = build_search_result(&psms, report, "custom_json", vec![]);
@@ -402,8 +402,8 @@ mod tests {
             total_psms: 3,
             matched: 2,
             unmatched: 1,
-            median_rt_delta_sec: 0.0,
-            max_rt_delta_sec: 0.0,
+            median_rt_delta_min: 0.0,
+            max_rt_delta_min: 0.0,
             per_file: HashMap::new(),
         };
         let (result, _) = build_search_result(&psms, report, "diann_parquet", vec![]);

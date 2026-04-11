@@ -33,7 +33,7 @@ pub enum IonType {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct XicDataPoint {
     /// Retention time in seconds.
-    pub retention_time_sec: f64,
+    pub retention_time_min: f64,
     /// Scan number (1-based).
     pub scan_number: u32,
     /// Extracted intensity (0.0 if no peak found in tolerance window).
@@ -65,7 +65,7 @@ pub struct XicData {
     /// Target peptide sequence.
     pub peptide_sequence: String,
     /// Target scan retention time (seconds).
-    pub target_rt_sec: f64,
+    pub target_rt_min: f64,
     /// Target scan number.
     pub target_scan: u32,
     /// Precursor charge state.
@@ -183,7 +183,7 @@ pub struct RawScan {
     /// Scan number (1-based).
     pub scan_number: u32,
     /// Retention time in seconds.
-    pub retention_time_sec: f64,
+    pub retention_time_min: f64,
     /// m/z values (sorted ascending).
     pub mz_array: Vec<f64>,
     /// Intensity values (parallel to mz_array).

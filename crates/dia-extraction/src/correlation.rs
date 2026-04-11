@@ -60,10 +60,10 @@ pub fn correlate_single_with_method(
     let by_rt = ms1_spectra
         .iter()
         .enumerate()
-        .filter(|(_, s)| s.retention_time_sec.is_finite() && ms2.retention_time_sec.is_finite())
+        .filter(|(_, s)| s.retention_time_min.is_finite() && ms2.retention_time_min.is_finite())
         .min_by(|(_, a), (_, b)| {
-            let da = (a.retention_time_sec - ms2.retention_time_sec).abs();
-            let db = (b.retention_time_sec - ms2.retention_time_sec).abs();
+            let da = (a.retention_time_min - ms2.retention_time_min).abs();
+            let db = (b.retention_time_min - ms2.retention_time_min).abs();
             da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
         })
         .map(|(idx, _)| idx);

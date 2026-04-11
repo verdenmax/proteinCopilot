@@ -152,7 +152,7 @@ fn parse_single_spectrum<R: std::io::BufRead>(
     // Spectrum fields
     let mut scan_number: Option<u32> = None;
     let mut ms_level: Option<u8> = None;
-    let mut rt_sec: Option<f64> = None;
+    let mut rt_min: Option<f64> = None;
 
     let mut precursors: Vec<PrecursorInfo> = Vec::new();
     let mut cur_precursor_mz: Option<f64> = None;
@@ -236,10 +236,12 @@ fn parse_single_spectrum<R: std::io::BufRead>(
                             if let Ok(rt_val) = value.parse::<f64>() {
                                 let unit_acc =
                                     get_attr(e, b"unitAccession").unwrap_or_default();
-                                rt_sec = Some(if unit_acc == "UO:0000031" {
-                                    rt_val * 60.0
+                                rt_min = Some(if unit_acc == "UO:0000031" {
+                                    rt_val // already minutes
+                                } else if unit_acc == "UO:0000010" {
+                                    rt_val / 60.0 // seconds → minutes
                                 } else {
-                                    rt_val
+                                    rt_val // assume minutes
                                 });
                             }
                         }
@@ -302,7 +304,7 @@ fn parse_single_spectrum<R: std::io::BufRead>(
                         return Spectrum::new(
                             scan,
                             level,
-                            rt_sec.unwrap_or(0.0),
+                            rt_min.unwrap_or(0.0),
                             precursors,
                             mz_array,
                             intensity_array,
@@ -440,7 +442,7 @@ mod tests {
         assert_eq!(spec.scan_number, 7);
         let standard = MzMLReader.read_spectrum(&fixture_path(), 7).unwrap();
         assert_eq!(spec.mz_array.len(), standard.mz_array.len());
-        assert!((spec.retention_time_sec - standard.retention_time_sec).abs() < 0.01);
+        assert!((spec.retention_time_min - standard.retention_time_min).abs() < 0.01);
     }
 
     #[test]
@@ -463,7 +465,7 @@ mod tests {
                 std_spec.intensity_array.len()
             );
             assert!(
-                (idx_spec.retention_time_sec - std_spec.retention_time_sec).abs() < 0.001
+                (idx_spec.retention_time_min - std_spec.retention_time_min).abs() < 0.001
             );
         }
     }

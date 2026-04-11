@@ -49,7 +49,7 @@ fn main() {
             );
             println!(
                 "RT range:         {:.1} - {:.1} sec",
-                s.rt_range_sec[0], s.rt_range_sec[1]
+                s.rt_range_min[0], s.rt_range_min[1]
             );
             println!("Median peaks:     {}", s.median_peaks_per_spectrum);
 
@@ -77,7 +77,7 @@ fn main() {
                     "Scan {}: {} peaks, RT={:.1}s",
                     sp.scan_number,
                     sp.num_peaks(),
-                    sp.retention_time_sec
+                    sp.retention_time_min
                 );
                 if let Some(p) = sp.precursors.first() {
                     print!(", precursor m/z={:.4}, charge={:?}", p.mz, p.charge);

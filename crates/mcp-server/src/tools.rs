@@ -414,9 +414,9 @@ struct ImportSearchResultsInput {
     /// Path to unimod.xml. If not provided, uses builtin modification database (~22 common mods).
     #[serde(default)]
     unimod_path: Option<String>,
-    /// RT tolerance in seconds for scan matching. Default: 30.
+    /// RT tolerance in minutes for scan matching. Default: 0.5.
     #[serde(default = "default_rt_tolerance")]
-    rt_tolerance_sec: f64,
+    rt_tolerance_min: f64,
     /// Q-value threshold for filtering (DIA-NN). Default: 0.01.
     #[serde(default = "default_filter_qvalue")]
     filter_qvalue: f64,
@@ -429,7 +429,7 @@ fn default_import_format() -> String {
     "auto".to_string()
 }
 fn default_rt_tolerance() -> f64 {
-    30.0
+    0.5
 }
 fn default_filter_qvalue() -> f64 {
     0.01
@@ -1963,10 +1963,10 @@ impl ProteinCopilotServer {
                 format!("mzml_dir is not a directory: {}", mzml_dir.display()),
             ));
         }
-        if input.rt_tolerance_sec < 0.0 || !input.rt_tolerance_sec.is_finite() {
+        if input.rt_tolerance_min < 0.0 || !input.rt_tolerance_min.is_finite() {
             return Err(mcp_err(
                 ErrorCode::INVALID_PARAMS,
-                "rt_tolerance_sec must be a non-negative finite number",
+                "rt_tolerance_min must be a non-negative finite number",
             ));
         }
         if !(0.0..=1.0).contains(&input.filter_qvalue) {
@@ -2036,7 +2036,7 @@ impl ProteinCopilotServer {
 
         // Scan matching
         let config = ScanMatcherConfig {
-            rt_tolerance_sec: input.rt_tolerance_sec,
+            rt_tolerance_min: input.rt_tolerance_min,
             mzml_dir: mzml_dir.clone(),
         };
 
