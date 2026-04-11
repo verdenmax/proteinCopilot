@@ -1,0 +1,978 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Unified Annotation + XIC — ProteinCopilot</title>
+<script src="__PLOTLY_SRC__"></script>
+<style>
+  :root {
+    --b-color: #d63031;
+    --y-color: #0984e3;
+    --unmatched-peak: #d0d0d0;
+    --noise-peak: #f0f0f0;
+    --unmatched-bracket: #e0e0e0;
+    --bg: #f8f9fa;
+    --card-bg: #ffffff;
+    --text: #2c3e50;
+    --text-muted: #7f8c8d;
+    --border: #dee2e6;
+    --font: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: var(--font); background: var(--bg); color: var(--text); padding: 20px; }
+
+  /* ── Info Card ────────────────────────────────────────── */
+  .info-card {
+    background: var(--card-bg); border: 1px solid var(--border);
+    border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;
+    box-shadow: 0 1px 3px rgba(0,0,0,.06);
+  }
+  .info-card h2 { font-size: 16px; font-weight: 600; margin-bottom: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px; }
+  .info-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px 24px; }
+  .info-item { display: flex; flex-direction: column; }
+  .info-label { font-size: 11px; text-transform: uppercase; letter-spacing: .4px; color: var(--text-muted); margin-bottom: 2px; }
+  .info-value { font-size: 14px; font-weight: 500; }
+  .info-value.peptide { font-family: 'Courier New', Courier, monospace; font-size: 16px; letter-spacing: 1px; font-weight: 700; }
+  .score-badge {
+    display: inline-block; padding: 2px 10px; border-radius: 10px;
+    color: #fff; font-weight: 700; font-size: 13px;
+  }
+  .score-badge.good { background: #27ae60; }
+  .score-badge.mid  { background: #f39c12; }
+  .score-badge.low  { background: #e74c3c; }
+
+  /* ── Coverage & Spectrum Cards ─────────────────────────── */
+  .coverage-card, .spectrum-card {
+    background: var(--card-bg); border: 1px solid var(--border);
+    border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;
+    box-shadow: 0 1px 3px rgba(0,0,0,.06); overflow-x: auto;
+  }
+  .coverage-card h2, .spectrum-card h2 {
+    font-size: 16px; font-weight: 600; margin-bottom: 12px;
+    color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px;
+  }
+
+  /* ── SVG shared ────────────────────────────────────────── */
+  svg text { font-family: var(--font); }
+  .axis text { font-size: 11px; fill: var(--text-muted); }
+  .axis line, .axis path { stroke: var(--border); }
+  .axis-label { font-size: 12px; fill: var(--text); font-weight: 500; }
+
+  /* Coverage bracket highlight on hover */
+  .cov-bracket.highlight { filter: brightness(1.3); stroke-width: 3.5 !important; }
+
+  /* ── Tooltip ─────────────────────────────────────────── */
+  #tooltip {
+    position: fixed; pointer-events: none; display: none;
+    background: rgba(44,62,80,.95); color: #fff; padding: 10px 14px;
+    border-radius: 6px; font-size: 12px; font-family: 'Courier New', Courier, monospace;
+    line-height: 1.6; white-space: nowrap; z-index: 1000;
+    box-shadow: 0 4px 12px rgba(0,0,0,.3);
+  }
+  #tooltip::after {
+    content: ''; position: absolute; top: 100%; left: 16px;
+    border: 6px solid transparent; border-top-color: rgba(44,62,80,.95);
+  }
+  .tip-row { display: flex; justify-content: space-between; gap: 16px; }
+  .tip-label { color: #95a5a6; font-size: 11px; }
+  .tip-val { font-weight: 600; text-align: right; }
+  .tip-sep { border: none; border-top: 1px solid rgba(255,255,255,.15); margin: 4px 0; }
+
+  /* ── SILAC controls ──────────────────────────────────── */
+  .silac-card {
+    background: var(--card-bg); border: 1px solid var(--border);
+    border-radius: 8px; padding: 16px 24px; margin-bottom: 20px;
+    box-shadow: 0 1px 3px rgba(0,0,0,.06);
+  }
+  .ctrl-row {
+    display: flex; align-items: center; gap: 20px; flex-wrap: wrap;
+  }
+  .ctrl-row label { font-size: 13px; display: flex; align-items: center; gap: 6px; }
+  .ctrl-row select { font-size: 13px; padding: 4px 8px; border-radius: 4px; border: 1px solid var(--border); }
+  .silac-badge {
+    font-size: 12px; padding: 2px 10px; border-radius: 10px;
+    background: #eee; color: #555; font-weight: 600;
+  }
+  #custom-fields {
+    margin-top: 10px; display: flex; align-items: center; gap: 8px; font-size: 13px;
+  }
+  #custom-fields input { width: 100px; padding: 4px 6px; border: 1px solid var(--border); border-radius: 4px; }
+  #custom-fields button { padding: 4px 12px; border-radius: 4px; border: 1px solid var(--border); cursor: pointer; }
+  .info-msg { color: #7f8c8d; font-size: 13px; margin-top: 8px; }
+
+  /* ── Ion toggle grid ────────────────────────────────── */
+  .ion-toggle-card {
+    background: var(--card-bg); border: 1px solid var(--border);
+    border-radius: 8px; padding: 16px 24px; margin-bottom: 20px;
+    box-shadow: 0 1px 3px rgba(0,0,0,.06);
+  }
+  .ion-toggle-card h3 {
+    font-size: 13px; font-weight: 600; margin-bottom: 10px;
+    color: var(--text-muted); text-transform: uppercase; letter-spacing: .4px;
+  }
+  .ion-grid {
+    display: flex; flex-wrap: wrap; gap: 4px;
+  }
+  .ion-col {
+    display: flex; flex-direction: column; align-items: center; gap: 2px;
+    min-width: 64px;
+  }
+  .ion-col-label {
+    font-family: 'Courier New', Courier, monospace; font-size: 12px;
+    font-weight: 600; color: var(--text); margin-bottom: 2px;
+  }
+  .ion-toggle {
+    display: flex; align-items: center; gap: 3px; font-size: 11px; cursor: pointer;
+  }
+  .ion-toggle input { width: 14px; height: 14px; cursor: pointer; accent-color: var(--b-color); }
+  .ion-toggle.heavy input { accent-color: #e67e22; }
+  .ion-toggle-light { color: #2c3e50; }
+  .ion-toggle-heavy { color: #e67e22; font-style: italic; }
+  .ion-btn-row { display: flex; gap: 8px; margin-bottom: 8px; }
+  .ion-btn-row button {
+    font-size: 11px; padding: 2px 10px; border: 1px solid var(--border);
+    border-radius: 4px; cursor: pointer; background: #f8f9fa;
+  }
+  .ion-btn-row button:hover { background: #e9ecef; }
+
+  /* ── XIC cards ───────────────────────────────────────── */
+  .xic-card {
+    background: var(--card-bg); border: 1px solid var(--border);
+    border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;
+    box-shadow: 0 1px 3px rgba(0,0,0,.06);
+  }
+  .xic-card h2 {
+    font-size: 16px; font-weight: 600; margin-bottom: 12px;
+    color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px;
+  }
+
+  /* ── Params footer ───────────────────────────────────── */
+  .params { padding: 12px 24px; font-size: 12px; color: #666; border-top: 1px solid #eee; margin-top: 10px; }
+</style>
+</head>
+<body>
+
+<!-- Section 1: Info Panel -->
+<div id="info-panel" class="info-card"></div>
+
+<!-- Section 2: Fragment Ion Coverage -->
+<div id="coverage-panel" class="coverage-card"></div>
+
+<!-- Section 3: Spectrum -->
+<div class="spectrum-card">
+  <h2>Spectrum</h2>
+  <div id="spectrum-container"></div>
+</div>
+<div id="tooltip"></div>
+
+<!-- Section 4: SILAC Controls (hidden if xic is null) -->
+<div id="silac-section" style="display:none;">
+  <div id="silac-controls" class="silac-card">
+    <div class="ctrl-row">
+      <label>SILAC Preset:
+        <select id="silac-preset">
+          <option value="none">None (Light only)</option>
+          <option value="standard" selected>Standard SILAC (K+8, R+10)</option>
+          <option value="medium">Medium SILAC (K+4, R+6)</option>
+          <option value="custom">Custom...</option>
+        </select>
+      </label>
+      <span id="silac-badge" class="silac-badge"></span>
+    </div>
+    <div id="custom-fields" style="display:none;">
+      K &Delta;: <input type="number" id="custom-k" step="0.001" value="8.014199"> Da
+      R &Delta;: <input type="number" id="custom-r" step="0.001" value="10.008269"> Da
+      <button id="apply-custom">Apply</button>
+    </div>
+    <div id="no-kr-message" style="display:none;" class="info-msg">
+      &#x2139;&#xFE0F; This peptide contains no K or R residues — heavy label has no effect.
+    </div>
+  </div>
+</div>
+
+<!-- Section 4b: Ion Visibility Toggles (hidden if xic is null) -->
+<div id="ion-toggle-section" style="display:none;">
+  <div class="ion-toggle-card">
+    <h3>Ion Visibility</h3>
+    <div class="ion-btn-row">
+      <button id="btn-all-light">All Light</button>
+      <button id="btn-all-heavy">All Heavy</button>
+      <button id="btn-all-on">Show All</button>
+      <button id="btn-all-off">Hide All</button>
+    </div>
+    <div id="ion-grid" class="ion-grid"></div>
+  </div>
+</div>
+
+<!-- Section 5: MS1 Precursor XIC (hidden if xic is null) -->
+<div id="ms1-section" style="display:none;">
+  <div class="xic-card">
+    <h2>MS1 Precursor XIC</h2>
+    <div id="ms1-plot" style="height:200px;"></div>
+  </div>
+</div>
+
+<!-- Section 6: MS2 Fragment Ion XIC (hidden if xic is null) -->
+<div id="ms2-section" style="display:none;">
+  <div class="xic-card">
+    <h2>MS2 Fragment Ion XIC</h2>
+    <div id="ms2-plot" style="height:400px;"></div>
+  </div>
+</div>
+
+<!-- Section 7: Parameters Footer (hidden if xic is null) -->
+<div id="params-section" style="display:none;">
+  <div class="params" id="params-info"></div>
+</div>
+
+<script>
+/*__UNIFIED_JSON__*/
+</script>
+<script>
+/* ================================================================
+   Section A — Annotation (info panel, coverage brackets, spectrum)
+   Copied VERBATIM from annotation.html, only data source changed.
+   ================================================================ */
+(function () {
+  "use strict";
+  var D = window.__UNIFIED_DATA__.annotation;
+  if (!D) return;
+
+  /* ── helpers ──────────────────────────────────────────── */
+  function fmt(n, d) { return Number(n).toFixed(d === undefined ? 2 : d); }
+  function el(tag, attrs, children) {
+    var e = document.createElement(tag);
+    if (attrs) Object.keys(attrs).forEach(function (k) { e.setAttribute(k, attrs[k]); });
+    if (typeof children === "string") e.textContent = children;
+    else if (Array.isArray(children)) children.forEach(function (c) { if (c) e.appendChild(c); });
+    return e;
+  }
+  function svgEl(tag, attrs) {
+    var e = document.createElementNS("http://www.w3.org/2000/svg", tag);
+    if (attrs) Object.keys(attrs).forEach(function (k) { e.setAttribute(k, attrs[k]); });
+    return e;
+  }
+  var SUBSCRIPT_DIGITS = "\u2080\u2081\u2082\u2083\u2084\u2085\u2086\u2087\u2088\u2089";
+  function subscript(n) {
+    return String(n).split("").map(function (c) { return SUBSCRIPT_DIGITS[parseInt(c)]; }).join("");
+  }
+
+  /* ── 1. Info Panel ────────────────────────────────────── */
+  (function renderInfo() {
+    var panel = document.getElementById("info-panel");
+    var U = window.__UNIFIED_DATA__;
+
+    // Source file header
+    if (U && U.source_file) {
+      var fileHeader = el("div", { style: "font-size:13px;color:#7f8c8d;margin-bottom:6px;" }, "\uD83D\uDCC4 " + U.source_file);
+      panel.appendChild(fileHeader);
+    }
+
+    panel.appendChild(el("h2", null, "Identification"));
+    var grid = el("div", { "class": "info-grid" });
+    function add(label, value, cls) {
+      var item = el("div", { "class": "info-item" });
+      item.appendChild(el("span", { "class": "info-label" }, label));
+      var v = el("span", { "class": "info-value" + (cls ? " " + cls : "") });
+      if (typeof value === "string") { v.textContent = value; }
+      else { v.appendChild(value); }
+      item.appendChild(v);
+      grid.appendChild(item);
+    }
+
+    var scoreVal = D.score;
+    var badgeCls = "score-badge " + (scoreVal > 0.5 ? "good" : scoreVal >= 0.2 ? "mid" : "low");
+    var badge = el("span", { "class": badgeCls }, fmt(scoreVal, 3));
+    var scoreWrap = document.createElement("span");
+    scoreWrap.appendChild(badge);
+    scoreWrap.appendChild(document.createTextNode("  (" + D.matched_ions + "/" + D.total_ions + " ions)"));
+
+    add("Scan / RT", "Scan " + D.scan_number + "  \u2014  " + fmt(D.retention_time_sec / 60, 2) + " min (" + fmt(D.retention_time_sec, 1) + " s)");
+    add("Charge", D.charge + "+");
+    add("Peptide", D.peptide_sequence, "peptide");
+    add("Protein(s)", D.protein_accessions.join(", ") || "\u2014");
+    add("Score", scoreWrap);
+    add("Precursor m/z", fmt(D.precursor_mz, 4));
+    add("\u0394 mass", fmt(D.delta_mass_ppm, 2) + " ppm");
+    panel.appendChild(grid);
+  })();
+
+  /* ── 2. Fragment Ion Coverage (SVG bracket notation) ──── */
+  (function renderCoverage() {
+    var panel = document.getElementById("coverage-panel");
+    panel.appendChild(el("h2", null, "Fragment Ion Coverage"));
+    var seq = D.peptide_sequence;
+    var n = seq.length;
+
+    var cellW = 44;
+    var totalW = n * cellW + 40;
+    var seqY = 70;
+    // y-bracket (above): C-term fragment, horizontal RIGHT over right residue
+    var yHorizY = seqY - 20;
+    var yVertTop = yHorizY;
+    var yVertBot = seqY - 6;
+    var yLabelY = yHorizY - 5;
+    // b-bracket (below): N-term fragment, horizontal LEFT over left residue
+    var bHorizY = seqY + 20;
+    var bVertTop = seqY + 10;
+    var bVertBot = bHorizY;
+    var bLabelY = bHorizY + 16;
+    var svgH = bLabelY + 10;
+    var xOff = 20;
+
+    var covSvg = svgEl("svg", {
+      width: "100%", height: "auto",
+      viewBox: "0 0 " + totalW + " " + svgH,
+      preserveAspectRatio: "xMidYMid meet",
+      style: "max-width:" + totalW + "px"
+    });
+
+    // Build match lookups
+    var bMatched = [], yMatched = [];
+    var bNumbers = [], yNumbers = [];
+    for (var ci = 0; ci < n - 1; ci++) {
+      var bIon = D.b_ions[ci];
+      bMatched[ci] = !!(bIon && bIon.matched);
+      bNumbers[ci] = bIon ? bIon.number : (ci + 1);
+      var yIdx = n - 2 - ci;
+      var yIon = D.y_ions[yIdx];
+      yMatched[ci] = !!(yIon && yIon.matched);
+      yNumbers[ci] = yIon ? yIon.number : (n - 1 - ci);
+    }
+
+    // Amino acid letters
+    for (var si = 0; si < n; si++) {
+      var ax = xOff + si * cellW + cellW / 2;
+      var aa = svgEl("text", {
+        x: ax, y: seqY,
+        "text-anchor": "middle",
+        "dominant-baseline": "central",
+        "font-size": "20",
+        "font-family": "'Courier New', Courier, monospace",
+        "font-weight": "700",
+        fill: "#2c3e50"
+      });
+      aa.textContent = seq[si];
+      covSvg.appendChild(aa);
+    }
+
+    // Draw brackets at each cleavage position
+    for (var ci2 = 0; ci2 < n - 1; ci2++) {
+      var cleavX = xOff + (ci2 + 1) * cellW;
+      var rightCenterX = cleavX + cellW / 2;  // center of right residue
+      var leftCenterX = cleavX - cellW / 2;   // center of left residue
+
+      var bColor = bMatched[ci2] ? "#d63031" : "#e0e0e0";
+      var bStroke = bMatched[ci2] ? 2.5 : 1.2;
+      var yColor = yMatched[ci2] ? "#0984e3" : "#e0e0e0";
+      var yStroke = yMatched[ci2] ? 2.5 : 1.2;
+
+      // y-ion (ABOVE): C-term fragment — stub down + horizontal RIGHT
+      covSvg.appendChild(svgEl("line", {
+        x1: cleavX, y1: yVertTop, x2: cleavX, y2: yVertBot,
+        stroke: yColor, "stroke-width": yStroke, "stroke-linecap": "round",
+        "class": "cov-bracket", "data-ion": "y" + yNumbers[ci2]
+      }));
+      covSvg.appendChild(svgEl("line", {
+        x1: cleavX, y1: yHorizY, x2: rightCenterX, y2: yHorizY,
+        stroke: yColor, "stroke-width": yStroke, "stroke-linecap": "round",
+        "class": "cov-bracket", "data-ion": "y" + yNumbers[ci2]
+      }));
+      var yLbl = svgEl("text", {
+        x: cleavX + 2, y: yLabelY,
+        "font-size": "10", "font-weight": "600",
+        fill: yColor, "text-anchor": "start",
+        "class": "cov-bracket", "data-ion": "y" + yNumbers[ci2]
+      });
+      yLbl.textContent = "y" + subscript(yNumbers[ci2]);
+      covSvg.appendChild(yLbl);
+
+      // b-ion (BELOW): N-term fragment — stub up + horizontal LEFT
+      covSvg.appendChild(svgEl("line", {
+        x1: cleavX, y1: bVertTop, x2: cleavX, y2: bVertBot,
+        stroke: bColor, "stroke-width": bStroke, "stroke-linecap": "round",
+        "class": "cov-bracket", "data-ion": "b" + bNumbers[ci2]
+      }));
+      covSvg.appendChild(svgEl("line", {
+        x1: cleavX, y1: bHorizY, x2: leftCenterX, y2: bHorizY,
+        stroke: bColor, "stroke-width": bStroke, "stroke-linecap": "round",
+        "class": "cov-bracket", "data-ion": "b" + bNumbers[ci2]
+      }));
+      var bLbl = svgEl("text", {
+        x: cleavX - 2, y: bLabelY,
+        "font-size": "10", "font-weight": "600",
+        fill: bColor, "text-anchor": "end",
+        "class": "cov-bracket", "data-ion": "b" + bNumbers[ci2]
+      });
+      bLbl.textContent = "b" + subscript(bNumbers[ci2]);
+      covSvg.appendChild(bLbl);
+    }
+
+    panel.appendChild(covSvg);
+  })();
+
+  /* ── 3. Interactive Spectrum ──────────────────────────── */
+  (function renderSpectrum() {
+    var container = document.getElementById("spectrum-container");
+    var tooltip = document.getElementById("tooltip");
+
+    var W = 1200, H = 500;
+    var margin = { top: 40, right: 30, bottom: 55, left: 65 };
+    var pw = W - margin.left - margin.right;
+    var ph = H - margin.top - margin.bottom;
+
+    var peaks = D.peaks;
+    if (!peaks.length) return;
+    var maxMz = 0, maxInt = 0;
+    for (var i = 0; i < peaks.length; i++) {
+      if (peaks[i].mz > maxMz) maxMz = peaks[i].mz;
+      if (peaks[i].intensity > maxInt) maxInt = peaks[i].intensity;
+    }
+    var mzMin = 0;
+    var mzMax = maxMz * 1.05;
+    var intMax = maxInt;
+    var minMatchedH = ph * 0.05;
+
+    function xScale(v) { return margin.left + (v - mzMin) / (mzMax - mzMin) * pw; }
+    function yScale(v) { return margin.top + ph - (v / intMax) * ph; }
+
+    var svg = svgEl("svg", {
+      width: "100%", height: "auto",
+      viewBox: "0 0 " + W + " " + H,
+      preserveAspectRatio: "xMidYMid meet"
+    });
+
+    // Background
+    svg.appendChild(svgEl("rect", {
+      x: margin.left, y: margin.top, width: pw, height: ph,
+      fill: "#f8f9fa"
+    }));
+
+    // Horizontal grid lines at 25%, 50%, 75%, 100%
+    var gGrid = svgEl("g");
+    var gridPcts = [25, 50, 75, 100];
+    for (var gi = 0; gi < gridPcts.length; gi++) {
+      var gy = yScale(gridPcts[gi] / 100 * intMax);
+      gGrid.appendChild(svgEl("line", {
+        x1: margin.left, y1: gy, x2: margin.left + pw, y2: gy,
+        stroke: "#e8e8e8", "stroke-width": "0.5", "stroke-dasharray": "4,3"
+      }));
+    }
+    svg.appendChild(gGrid);
+
+    // Axes
+    var gAxis = svgEl("g", { "class": "axis" });
+
+    // x-axis
+    gAxis.appendChild(svgEl("line", {
+      x1: margin.left, y1: margin.top + ph,
+      x2: margin.left + pw, y2: margin.top + ph, stroke: "#dee2e6"
+    }));
+    var xTicks = niceRange(mzMin, mzMax, 10);
+    for (var xi = 0; xi < xTicks.length; xi++) {
+      var tx = xScale(xTicks[xi]);
+      gAxis.appendChild(svgEl("line", {
+        x1: tx, y1: margin.top + ph, x2: tx, y2: margin.top + ph + 5, stroke: "#dee2e6"
+      }));
+      var tl = svgEl("text", { x: tx, y: margin.top + ph + 18, "text-anchor": "middle" });
+      tl.textContent = xTicks[xi];
+      gAxis.appendChild(tl);
+    }
+    var xLabel = svgEl("text", {
+      x: margin.left + pw / 2, y: H - 6,
+      "text-anchor": "middle", "class": "axis-label"
+    });
+    xLabel.textContent = "m/z";
+    gAxis.appendChild(xLabel);
+
+    // y-axis
+    gAxis.appendChild(svgEl("line", {
+      x1: margin.left, y1: margin.top,
+      x2: margin.left, y2: margin.top + ph, stroke: "#dee2e6"
+    }));
+    var yTicks = [0, 25, 50, 75, 100];
+    for (var yi = 0; yi < yTicks.length; yi++) {
+      var pct = yTicks[yi];
+      var ty = yScale(pct / 100 * intMax);
+      gAxis.appendChild(svgEl("line", {
+        x1: margin.left - 5, y1: ty, x2: margin.left, y2: ty, stroke: "#dee2e6"
+      }));
+      var yl = svgEl("text", { x: margin.left - 8, y: ty + 4, "text-anchor": "end" });
+      yl.textContent = pct + "%";
+      gAxis.appendChild(yl);
+    }
+    var yLabelEl = svgEl("text", {
+      x: 16, y: margin.top + ph / 2,
+      "text-anchor": "middle", "class": "axis-label",
+      transform: "rotate(-90,16," + (margin.top + ph / 2) + ")"
+    });
+    yLabelEl.textContent = "Relative Intensity";
+    gAxis.appendChild(yLabelEl);
+    svg.appendChild(gAxis);
+
+    // Separate peaks into layers: noise → unmatched → matched (draw order)
+    var baseline = margin.top + ph;
+    var gNoise = svgEl("g");
+    var gUnmatched = svgEl("g");
+    var gMatched = svgEl("g");
+    var gLabels = svgEl("g");
+    var gHitboxes = svgEl("g");
+
+    // Collect label positions for overlap staggering
+    var labelPositions = [];
+
+    for (var p = 0; p < peaks.length; p++) {
+      var pk = peaks[p];
+      var relInt = pk.intensity / intMax;
+      var x = xScale(pk.mz);
+      var ann = pk.annotation;
+
+      if (ann) {
+        // Matched peak: 3px stroke, vivid color, minimum height enforced
+        var peakH = relInt * ph;
+        if (peakH < minMatchedH) peakH = minMatchedH;
+        var y2m = baseline - peakH;
+        var col = ann.ion_type === "B" ? "#d63031" : "#0984e3";
+
+        gMatched.appendChild(svgEl("line", {
+          x1: x, y1: baseline, x2: x, y2: y2m,
+          stroke: col, "stroke-width": "3", "stroke-linecap": "round"
+        }));
+
+        // Label with subscript digits
+        var ionPrefix = ann.ion_type === "B" ? "b" : "y";
+        var labelText = ionPrefix + subscript(ann.ion_number);
+        var labelY = y2m - 6;
+
+        // Stagger to avoid overlap
+        for (var li = 0; li < labelPositions.length; li++) {
+          if (Math.abs(labelPositions[li].x - x) < 20) {
+            var diff = Math.abs(labelPositions[li].y - labelY);
+            if (diff < 16) {
+              labelY = labelPositions[li].y - 18;
+            }
+          }
+        }
+        if (labelY < margin.top + 4) labelY = margin.top + 4;
+        labelPositions.push({ x: x, y: labelY });
+
+        var lt = svgEl("text", {
+          x: x, y: labelY, "text-anchor": "middle",
+          fill: col, "font-size": "14", "font-weight": "700"
+        });
+        lt.textContent = labelText;
+        gLabels.appendChild(lt);
+
+      } else if (relInt < 0.05) {
+        // Noise peak: very thin, very light
+        var y2n = yScale(pk.intensity);
+        gNoise.appendChild(svgEl("line", {
+          x1: x, y1: baseline, x2: x, y2: y2n,
+          stroke: "#f0f0f0", "stroke-width": "0.5"
+        }));
+      } else {
+        // Unmatched peak above 5%: thin, light gray
+        var y2u = yScale(pk.intensity);
+        gUnmatched.appendChild(svgEl("line", {
+          x1: x, y1: baseline, x2: x, y2: y2u,
+          stroke: "#d0d0d0", "stroke-width": "1"
+        }));
+      }
+
+      // Hitbox for all peaks (wider for easier hovering)
+      (function (peak, px, ann2) {
+        var peakTop = ann2
+          ? baseline - Math.max((peak.intensity / intMax) * ph, minMatchedH)
+          : yScale(peak.intensity);
+        var hitbox = svgEl("line", {
+          x1: px, y1: baseline, x2: px, y2: peakTop,
+          stroke: "transparent", "stroke-width": "12", fill: "none",
+          cursor: "pointer"
+        });
+
+        var ionId = ann2 ? ((ann2.ion_type === "B" ? "b" : "y") + ann2.ion_number) : null;
+
+        hitbox.addEventListener("mouseenter", function () {
+          var relI = (peak.intensity / intMax * 100);
+          var html = "<div class=\"tip-row\"><span class=\"tip-label\">m/z</span><span class=\"tip-val\">" + fmt(peak.mz, 4) + "</span></div>";
+          html += "<div class=\"tip-row\"><span class=\"tip-label\">Intensity</span><span class=\"tip-val\">" + fmt(peak.intensity, 1) + " (" + fmt(relI, 1) + "%)</span></div>";
+          if (ann2) {
+            html += "<hr class=\"tip-sep\">";
+            var lbl = (ann2.ion_type === "B" ? "b" : "y") + "<sub>" + ann2.ion_number + "</sub>";
+            html += "<div class=\"tip-row\"><span class=\"tip-label\">Ion</span><span class=\"tip-val\">" + lbl + "</span></div>";
+            html += "<div class=\"tip-row\"><span class=\"tip-label\">\u0394 ppm</span><span class=\"tip-val\">" + fmt(ann2.delta_ppm, 2) + "</span></div>";
+          }
+          tooltip.innerHTML = html;
+          tooltip.style.display = "block";
+
+          // Highlight corresponding bracket in coverage diagram
+          if (ionId) {
+            var brackets = document.querySelectorAll(".cov-bracket[data-ion='" + ionId + "']");
+            for (var bi = 0; bi < brackets.length; bi++) {
+              brackets[bi].classList.add("highlight");
+            }
+          }
+        });
+        hitbox.addEventListener("mousemove", function (ev) {
+          tooltip.style.left = (ev.clientX + 14) + "px";
+          tooltip.style.top = (ev.clientY - 28) + "px";
+        });
+        hitbox.addEventListener("mouseleave", function () {
+          tooltip.style.display = "none";
+          if (ionId) {
+            var brackets = document.querySelectorAll(".cov-bracket[data-ion='" + ionId + "']");
+            for (var bi2 = 0; bi2 < brackets.length; bi2++) {
+              brackets[bi2].classList.remove("highlight");
+            }
+          }
+        });
+        gHitboxes.appendChild(hitbox);
+      })(pk, x, ann);
+    }
+
+    svg.appendChild(gNoise);
+    svg.appendChild(gUnmatched);
+    svg.appendChild(gMatched);
+    svg.appendChild(gLabels);
+    svg.appendChild(gHitboxes);
+    container.appendChild(svg);
+  })();
+
+  /* nice tick generation */
+  function niceRange(lo, hi, count) {
+    var span = hi - lo;
+    if (span <= 0) return [lo];
+    var rough = span / count;
+    var mag = Math.pow(10, Math.floor(Math.log10(rough)));
+    var res = rough / mag;
+    var step;
+    if (res <= 1.5) step = mag;
+    else if (res <= 3) step = 2 * mag;
+    else if (res <= 7) step = 5 * mag;
+    else step = 10 * mag;
+    var start = Math.ceil(lo / step) * step;
+    var ticks = [];
+    for (var v = start; v <= hi; v += step) {
+      ticks.push(Math.round(v * 1e6) / 1e6);
+    }
+    return ticks;
+  }
+})();
+
+/* ================================================================
+   Section B — XIC + SILAC Controls + Ion Toggle + Recomputation
+   ================================================================ */
+(function () {
+  "use strict";
+  var U = window.__UNIFIED_DATA__;
+  if (!U) return;
+  var X = U.xic;
+  if (!X) return;
+
+  // Show XIC-related sections
+  document.getElementById("silac-section").style.display = "";
+  document.getElementById("ion-toggle-section").style.display = "";
+  document.getElementById("ms1-section").style.display = "";
+  document.getElementById("ms2-section").style.display = "";
+  document.getElementById("params-section").style.display = "";
+
+  /* ── SILAC Presets ─────────────────────────────────────── */
+  var PRESETS = {
+    none:     { k: 0, r: 0 },
+    standard: { k: 8.014199, r: 10.008269 },
+    medium:   { k: 4.025107, r: 6.020129 }
+  };
+
+  var colors = ['#1f77b4','#ff7f0e','#2ca02c','#d62728','#9467bd','#8c564b'];
+
+  /* ── Ion visibility state ──────────────────────────────── */
+  // Build ion list: precursor + fragment traces
+  var ionList = []; // { id, label, hasLight, hasHeavy }
+  ionList.push({ id: 'precursor', label: 'Precursor', hasLight: true, hasHeavy: true });
+  if (X.fragment_xic_traces) {
+    X.fragment_xic_traces.forEach(function(t, i) {
+      ionList.push({ id: 'frag_' + i, label: t.ion_label, hasLight: true, hasHeavy: true });
+    });
+  }
+  // Track visibility per ion: { light: bool, heavy: bool }
+  var ionVis = {};
+  ionList.forEach(function(ion) { ionVis[ion.id] = { light: true, heavy: true }; });
+
+  /* ── Build ion toggle grid ─────────────────────────────── */
+  (function buildIonGrid() {
+    var grid = document.getElementById("ion-grid");
+    ionList.forEach(function(ion) {
+      var col = document.createElement("div");
+      col.className = "ion-col";
+
+      var lbl = document.createElement("span");
+      lbl.className = "ion-col-label";
+      lbl.textContent = ion.label;
+      col.appendChild(lbl);
+
+      // Light checkbox
+      var lightToggle = document.createElement("label");
+      lightToggle.className = "ion-toggle ion-toggle-light";
+      var lightCb = document.createElement("input");
+      lightCb.type = "checkbox"; lightCb.checked = true;
+      lightCb.dataset.ionId = ion.id; lightCb.dataset.channel = "light";
+      lightToggle.appendChild(lightCb);
+      lightToggle.appendChild(document.createTextNode("L"));
+      col.appendChild(lightToggle);
+
+      // Heavy checkbox
+      var heavyToggle = document.createElement("label");
+      heavyToggle.className = "ion-toggle heavy ion-toggle-heavy";
+      var heavyCb = document.createElement("input");
+      heavyCb.type = "checkbox"; heavyCb.checked = true;
+      heavyCb.dataset.ionId = ion.id; heavyCb.dataset.channel = "heavy";
+      heavyToggle.appendChild(heavyCb);
+      heavyToggle.appendChild(document.createTextNode("H"));
+      col.appendChild(heavyToggle);
+
+      grid.appendChild(col);
+    });
+
+    // Checkbox change → update ionVis + re-render
+    grid.addEventListener("change", function(ev) {
+      var cb = ev.target;
+      if (cb.tagName !== "INPUT") return;
+      ionVis[cb.dataset.ionId][cb.dataset.channel] = cb.checked;
+      update();
+    });
+
+    // Bulk buttons
+    document.getElementById("btn-all-light").addEventListener("click", function() {
+      ionList.forEach(function(ion) { ionVis[ion.id].light = true; ionVis[ion.id].heavy = false; });
+      syncCheckboxes(); update();
+    });
+    document.getElementById("btn-all-heavy").addEventListener("click", function() {
+      ionList.forEach(function(ion) { ionVis[ion.id].light = false; ionVis[ion.id].heavy = true; });
+      syncCheckboxes(); update();
+    });
+    document.getElementById("btn-all-on").addEventListener("click", function() {
+      ionList.forEach(function(ion) { ionVis[ion.id].light = true; ionVis[ion.id].heavy = true; });
+      syncCheckboxes(); update();
+    });
+    document.getElementById("btn-all-off").addEventListener("click", function() {
+      ionList.forEach(function(ion) { ionVis[ion.id].light = false; ionVis[ion.id].heavy = false; });
+      syncCheckboxes(); update();
+    });
+
+    function syncCheckboxes() {
+      var cbs = grid.querySelectorAll("input[type=checkbox]");
+      for (var i = 0; i < cbs.length; i++) {
+        cbs[i].checked = ionVis[cbs[i].dataset.ionId][cbs[i].dataset.channel];
+      }
+    }
+  })();
+
+  /* ── Binary search for intensity extraction ────────────── */
+  function binarySearchLo(arr, val) {
+    if (!arr) return 0;
+    var lo = 0, hi = arr.length;
+    while (lo < hi) { var mid = (lo + hi) >> 1; arr[mid] < val ? lo = mid + 1 : hi = mid; }
+    return lo;
+  }
+
+  function extractIntensity(targetMz, mzArr, intArr, tolPpm) {
+    var tolDa = targetMz * tolPpm * 1e-6;
+    var lo = binarySearchLo(mzArr, targetMz - tolDa * 1.5);
+    var best = 0;
+    for (var i = lo; i < mzArr.length && mzArr[i] <= targetMz + tolDa * 1.5; i++) {
+      if (Math.abs(mzArr[i] - targetMz) / targetMz * 1e6 <= tolPpm) {
+        if (intArr[i] > best) best = intArr[i];
+      }
+    }
+    return best;
+  }
+
+  /* ── Heavy recomputation engine ────────────────────────── */
+  function recomputeHeavy(kDelta, rDelta) {
+    var info = U.peptide_info;
+    if (!info) return { ms1Heavy: null, ms2Heavy: [], heavyIons: [], heavyPrecMz: 0 };
+    var tol = X.extraction_params.mz_tolerance.value; // ppm
+
+    var precDelta = info.total_k * kDelta + info.total_r * rDelta;
+    var heavyPrecMz = info.precursor_mz + precDelta / Math.abs(info.charge);
+
+    var ionMeta = U.ion_metadata || [];
+    var heavyIons = ionMeta.map(function(ion) {
+      var d = ion.k_count * kDelta + ion.r_count * rDelta;
+      return { label: ion.label, heavy_mz: ion.light_mz + d / ion.charge };
+    });
+
+    var ms1Heavy = null;
+    if (U.raw_scans && U.raw_scans.ms1_scans.length > 0) {
+      ms1Heavy = U.raw_scans.ms1_scans.map(function(s) {
+        return { rt: s.retention_time_sec, scan: s.scan_number,
+                 intensity: extractIntensity(heavyPrecMz, s.mz_array, s.intensity_array, tol) };
+      });
+    }
+
+    var ms2Heavy = heavyIons.map(function(ion) {
+      if (!U.raw_scans) return [];
+      return U.raw_scans.ms2_scans.map(function(s) {
+        return { rt: s.retention_time_sec, scan: s.scan_number,
+                 intensity: extractIntensity(ion.heavy_mz, s.mz_array, s.intensity_array, tol) };
+      });
+    });
+
+    return { ms1Heavy: ms1Heavy, ms2Heavy: ms2Heavy, heavyIons: heavyIons, heavyPrecMz: heavyPrecMz };
+  }
+
+  /* ── Plotly rendering (uses ionVis for per-ion visibility) ─── */
+  function renderPlots(heavyResult) {
+    var targetRt = X.target_rt_sec;
+    var rtShape = [{
+      type: 'line', x0: targetRt, x1: targetRt, y0: 0, y1: 1,
+      yref: 'paper', line: { color: 'red', width: 1, dash: 'dot' }
+    }];
+
+    var precVis = ionVis['precursor'] || { light: true, heavy: true };
+
+    /* — MS1 Plot — */
+    var ms1Traces = [];
+    if (precVis.light && X.ms1_precursor_xic) {
+      ms1Traces.push({
+        x: X.ms1_precursor_xic.data_points.map(function(p) { return p.retention_time_sec; }),
+        y: X.ms1_precursor_xic.data_points.map(function(p) { return p.intensity; }),
+        name: X.ms1_precursor_xic.ion_label + ' (L)',
+        mode: 'lines+markers',
+        line: { color: colors[0], width: 2, dash: 'solid' },
+        marker: { size: 3 },
+        hovertemplate: X.ms1_precursor_xic.ion_label + ' (Light)<br>RT: %{x:.1f}s<br>Intensity: %{y:.0f}<extra></extra>'
+      });
+    }
+    if (precVis.heavy && heavyResult && heavyResult.ms1Heavy) {
+      ms1Traces.push({
+        x: heavyResult.ms1Heavy.map(function(p) { return p.rt; }),
+        y: heavyResult.ms1Heavy.map(function(p) { return p.intensity; }),
+        name: 'Precursor (H) ' + heavyResult.heavyPrecMz.toFixed(4),
+        mode: 'lines+markers',
+        line: { color: colors[0], width: 2, dash: 'dash' },
+        marker: { size: 3 },
+        hovertemplate: 'Precursor (Heavy)<br>RT: %{x:.1f}s<br>Intensity: %{y:.0f}<extra></extra>'
+      });
+    }
+
+    if (ms1Traces.length > 0) {
+      Plotly.newPlot('ms1-plot', ms1Traces, {
+        title: { text: 'MS1 Precursor XIC', font: { size: 14 } },
+        xaxis: { title: 'RT (s)' },
+        yaxis: { title: 'Intensity' },
+        shapes: rtShape,
+        margin: { t: 40, b: 40, l: 60, r: 20 },
+        showlegend: true,
+        legend: { orientation: 'h', y: 1.15 }
+      }, { responsive: true });
+    } else {
+      document.getElementById('ms1-plot').innerHTML = '<p style="text-align:center;color:#999;padding:20px;">No MS1 precursor XIC data (or hidden by toggle)</p>';
+    }
+
+    /* — MS2 Plot — */
+    var ms2Traces = [];
+    if (X.fragment_xic_traces) {
+      X.fragment_xic_traces.forEach(function(t, i) {
+        var fragVis = ionVis['frag_' + i] || { light: true, heavy: true };
+        if (fragVis.light) {
+          ms2Traces.push({
+            x: t.data_points.map(function(p) { return p.retention_time_sec; }),
+            y: t.data_points.map(function(p) { return p.intensity; }),
+            name: t.ion_label + ' (L)',
+            mode: 'lines+markers',
+            line: { color: colors[i % colors.length], width: 2, dash: 'solid' },
+            marker: { size: 3 },
+            hovertemplate: t.ion_label + ' (Light)<br>RT: %{x:.1f}s<br>Intensity: %{y:.0f}<br>m/z: ' + t.theoretical_mz.toFixed(4) + '<extra></extra>'
+          });
+        }
+        if (fragVis.heavy && heavyResult && heavyResult.ms2Heavy && heavyResult.ms2Heavy[i]) {
+          var pts = heavyResult.ms2Heavy[i];
+          if (pts && pts.length > 0) {
+            var ionLabel = heavyResult.heavyIons[i] ? heavyResult.heavyIons[i].label + ' (H)' : 'Heavy ion ' + i;
+            ms2Traces.push({
+              x: pts.map(function(p) { return p.rt; }),
+              y: pts.map(function(p) { return p.intensity; }),
+              name: ionLabel,
+              mode: 'lines+markers',
+              line: { color: colors[i % colors.length], width: 2, dash: 'dash' },
+              marker: { size: 3 },
+              hovertemplate: ionLabel + '<br>RT: %{x:.1f}s<br>Intensity: %{y:.0f}<extra></extra>'
+            });
+          }
+        }
+      });
+    }
+
+    if (ms2Traces.length > 0) {
+      Plotly.newPlot('ms2-plot', ms2Traces, {
+        title: { text: 'MS2 Fragment Ion XIC', font: { size: 14 } },
+        xaxis: { title: 'RT (s)' },
+        yaxis: { title: 'Intensity' },
+        shapes: rtShape,
+        margin: { t: 40, b: 40, l: 60, r: 20 },
+        showlegend: true,
+        legend: { orientation: 'h', y: 1.2 }
+      }, { responsive: true });
+    } else {
+      document.getElementById('ms2-plot').innerHTML = '<p style="text-align:center;color:#999;padding:20px;">No MS2 fragment XIC data (or hidden by toggle)</p>';
+    }
+  }
+
+  /* ── SILAC event handling ──────────────────────────────── */
+  if (U.peptide_info.total_k === 0 && U.peptide_info.total_r === 0) {
+    document.getElementById('no-kr-message').style.display = 'block';
+    document.getElementById('silac-preset').value = 'none';
+    document.getElementById('silac-preset').disabled = true;
+  }
+
+  function update() {
+    var preset = document.getElementById('silac-preset').value;
+    document.getElementById('custom-fields').style.display = preset === 'custom' ? 'flex' : 'none';
+
+    var kd, rd;
+    if (preset === 'custom') {
+      kd = parseFloat(document.getElementById('custom-k').value) || 0;
+      rd = parseFloat(document.getElementById('custom-r').value) || 0;
+    } else {
+      var p = PRESETS[preset]; kd = p.k; rd = p.r;
+    }
+
+    document.getElementById('silac-badge').textContent =
+      (kd === 0 && rd === 0) ? 'No label' : 'K+' + kd.toFixed(3) + ' R+' + rd.toFixed(3);
+
+    var heavyResult = (kd === 0 && rd === 0) ? null : recomputeHeavy(kd, rd);
+
+    // When SILAC is "none", uncheck all heavy toggles
+    var grid = document.getElementById('ion-grid');
+    var heavyCbs = grid.querySelectorAll('input[data-channel="heavy"]');
+    for (var i = 0; i < heavyCbs.length; i++) {
+      heavyCbs[i].parentNode.style.opacity = (kd === 0 && rd === 0) ? '0.3' : '1';
+      if (kd === 0 && rd === 0) {
+        heavyCbs[i].checked = false;
+        ionVis[heavyCbs[i].dataset.ionId].heavy = false;
+      }
+    }
+
+    renderPlots(heavyResult);
+  }
+
+  document.getElementById('silac-preset').addEventListener('change', update);
+  document.getElementById('apply-custom').addEventListener('click', update);
+
+  // Parameters footer
+  var ep = X.extraction_params;
+  document.getElementById('params-info').textContent =
+    'Tolerance: ' + ep.mz_tolerance.value + ' ' + ep.mz_tolerance.unit +
+    ' | Cycles: \u00b1' + ep.n_cycles +
+    ' | Top-N: ' + ep.top_n_ions +
+    ' | Intensity: ' + ep.intensity_rule +
+    (ep.label_type ? ' | Label: SILAC' : '');
+
+  // Initial render with standard SILAC
+  update();
+})();
+</script>
+</body>
+</html>
