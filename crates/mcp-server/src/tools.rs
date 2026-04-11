@@ -255,6 +255,21 @@ struct AnnotateSpectrumInput {
     /// Fragment mass tolerance. Default: 20 ppm.
     #[serde(default, deserialize_with = "deserialize_tolerance")]
     fragment_tolerance: Option<protein_copilot_core::search_params::MassTolerance>,
+    /// Number of DIA cycles before/after target for XIC (default: 5).
+    #[serde(default)]
+    n_cycles: Option<u32>,
+    /// Number of top fragment ions for XIC (default: 6).
+    #[serde(default)]
+    top_n_ions: Option<usize>,
+    /// Heavy-label type for SILAC comparison.
+    #[serde(default)]
+    label_type: Option<protein_copilot_xic::LabelType>,
+    /// m/z extraction tolerance for XIC (default: 20 ppm).
+    #[serde(default, deserialize_with = "deserialize_tolerance")]
+    extraction_tolerance: Option<protein_copilot_core::search_params::MassTolerance>,
+    /// Plotly loading mode (default: Cdn).
+    #[serde(default)]
+    plotly_mode: Option<protein_copilot_xic::PlotlyMode>,
 }
 
 #[derive(Debug, Serialize, schemars::JsonSchema)]
@@ -1490,30 +1505,98 @@ impl ProteinCopilotServer {
         )
         .map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, e))?;
 
-        // Render HTML
+        // Try unified rendering with XIC if spectrum file is mzML
         let out_path = input.output_path.map(PathBuf::from).unwrap_or_else(|| {
             PathBuf::from(format!("output/annotation_scan{}.html", input.scan_number))
         });
 
-        ReportGenerator::render_annotation(&annotation, &out_path)
-            .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
+        let use_unified = spectrum_file
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.eq_ignore_ascii_case("mzml"))
+            .unwrap_or(false);
+
+        if use_unified {
+            let xic_params = protein_copilot_xic::ExtractionParams {
+                mz_tolerance: input.extraction_tolerance.unwrap_or(MassTolerance {
+                    value: 20.0,
+                    unit: ToleranceUnit::Ppm,
+                }),
+                n_cycles: input.n_cycles.unwrap_or(5),
+                top_n_ions: input.top_n_ions.unwrap_or(6),
+                label_type: input.label_type.clone(),
+                intensity_rule: protein_copilot_xic::IntensityRule::MaxInWindow,
+            };
+
+            // Try XIC extraction, fall back to annotation-only on failure
+            match protein_copilot_xic::extract::extract_xic_with_raw(
+                &spectrum_file,
+                input.scan_number,
+                &peptide_seq,
+                charge,
+                annotation.precursor_mz,
+                &modifications,
+                &xic_params,
+                20.0, // ms1_mz_window_da
+            ) {
+                Ok((xic_data, raw_scans, ion_metadata)) => {
+                    let peptide_info = protein_copilot_report::unified_types::PeptideInfo {
+                        sequence: peptide_seq.clone(),
+                        charge,
+                        precursor_mz: annotation.precursor_mz,
+                        total_k: peptide_seq.chars().filter(|&c| c == 'K').count() as u32,
+                        total_r: peptide_seq.chars().filter(|&c| c == 'R').count() as u32,
+                    };
+
+                    let unified_data = protein_copilot_report::unified_types::UnifiedViewData {
+                        annotation: annotation.clone(),
+                        xic: Some(xic_data),
+                        raw_scans: Some(raw_scans),
+                        ion_metadata,
+                        peptide_info,
+                    };
+
+                    let plotly_mode =
+                        input.plotly_mode.unwrap_or(protein_copilot_xic::PlotlyMode::Cdn);
+                    ReportGenerator::render_unified(&unified_data, &out_path, plotly_mode)
+                        .map_err(|e| {
+                            mcp_core_err(protein_copilot_core::error::CoreError::from(e))
+                        })?;
+                }
+                Err(_) => {
+                    // Fall back to annotation-only
+                    ReportGenerator::render_annotation(&annotation, &out_path).map_err(|e| {
+                        mcp_core_err(protein_copilot_core::error::CoreError::from(e))
+                    })?;
+                }
+            }
+        } else {
+            // Non-mzML file — annotation only
+            ReportGenerator::render_annotation(&annotation, &out_path)
+                .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
+        }
 
         Ok(Json(AnnotateResult {
             output_path: out_path.display().to_string(),
             scan_number: annotation.scan_number,
-            peptide_sequence: annotation.peptide_sequence,
+            peptide_sequence: annotation.peptide_sequence.clone(),
             charge: annotation.charge,
             score: annotation.score,
             matched_ions: annotation.matched_ions,
             total_ions: annotation.total_ions,
             delta_mass_ppm: annotation.delta_mass_ppm,
-            protein_accessions: annotation.protein_accessions,
+            protein_accessions: annotation.protein_accessions.clone(),
             message: format!(
-                "Annotation saved to {}. Matched {}/{} ions (score: {:.3}). Open in browser to view.",
+                "Annotation saved to {}. Matched {}/{} ions (score: {:.3}). {}",
                 out_path.display(),
                 annotation.matched_ions,
                 annotation.total_ions,
                 annotation.score,
+                if use_unified {
+                    "Includes XIC + SILAC controls."
+                } else {
+                    "Open in browser to view."
+                },
             ),
         }))
     }
