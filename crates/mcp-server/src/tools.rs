@@ -246,6 +246,9 @@ struct AnnotateSpectrumInput {
     /// Charge state — required for manual mode.
     #[serde(default)]
     charge: Option<i32>,
+    /// Retention time in minutes — alternative to scan_number for auto scan lookup.
+    #[serde(default)]
+    retention_time_min: Option<f64>,
     /// Protein accession(s) — optional for manual mode (e.g. ["sp|P00001|TEST_HUMAN"]).
     #[serde(default)]
     protein_accessions: Option<Vec<String>>,
@@ -340,6 +343,10 @@ struct ExtractXicInput {
     /// Target scan number (1-based).
     #[schemars(description = "Scan number (1-based) to center the XIC around.")]
     scan_number: u32,
+    /// Retention time in minutes — alternative to scan_number.
+    #[serde(default)]
+    #[schemars(description = "Retention time in minutes. When scan_number is 0, auto-finds the closest MS2 scan matching this RT and precursor_mz.")]
+    retention_time_min: Option<f64>,
     /// Peptide sequence.
     #[schemars(description = "Peptide amino acid sequence (one-letter codes).")]
     peptide_sequence: Option<String>,
@@ -1428,7 +1435,7 @@ impl ProteinCopilotServer {
     /// Annotate a single spectrum with peptide fragment ion matching.
     #[rmcp::tool(
         name = "annotate_spectrum",
-        description = "Annotate a single spectrum with peptide fragment ion matching. Generates an interactive HTML file showing matched b/y ions. Two modes: (1) provide run_id + scan_number to annotate an existing PSM, or (2) provide file_path + scan_number + peptide_sequence + charge for manual annotation."
+        description = "Annotate a single spectrum with peptide fragment ion matching. Generates an interactive HTML file showing matched b/y ions. Two modes: (1) provide run_id + scan_number to annotate an existing PSM, or (2) provide file_path + scan_number + peptide_sequence + charge for manual annotation. In mode 2, you can set scan_number=0 and provide retention_time_min to auto-find the matching scan."
     )]
     fn annotate_spectrum(
         &self,
@@ -1436,7 +1443,23 @@ impl ProteinCopilotServer {
     ) -> Result<Json<AnnotateResult>, ErrorData> {
         use protein_copilot_core::search_params::{MassTolerance, Modification, ToleranceUnit};
 
-        validate_scan_number(input.scan_number)?;
+        // Allow scan_number=0 only when retention_time_min is provided for auto-lookup
+        if input.scan_number == 0 && input.retention_time_min.is_none() {
+            return Err(mcp_err(
+                ErrorCode::INVALID_PARAMS,
+                "scan_number must be >= 1, or set scan_number=0 with retention_time_min for auto lookup",
+            ));
+        }
+        if input.scan_number != 0 {
+            validate_scan_number(input.scan_number)?;
+        }
+        // RT-based lookup is only for Mode 2 (manual); Mode 1 (run_id) requires valid scan_number
+        if input.scan_number == 0 && input.run_id.is_some() {
+            return Err(mcp_err(
+                ErrorCode::INVALID_PARAMS,
+                "retention_time_min auto-lookup is only supported in manual mode (without run_id). With run_id, provide a valid scan_number.",
+            ));
+        }
 
         // Resolve mode and gather PSM info + spectrum file path
         let (spectrum_file, peptide_seq, charge, modifications, protein_accs) = if let Some(
@@ -1495,10 +1518,36 @@ impl ProteinCopilotServer {
                 ));
         };
 
+        // Resolve scan_number: if 0 and retention_time_min provided, auto-match via RT
+        let resolved_scan = if input.scan_number == 0 {
+            if let Some(rt) = input.retention_time_min {
+                let reader = self.get_or_create_reader(&spectrum_file)?;
+                use protein_copilot_search_engine::chemistry::{residue_mass, PROTON_MASS, WATER_MASS};
+                let base_mass: f64 = peptide_seq.chars().filter_map(residue_mass).sum::<f64>() + WATER_MASS;
+                let mod_mass: f64 = modifications.iter().map(|m| m.mass_delta).sum();
+                let precursor_mz = (base_mass + mod_mass + charge as f64 * PROTON_MASS) / charge as f64;
+                protein_copilot_result_import::scan_matcher::find_scan_by_rt(
+                    &spectrum_file,
+                    rt,
+                    precursor_mz,
+                    0.5,
+                    &*reader,
+                )
+                .map_err(|e| mcp_err(ErrorCode::INVALID_PARAMS, e))?
+            } else {
+                return Err(mcp_err(
+                    ErrorCode::INVALID_PARAMS,
+                    "scan_number is 0: provide retention_time_min for auto lookup",
+                ));
+            }
+        } else {
+            input.scan_number
+        };
+
         // Read the spectrum
         let reader = self.get_or_create_reader(&spectrum_file)?;
         let spectrum = reader
-            .read_spectrum(&spectrum_file, input.scan_number)
+            .read_spectrum(&spectrum_file, resolved_scan)
             .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
 
         let frag_tol = input.fragment_tolerance.unwrap_or(MassTolerance {
@@ -1525,7 +1574,7 @@ impl ProteinCopilotServer {
             .unwrap_or_default();
 
         let out_path = input.output_path.map(PathBuf::from).unwrap_or_else(|| {
-            PathBuf::from(format!("output/annotation_scan{}.html", input.scan_number))
+            PathBuf::from(format!("output/annotation_scan{}.html", resolved_scan))
         });
 
         let is_mzml = spectrum_file
@@ -1565,7 +1614,7 @@ impl ProteinCopilotServer {
 
             match protein_copilot_xic::extract::extract_xic_with_raw(
                 &spectrum_file,
-                input.scan_number,
+                resolved_scan,
                 &peptide_seq,
                 charge,
                 annotation.precursor_mz,
@@ -1817,7 +1866,7 @@ impl ProteinCopilotServer {
     /// Extract XIC (Extracted Ion Chromatogram) for a peptide from an mzML file.
     #[rmcp::tool(
         name = "extract_xic",
-        description = "Extract XIC (Extracted Ion Chromatogram) for a peptide from an mzML file. Generates an interactive HTML file with Plotly.js showing MS1 precursor and MS2 fragment ion chromatograms. Supports SILAC heavy-label comparison. Two modes: (1) provide run_id + scan_number to use PSM context, or (2) provide file_path + scan_number + peptide_sequence + charge + precursor_mz."
+        description = "Extract XIC (Extracted Ion Chromatogram) for a peptide from an mzML file. Generates an interactive HTML file with Plotly.js showing MS1 precursor and MS2 fragment ion chromatograms. Supports SILAC heavy-label comparison. Two modes: (1) provide run_id + scan_number to use PSM context, or (2) provide file_path + scan_number + peptide_sequence + charge + precursor_mz. In mode 2, set scan_number=0 with retention_time_min to auto-find scan."
     )]
     fn extract_xic(
         &self,
@@ -1825,7 +1874,22 @@ impl ProteinCopilotServer {
     ) -> Result<Json<ExtractXicResult>, ErrorData> {
         use protein_copilot_core::search_params::{MassTolerance, ToleranceUnit};
 
-        validate_scan_number(input.scan_number)?;
+        // Allow scan_number=0 when retention_time_min is provided
+        if input.scan_number == 0 && input.retention_time_min.is_none() {
+            return Err(mcp_err(
+                ErrorCode::INVALID_PARAMS,
+                "scan_number must be >= 1, or set scan_number=0 with retention_time_min for auto lookup",
+            ));
+        }
+        if input.scan_number != 0 {
+            validate_scan_number(input.scan_number)?;
+        }
+        if input.scan_number == 0 && input.run_id.is_some() {
+            return Err(mcp_err(
+                ErrorCode::INVALID_PARAMS,
+                "retention_time_min auto-lookup is only supported in manual mode (without run_id). With run_id, provide a valid scan_number.",
+            ));
+        }
 
         // Resolve mode: run_id or manual
         let (file_path, peptide, charge, precursor_mz, modifications) =
@@ -1883,6 +1947,28 @@ impl ProteinCopilotServer {
                 ));
             };
 
+        // Resolve scan_number: if 0 and retention_time_min provided, auto-match via RT
+        let resolved_scan = if input.scan_number == 0 {
+            if let Some(rt) = input.retention_time_min {
+                let reader = self.get_or_create_reader(&file_path)?;
+                protein_copilot_result_import::scan_matcher::find_scan_by_rt(
+                    &file_path,
+                    rt,
+                    precursor_mz,
+                    0.5,
+                    &*reader,
+                )
+                .map_err(|e| mcp_err(ErrorCode::INVALID_PARAMS, e))?
+            } else {
+                return Err(mcp_err(
+                    ErrorCode::INVALID_PARAMS,
+                    "scan_number is 0: provide retention_time_min for auto lookup",
+                ));
+            }
+        } else {
+            input.scan_number
+        };
+
         let params = protein_copilot_xic::ExtractionParams {
             mz_tolerance: input.extraction_tolerance.unwrap_or(MassTolerance {
                 value: 20.0,
@@ -1899,7 +1985,7 @@ impl ProteinCopilotServer {
         // Extract XIC
         let xic_data = protein_copilot_xic::extract::extract_xic(
             &file_path,
-            input.scan_number,
+            resolved_scan,
             &peptide,
             charge,
             precursor_mz,
@@ -1910,7 +1996,7 @@ impl ProteinCopilotServer {
 
         // Render HTML
         let out_path = input.output_path.map(PathBuf::from).unwrap_or_else(|| {
-            PathBuf::from(format!("output/xic_scan{}.html", input.scan_number))
+            PathBuf::from(format!("output/xic_scan{}.html", resolved_scan))
         });
 
         let plotly_mode = input
