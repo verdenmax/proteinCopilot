@@ -14,6 +14,9 @@ pub mod summary;
 pub mod visualize;
 pub mod xic_visualize;
 
+pub mod unified_types;
+pub mod unified_visualize;
+
 pub use error::ReportError;
 
 use std::path::Path;
