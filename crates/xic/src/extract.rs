@@ -244,6 +244,17 @@ pub fn extract_xic(
 
     // --- Pass 0: Get target scan info ---
     let target_spectrum = reader.read_spectrum(file_path, target_scan)?;
+
+    // Validate target scan is MS2
+    if target_spectrum.ms_level != MsLevel::MS2 {
+        return Err(XicError::InvalidPeptide {
+            detail: format!(
+                "scan {} is not MS2 — XIC extraction requires an MS2 scan",
+                target_scan,
+            ),
+        });
+    }
+
     let target_rt = target_spectrum.retention_time_sec;
     let target_window = target_spectrum
         .precursors
@@ -531,12 +542,32 @@ pub fn extract_xic_with_raw(
 
     // --- Pass 0: Get target scan info ---
     let target_spectrum = reader.read_spectrum(file_path, target_scan)?;
+
+    // Validate target scan is MS2
+    if target_spectrum.ms_level != MsLevel::MS2 {
+        return Err(XicError::InvalidPeptide {
+            detail: format!(
+                "scan {} is not MS2 — XIC extraction requires an MS2 scan",
+                target_scan,
+            ),
+        });
+    }
+
     let target_rt = target_spectrum.retention_time_sec;
     let target_window = target_spectrum
         .precursors
         .first()
         .and_then(|p| p.isolation_window.as_ref())
         .cloned();
+
+    // Compute dynamic MS1 trim window: must accommodate heavy precursor shift.
+    // Heavy shift = (K_count * K_delta + R_count * R_delta) / |charge|
+    // Use maximum plausible shift (standard SILAC K+8.015, R+10.009) + 5 Da margin.
+    let k_count = peptide_sequence.chars().filter(|&c| c == 'K').count() as f64;
+    let r_count = peptide_sequence.chars().filter(|&c| c == 'R').count() as f64;
+    let max_heavy_shift =
+        (k_count * 8.015 + r_count * 10.009) / (charge.unsigned_abs() as f64).max(1.0);
+    let effective_ms1_window = ms1_mz_window_da.max(max_heavy_shift + 5.0);
 
     // --- Build target ion list ---
     let light_ions = build_target_ions(peptide_sequence, modifications, charge);
@@ -591,12 +622,12 @@ pub fn extract_xic_with_raw(
                     });
                 }
 
-                // Capture raw MS1 peaks (trimmed to window around precursor)
+                // Capture raw MS1 peaks (trimmed to dynamic window around precursor)
                 let (trimmed_mz, trimmed_int) = trim_peaks_to_window(
                     &spec.mz_array,
                     &spec.intensity_array,
                     precursor_mz,
-                    ms1_mz_window_da,
+                    effective_ms1_window,
                 );
                 if !trimmed_mz.is_empty() {
                     raw_ms1_scans.push(crate::RawScan {
@@ -613,7 +644,7 @@ pub fn extract_xic_with_raw(
                         .isolation_window
                         .as_ref()
                         .is_some_and(|w| same_isolation_window(tw, w)),
-                    (None, _) => true,
+                    (None, _) => true, // DDA: no window filtering, rely on n_cycles post-filter
                     _ => false,
                 };
 
@@ -651,13 +682,19 @@ pub fn extract_xic_with_raw(
                         heavy_intensities,
                     ));
 
-                    // Capture raw MS2 peaks (full spectrum)
-                    raw_ms2_scans.push(crate::RawScan {
-                        scan_number: spec.scan_number,
-                        retention_time_sec: rt,
-                        mz_array: spec.mz_array.clone(),
-                        intensity_array: spec.intensity_array.clone(),
-                    });
+                    // Capture raw MS2 peaks — only if likely to survive n_cycles windowing.
+                    // For DDA (no isolation window), use RT proximity as a pre-filter to
+                    // avoid cloning the entire run's MS2 peak arrays into memory.
+                    // A generous ±300s RT window covers far more than n_cycles would keep.
+                    let rt_close = (rt - target_rt).abs() < 300.0;
+                    if target_window.is_some() || rt_close {
+                        raw_ms2_scans.push(crate::RawScan {
+                            scan_number: spec.scan_number,
+                            retention_time_sec: rt,
+                            mz_array: spec.mz_array.clone(),
+                            intensity_array: spec.intensity_array.clone(),
+                        });
+                    }
                 }
             }
             _ => {}
