@@ -142,7 +142,15 @@ fn build_mgf_index(path: &Path) -> Result<ScanIndex, SpectrumIoError> {
             })?;
 
         let scan = read_scan_from_header(&mut buf_reader, path)?;
-        offsets.insert(scan.unwrap_or(fallback_scan), offset);
+        let scan_num = scan.unwrap_or(fallback_scan);
+        if offsets.contains_key(&scan_num) {
+            tracing::warn!(
+                "duplicate scan number {} in MGF file {:?}; later occurrence overwrites earlier",
+                scan_num,
+                path,
+            );
+        }
+        offsets.insert(scan_num, offset);
     }
 
     Ok(ScanIndex::new(offsets, IndexSource::BuiltFromScan))

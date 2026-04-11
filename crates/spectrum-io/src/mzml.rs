@@ -339,6 +339,12 @@ where
                                 builder.rt_sec = Some(if unit_acc == "UO:0000031" {
                                     rt_val * 60.0 // minutes → seconds
                                 } else {
+                                    if unit_acc.is_empty() {
+                                        tracing::warn!(
+                                            "MS:1000016 scan start time missing unitAccession; \
+                                             assuming seconds (industry convention)"
+                                        );
+                                    }
                                     rt_val // assume seconds
                                 });
                             }

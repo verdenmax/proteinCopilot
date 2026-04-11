@@ -1425,6 +1425,8 @@ impl ProteinCopilotServer {
     ) -> Result<Json<AnnotateResult>, ErrorData> {
         use protein_copilot_core::search_params::{MassTolerance, Modification, ToleranceUnit};
 
+        validate_scan_number(input.scan_number)?;
+
         // Resolve mode and gather PSM info + spectrum file path
         let (spectrum_file, peptide_seq, charge, modifications, protein_accs) = if let Some(
             ref rid,
@@ -1462,7 +1464,6 @@ impl ProteinCopilotServer {
         {
             // Mode 2: manual annotation
             validate_file_path(fp)?;
-            validate_scan_number(input.scan_number)?;
             if pep.trim().is_empty() {
                 return Err(mcp_err(
                     ErrorCode::INVALID_PARAMS,
@@ -1860,7 +1861,7 @@ impl ProteinCopilotServer {
             } else {
                 return Err(mcp_err(
                     ErrorCode::INVALID_PARAMS,
-                    "provide either 'run_id' or 'file_path' + 'peptide_sequence' + 'charge' + 'precursor_mz'",
+                    "provide either 'run_id' + 'scan_number' or 'file_path' + 'scan_number' + 'peptide_sequence' + 'charge' + 'precursor_mz'",
                 ));
             };
 

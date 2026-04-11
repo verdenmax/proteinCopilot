@@ -232,6 +232,11 @@ pub fn extract_xic(
             detail: "peptide sequence is empty".to_string(),
         });
     }
+    if charge <= 0 {
+        return Err(XicError::InvalidPeptide {
+            detail: format!("charge must be > 0, got {charge}"),
+        });
+    }
 
     let info = protein_copilot_spectrum_io::detect_format(file_path)?;
     if info.format != protein_copilot_core::spectrum::SpectrumFormat::MzML {
@@ -528,6 +533,11 @@ pub fn extract_xic_with_raw(
     if peptide_sequence.is_empty() {
         return Err(XicError::InvalidPeptide {
             detail: "peptide sequence is empty".to_string(),
+        });
+    }
+    if charge <= 0 {
+        return Err(XicError::InvalidPeptide {
+            detail: format!("charge must be > 0, got {charge}"),
         });
     }
 

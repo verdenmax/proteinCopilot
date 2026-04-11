@@ -163,11 +163,24 @@ fn find_best_match(
 // ---------------------------------------------------------------------------
 
 /// Calculates the total mass shift from fixed modifications for a peptide.
+/// Applies fixed modifications to compute total mass delta.
+///
+/// `ProteinNTerm`/`ProteinCTerm` mods are **not** applied here because
+/// `annotate_spectrum` is called without protein-terminal context.
+/// Only `AnyNTerm`, `AnyCTerm`, `Anywhere`, and residue-specific mods apply.
 fn apply_fixed_mod_mass(sequence: &str, fixed_mods: &[Modification]) -> f64 {
+    use protein_copilot_core::search_params::ModPosition;
     let mut delta = 0.0;
     for m in fixed_mods {
         if m.residues.is_empty() {
-            delta += m.mass_delta;
+            match m.position {
+                ModPosition::AnyNTerm | ModPosition::AnyCTerm | ModPosition::Anywhere => {
+                    delta += m.mass_delta;
+                }
+                ModPosition::ProteinNTerm | ModPosition::ProteinCTerm => {
+                    // Skip: no terminal context available in annotation mode
+                }
+            }
         } else {
             for ch in sequence.chars() {
                 if m.residues.contains(&ch) {

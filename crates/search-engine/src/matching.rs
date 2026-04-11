@@ -239,21 +239,41 @@ fn count_matched_ions(
 /// Applies fixed modifications to the theoretical peptide mass.
 ///
 /// Terminal mods (empty residues) are applied based on their `ModPosition`:
-/// - `AnyNTerm` / `ProteinNTerm`: apply once (N-terminal)
-/// - `AnyCTerm` / `ProteinCTerm`: apply once (C-terminal)
+/// - `AnyNTerm`: apply once (any peptide N-terminus)
+/// - `AnyCTerm`: apply once (any peptide C-terminus)
+/// - `ProteinNTerm`: apply only if peptide is at protein N-terminus
+/// - `ProteinCTerm`: apply only if peptide is at protein C-terminus
 /// - `Anywhere` with empty residues: treated as a global mod, applied once
 ///
 /// Residue-specific mods: apply once per matching residue in the sequence.
-fn apply_fixed_mods(sequence: &str, mods: &[Modification]) -> f64 {
+fn apply_fixed_mods(
+    sequence: &str,
+    mods: &[Modification],
+    is_protein_nterm: bool,
+    is_protein_cterm: bool,
+) -> f64 {
     use protein_copilot_core::search_params::ModPosition;
     let mut delta = 0.0;
     for m in mods {
         if m.residues.is_empty() {
             match m.position {
-                ModPosition::AnyNTerm | ModPosition::ProteinNTerm |
-                ModPosition::AnyCTerm | ModPosition::ProteinCTerm |
+                ModPosition::AnyNTerm => {
+                    delta += m.mass_delta;
+                }
+                ModPosition::AnyCTerm => {
+                    delta += m.mass_delta;
+                }
+                ModPosition::ProteinNTerm => {
+                    if is_protein_nterm {
+                        delta += m.mass_delta;
+                    }
+                }
+                ModPosition::ProteinCTerm => {
+                    if is_protein_cterm {
+                        delta += m.mass_delta;
+                    }
+                }
                 ModPosition::Anywhere => {
-                    // Terminal or global mod with no specific residue: apply once
                     delta += m.mass_delta;
                 }
             }
@@ -327,7 +347,12 @@ pub fn match_spectrum(
     let mut best_match: Option<PeptideMatch> = None;
 
     for peptide in candidates {
-        let fixed_delta = apply_fixed_mods(&peptide.sequence, fixed_mods);
+        let fixed_delta = apply_fixed_mods(
+            &peptide.sequence,
+            fixed_mods,
+            peptide.is_protein_nterm,
+            peptide.is_protein_cterm,
+        );
 
         // Discover applicable variable mod sites for this peptide
         let sites = crate::varmod::find_applicable_sites(
@@ -449,7 +474,12 @@ pub fn match_spectrum_all(
         let mut best_match: Option<PeptideMatch> = None;
 
         for peptide in candidates {
-            let fixed_delta = apply_fixed_mods(&peptide.sequence, fixed_mods);
+            let fixed_delta = apply_fixed_mods(
+                &peptide.sequence,
+                fixed_mods,
+                peptide.is_protein_nterm,
+                peptide.is_protein_cterm,
+            );
 
             let sites = crate::varmod::find_applicable_sites(
                 &peptide.sequence,
@@ -686,7 +716,7 @@ mod tests {
             position: protein_copilot_core::search_params::ModPosition::Anywhere,
         };
         let modified_mass =
-            peptide.neutral_mass + apply_fixed_mods("PEPTIDCK", std::slice::from_ref(&cam));
+            peptide.neutral_mass + apply_fixed_mods("PEPTIDCK", std::slice::from_ref(&cam), false, false);
         assert!((modified_mass - peptide.neutral_mass - 57.021464).abs() < 0.001);
     }
 
