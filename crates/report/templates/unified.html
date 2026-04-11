@@ -843,7 +843,7 @@
         mode: 'lines+markers',
         line: { color: colors[0], width: 2, dash: 'solid' },
         marker: { size: 3 },
-        hovertemplate: X.ms1_precursor_xic.ion_label + ' (Light)<br>RT: %{x:.2f} min (Scan %{customdata})<br>Intensity: %{y:.0f}<extra></extra>'
+        hovertemplate: X.ms1_precursor_xic.ion_label + ' (Light)<br>RT: %{x:.2f} min<br>Scan: %{customdata}<br>Intensity: %{y:.0f}<extra></extra>'
       });
     }
     if (precVis.heavy && heavyResult && heavyResult.ms1Heavy) {
@@ -855,7 +855,7 @@
         mode: 'lines+markers',
         line: { color: colors[0], width: 2, dash: 'dash' },
         marker: { size: 3 },
-        hovertemplate: 'Precursor (Heavy)<br>RT: %{x:.2f} min (Scan %{customdata})<br>Intensity: %{y:.0f}<extra></extra>'
+        hovertemplate: 'Precursor (Heavy)<br>RT: %{x:.2f} min<br>Scan: %{customdata}<br>Intensity: %{y:.0f}<extra></extra>'
       });
     }
 
@@ -887,7 +887,7 @@
             mode: 'lines+markers',
             line: { color: colors[i % colors.length], width: 2, dash: 'solid' },
             marker: { size: 3 },
-            hovertemplate: t.ion_label + ' (Light)<br>RT: %{x:.2f} min (Scan %{customdata})<br>Intensity: %{y:.0f}<br>m/z: ' + t.theoretical_mz.toFixed(4) + '<extra></extra>'
+            hovertemplate: t.ion_label + ' (Light)<br>RT: %{x:.2f} min<br>Scan: %{customdata}<br>Intensity: %{y:.0f}<br>m/z: ' + t.theoretical_mz.toFixed(4) + '<extra></extra>'
           });
         }
         if (fragVis.heavy && heavyResult && heavyResult.ms2Heavy && heavyResult.ms2Heavy[i]) {
@@ -902,7 +902,7 @@
               mode: 'lines+markers',
               line: { color: colors[i % colors.length], width: 2, dash: 'dash' },
               marker: { size: 3 },
-              hovertemplate: ionLabel + '<br>RT: %{x:.2f} min (Scan %{customdata})<br>Intensity: %{y:.0f}<extra></extra>'
+              hovertemplate: ionLabel + '<br>RT: %{x:.2f} min<br>Scan: %{customdata}<br>Intensity: %{y:.0f}<extra></extra>'
             });
           }
         }
