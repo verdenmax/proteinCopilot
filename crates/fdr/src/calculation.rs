@@ -36,6 +36,11 @@ pub fn calculate_fdr(psms: &[ScoredPsm]) -> Result<Vec<(usize, f64)>, FdrError> 
         return Err(FdrError::InvalidScore);
     }
 
+    // Check that at least one decoy hit exists for target-decoy FDR
+    if !psms.iter().any(|p| p.is_decoy) {
+        return Err(FdrError::NoDecoyHits);
+    }
+
     // Sort by score descending
     let mut sorted: Vec<&ScoredPsm> = psms.iter().collect();
     sorted.sort_by(|a, b| b.score.total_cmp(&a.score));
@@ -146,10 +151,11 @@ mod tests {
             ScoredPsm { index: 0, score: 0.9, is_decoy: false },
             ScoredPsm { index: 1, score: 0.8, is_decoy: false },
         ];
-        let result = calculate_fdr(&psms).unwrap();
-        for (_, q) in &result {
-            assert!(q.abs() < 1e-9, "all targets, no decoys: FDR should be 0");
-        }
+        let result = calculate_fdr(&psms);
+        assert!(
+            matches!(result, Err(FdrError::NoDecoyHits)),
+            "all targets, no decoys: should return NoDecoyHits error"
+        );
     }
 
     #[test]

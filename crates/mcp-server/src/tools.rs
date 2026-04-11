@@ -1026,6 +1026,17 @@ impl ProteinCopilotServer {
             ));
         }
 
+        // Validate that all input files exist before proceeding
+        for file_str in &input.input_files {
+            let p = Path::new(file_str);
+            if !p.exists() {
+                return Err(mcp_err(
+                    ErrorCode::INVALID_PARAMS,
+                    &format!("input file does not exist: {file_str}"),
+                ));
+            }
+        }
+
         let mut params = if let Some(p) = input.params {
             p
         } else {

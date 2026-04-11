@@ -78,8 +78,8 @@ fn residue_heavy_delta(residues: &[char], label: &LabelType) -> f64 {
             heavy_k_delta,
             heavy_r_delta,
         } => {
-            let count_k = residues.iter().filter(|&&c| c == 'K').count() as f64;
-            let count_r = residues.iter().filter(|&&c| c == 'R').count() as f64;
+            let count_k = residues.iter().filter(|&&c| c == 'K' || c == 'k').count() as f64;
+            let count_r = residues.iter().filter(|&&c| c == 'R' || c == 'r').count() as f64;
             count_k * heavy_k_delta + count_r * heavy_r_delta
         }
         LabelType::Custom { residue_deltas } => {

@@ -67,6 +67,7 @@ pub fn extract_dia_precursors(
     let ms1_indices = correlation::correlate_ms1_ms2(&ms1_refs, &ms2_refs);
 
     let mut enhanced_spectra = Vec::with_capacity(ms2_refs.len());
+    let mut skipped_no_iw = 0u64;
     for (ms2, ms1_idx) in ms2_refs.iter().zip(ms1_indices.iter()) {
         let mut cloned = (*ms2).clone();
         if let Some(idx) = ms1_idx {
@@ -77,9 +78,16 @@ pub fn extract_dia_precursors(
             {
                 let candidates = extractor.extract(ms1_refs[*idx], iw);
                 cloned.precursors = candidates;
+            } else {
+                skipped_no_iw += 1;
             }
         }
         enhanced_spectra.push(cloned);
+    }
+    if skipped_no_iw > 0 {
+        tracing::warn!(
+            "{skipped_no_iw} DIA MS2 spectra had no isolation window; precursors not extracted"
+        );
     }
 
     let mut total_precursors_extracted: u32 = 0;

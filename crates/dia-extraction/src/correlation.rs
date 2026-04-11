@@ -56,10 +56,11 @@ pub fn correlate_single_with_method(
         return (Some(idx), "scan_order");
     }
 
-    // Level 3: closest MS1 by retention time
+    // Level 3: closest MS1 by retention time (skip NaN RT values)
     let by_rt = ms1_spectra
         .iter()
         .enumerate()
+        .filter(|(_, s)| s.retention_time_sec.is_finite() && ms2.retention_time_sec.is_finite())
         .min_by(|(_, a), (_, b)| {
             let da = (a.retention_time_sec - ms2.retention_time_sec).abs();
             let db = (b.retention_time_sec - ms2.retention_time_sec).abs();

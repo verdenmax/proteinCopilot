@@ -51,7 +51,9 @@ pub(crate) fn generate_summary(result: &SearchResult) -> SearchResultSummary {
         for m in &psm.modifications {
             *mod_dist.entry(m.name.clone()).or_insert(0) += 1;
         }
-        *charge_dist.entry(psm.charge).or_insert(0) += 1;
+        if psm.charge > 0 {
+            *charge_dist.entry(psm.charge).or_insert(0) += 1;
+        }
         if psm.score.is_finite() {
             scores.push(psm.score);
         }

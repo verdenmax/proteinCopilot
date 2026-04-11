@@ -154,6 +154,8 @@ pub struct Modification {
     /// Modification name (e.g. "Carbamidomethyl", "Oxidation").
     pub name: String,
     /// Mass shift in Daltons.
+    /// Positive for mass-increasing modifications (e.g., +57.021 for Carbamidomethyl),
+    /// negative for mass-decreasing (rare; e.g., -18.011 for dehydration).
     pub mass_delta: f64,
     /// Target residues (e.g. `['C']` for Carbamidomethyl, `['M']` for Oxidation).
     pub residues: Vec<char>,

@@ -90,8 +90,8 @@ pub fn extract_intensity(
 
 /// Check if two isolation windows cover the same DIA region.
 ///
-/// Compares full window bounds (not just center m/z) to avoid
-/// conflating adjacent or overlapping windows.
+/// Uses fixed tolerances: center m/z within 1.0 Da and width within 20%.
+/// These values are suitable for typical DIA window schemes (e.g., SWATH).
 pub fn same_isolation_window(a: &IsolationWindow, b: &IsolationWindow) -> bool {
     let a_lo = a.target_mz - a.lower_offset;
     let a_hi = a.target_mz + a.upper_offset;
@@ -184,8 +184,8 @@ pub fn compute_ion_metadata(ions: &[TargetIon], peptide: &str) -> Vec<crate::Ion
                 ion_number: ion.ion_number,
                 charge: ion.charge,
                 light_mz: ion.mz,
-                k_count: fragment_chars.iter().filter(|&&c| c == 'K').count() as u32,
-                r_count: fragment_chars.iter().filter(|&&c| c == 'R').count() as u32,
+                k_count: fragment_chars.iter().filter(|&&c| c == 'K' || c == 'k').count() as u32,
+                r_count: fragment_chars.iter().filter(|&&c| c == 'R' || c == 'r').count() as u32,
             }
         })
         .collect()
@@ -374,7 +374,12 @@ pub fn extract_xic(
             let end = (pos + n + 1).min(ms2_points.len());
             (start, end)
         }
-        None => (0, ms2_points.len()),
+        None => {
+            return Err(XicError::ScanNotFound {
+                scan: target_scan,
+                path: file_path.to_path_buf(),
+            });
+        }
     };
     let windowed = &ms2_points[start..end];
 
@@ -573,8 +578,8 @@ pub fn extract_xic_with_raw(
     // Compute dynamic MS1 trim window: must accommodate heavy precursor shift.
     // Heavy shift = (K_count * K_delta + R_count * R_delta) / |charge|
     // Use maximum plausible shift (standard SILAC K+8.015, R+10.009) + 5 Da margin.
-    let k_count = peptide_sequence.chars().filter(|&c| c == 'K').count() as f64;
-    let r_count = peptide_sequence.chars().filter(|&c| c == 'R').count() as f64;
+    let k_count = peptide_sequence.chars().filter(|&c| c == 'K' || c == 'k').count() as f64;
+    let r_count = peptide_sequence.chars().filter(|&c| c == 'R' || c == 'r').count() as f64;
     let max_heavy_shift =
         (k_count * 8.015 + r_count * 10.009) / (charge.unsigned_abs() as f64).max(1.0);
     let effective_ms1_window = ms1_mz_window_da.max(max_heavy_shift + 5.0);
@@ -725,7 +730,12 @@ pub fn extract_xic_with_raw(
             let end = (pos + n + 1).min(ms2_points.len());
             (start, end)
         }
-        None => (0, ms2_points.len()),
+        None => {
+            return Err(XicError::ScanNotFound {
+                scan: target_scan,
+                path: file_path.to_path_buf(),
+            });
+        }
     };
     let windowed = &ms2_points[start..end];
 
