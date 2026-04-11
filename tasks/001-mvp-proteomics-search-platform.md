@@ -3,7 +3,7 @@
 > **文件名**：`prd-mvp-proteomics-search.md`
 > **版本**：1.0
 > **创建日期**：2026-03-27
-> **状态**：In Progress — M1.1 ✅ M1.2 ✅ M1.3 ✅ M1.4 ✅ M1.5 ✅ M1.6 ✅ M1.7 ✅（499 tests, 0 warnings）— MVP 完成 + Post-MVP 功能（异步搜索优化、搜索历史持久化、谱图注释可视化）+ DIA 数据支持（前体提取 + 搜索集成 + 端到端工作流 + 单谱图母离子提取）+ Biology Audit 完成 + BUG-1 已修复（碎片离子固定修饰）+ 16 MCP Tools + FW-1 ✅ ProteinNTerm 修饰过滤 + FW-2 ✅ 可变修饰枚举 + FW-3 ✅ ppm 碎片离子容差 + FW-4 ✅ 多电荷碎片离子 + FW-6 ✅ 原生 FDR 计算（fdr crate + decoy 生成 + q-value 单调化）+ XIC 可视化（xic crate + extract_xic tool + SILAC 重标轻重离子 + Plotly.js HTML）+ 索引谱图读取（IndexedMzMLReader / IndexedMgfReader + scan offset 随机访问）+ 外部搜索结果导入（result-import crate + import_search_results tool + DIA-NN parquet / custom JSON / RT 扫描匹配）
+> **状态**：In Progress — M1.1 ✅ M1.2 ✅ M1.3 ✅ M1.4 ✅ M1.5 ✅ M1.6 ✅ M1.7 ✅（510 tests, 0 warnings）— MVP 完成 + Post-MVP 功能（异步搜索优化、搜索历史持久化、谱图注释可视化）+ DIA 数据支持（前体提取 + 搜索集成 + 端到端工作流 + 单谱图母离子提取）+ Biology Audit 完成 + BUG-1 已修复（碎片离子固定修饰）+ 16 MCP Tools + FW-1 ✅ ProteinNTerm 修饰过滤 + FW-2 ✅ 可变修饰枚举 + FW-3 ✅ ppm 碎片离子容差 + FW-4 ✅ 多电荷碎片离子 + FW-6 ✅ 原生 FDR 计算（fdr crate + decoy 生成 + q-value 单调化）+ XIC 可视化（xic crate + extract_xic tool + SILAC 重标轻重离子 + Plotly.js HTML）+ 索引谱图读取（IndexedMzMLReader / IndexedMgfReader + scan offset 随机访问）+ 外部搜索结果导入（result-import crate + import_search_results tool + DIA-NN parquet / custom JSON / RT 扫描匹配）+ 统一标注+XIC 视图（客户端 SILAC 引擎 + 逐离子 L/H 开关 + DDA 自动跳过 XIC）
 
 ---
 
@@ -1105,3 +1105,19 @@ M1.7 (集成验证)    ← 需要所有 MVP Milestone
 - **单位规范**: 外部数据 RT（分钟）自动转为内部标准（秒），DIA-NN Q.Value（lower=better）自动转为 score（higher=better）
 - **下游兼容**: 导入结果可直接用于 annotate_spectrum、extract_xic、generate_summary、export_results
 - **测试**: 32 tests 通过
+
+#### 统一标注+XIC 视图（Unified Annotation + XIC with Interactive SILAC）
+
+- **功能**: 将谱图标注（SVG b/y 离子匹配）和 XIC 色谱图整合为一个交互式 HTML 页面
+- **DDA/DIA 自适应**: 通过 fragment XIC 数据点数量判断（非窗口宽度阈值），DIA 显示完整 XIC，DDA 自动跳过无意义的单点 XIC
+- **客户端 SILAC 引擎**: raw peaks 嵌入 HTML，JS 侧实时切换 SILAC 预设（None/Standard/Medium/Custom）并重新计算重标离子
+- **UI 改进**:
+  - 📄 源文件名显示在页面顶部
+  - Scan + RT 合并显示（如 "Scan 1234 — 12.34 min (740.4 s)"）
+  - 逐离子 L/H 开关网格（每个离子竖向排列 Light/Heavy 复选框）
+  - 批量切换按钮（All Light / All Heavy / Show All / Hide All）
+- **模板**: `crates/report/templates/unified.html`（~870 行自包含 HTML + CSS + JS）
+- **类型**: `UnifiedViewData`（unified_types.rs）— 包含 source_file, peptide_info, annotation, xic, raw_scans, ion_metadata
+- **渲染**: `render_unified_html()`（unified_visualize.rs）— 将 UnifiedViewData → HTML 文件
+- **MCP 集成**: `annotate_spectrum` tool 自动选择渲染模式（unified+xic / unified-only / legacy）
+- **测试**: 510 tests 通过（+11 from unified view）

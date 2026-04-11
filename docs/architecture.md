@@ -374,14 +374,19 @@ impl ReportGenerator {
 **内部结构**：
 ```text
 report/src/
-├── lib.rs         ← ReportGenerator 门面
-├── error.rs       ← ReportError（3 变体）
-├── summary.rs     ← FDR 过滤 + 统计聚合
-├── export.rs      ← TSV/JSON 导出（含 sanitize_tsv 转义）
-└── visualize.rs   ← 谱图注释 HTML 渲染（自包含 HTML，浏览器可直接查看）
+├── lib.rs                ← ReportGenerator 门面
+├── error.rs              ← ReportError（3 变体）
+├── summary.rs            ← FDR 过滤 + 统计聚合
+├── export.rs             ← TSV/JSON 导出（含 sanitize_tsv 转义）
+├── visualize.rs          ← 谱图注释 HTML 渲染（自包含 HTML）
+├── unified_types.rs      ← UnifiedViewData / PeptideInfo 类型
+└── unified_visualize.rs  ← 统一标注+XIC HTML 渲染
+templates/
+├── annotation.html       ← 纯标注 HTML 模板（SVG 谱图 + 覆盖图）
+└── unified.html          ← 统一标注+XIC HTML 模板（含 SILAC 交互控件 + Plotly.js）
 ```
 
-**对外暴露**（补充 `render_annotation`）：
+**对外暴露**（补充 `render_annotation` + `render_unified`）：
 ```rust
 impl ReportGenerator {
     /// 渲染谱图注释为自包含 HTML 文件。
@@ -389,10 +394,20 @@ impl ReportGenerator {
         annotation: &SpectrumAnnotation,
         output_path: &Path,
     ) -> Result<(), ReportError>;
+
+    /// 渲染统一标注+XIC 视图为自包含 HTML 文件。
+    /// 包含：文件名 + Scan/RT、覆盖图（SVG bracket）、谱图、
+    /// SILAC 控件、逐离子 L/H 开关网格、MS1/MS2 XIC（Plotly.js）。
+    /// 当 xic=None 时自动隐藏 XIC 相关区域（DDA 模式）。
+    pub fn render_unified(
+        data: &UnifiedViewData,
+        output_path: &Path,
+        plotly_mode: PlotlyMode,
+    ) -> Result<(), ReportError>;
 }
 ```
 
-**依赖**：`core`（共享类型 + compute_median）, `search-engine`（SpectrumAnnotation 类型）, `serde_json`
+**依赖**：`core`（共享类型 + compute_median）, `search-engine`（SpectrumAnnotation 类型）, `xic`（IonMetadataEntry / RawScanData 类型）, `serde_json`
 
 ---
 
@@ -506,25 +521,31 @@ mcp-server/src/
 
 ### 3.9 `xic`（lib crate）
 
-**职责**：从 mzML 原始数据提取碎片离子的 XIC（Extracted Ion Chromatogram），支持 SILAC 重标记轻重离子对。
+**职责**：从 mzML 原始数据提取碎片离子的 XIC（Extracted Ion Chromatogram），支持 SILAC 重标记轻重离子对。同时提供客户端 SILAC 所需的 raw scan 数据和离子元数据。
 
 **对外暴露**：
 ```text
 xic::
-├── extract_xic()        ← 核心函数：肽段序列 + 电荷 + mzML → XIC 数据
-├── XicResult            ← XIC 结果（per-ion RT-intensity 时间序列）
-├── render_xic_html()    ← Plotly.js 交互式 HTML 可视化
-└── SilacLabel           ← SILAC 重标记定义（heavy K+8, R+10 等）
+├── extract::extract_xic()           ← 核心函数：肽段 + mzML → XicData
+├── extract::extract_xic_with_raw()  ← 增强版：+ RawScanData + IonMetadataEntry
+├── XicData / XicTrace / XicDataPoint
+├── IonMetadataEntry                 ← 离子 K/R 计数（供客户端 SILAC 重计算）
+├── RawScanData / RawScan            ← MS1/MS2 原始峰数组（嵌入 HTML 供 JS 使用）
+├── ExtractionParams                 ← 提取参数（tolerance, n_cycles, top_n_ions 等）
+├── LabelType / SilacLabel           ← SILAC 重标记定义
+└── PlotlyMode                       ← Plotly.js CDN/Embedded 加载模式
 ```
 
 **依赖**：`core`, `spectrum-io`
 **不依赖**：`rmcp`（纯 library）
 
 **设计要点**：
-- 从 MS1 谱图中按 m/z 窗口提取 XIC（而非 MS2）
-- 对每个 b/y 碎片离子，计算理论 m/z，在 RT 范围内扫描 MS1 谱图提取强度
-- SILAC 模式下自动生成轻重碎片离子对，同一 HTML 中并排展示
-- 输出 Plotly.js HTML，支持缩放、悬停显示离子信息
+- MS2 fragment XIC 通过 `same_isolation_window()` 匹配同窗 MS2 扫描（DIA 多点、DDA 单点）
+- MS1 precursor XIC 从全扫描中按 m/z 窗口提取（DDA/DIA 均可用）
+- `extract_xic_with_raw()` 额外输出修剪后的 raw peaks 和 `compute_ion_metadata()` 的 K/R 计数，供 unified HTML 模板的客户端 SILAC 引擎使用
+- MS1 修剪窗口根据肽段 K/R 数量和电荷态动态计算，确保 SILAC 重标前体不被截断
+- DDA 无隔离窗口时，对 raw MS2 克隆使用 ±300s RT 近邻预过滤防止内存暴涨
+- 入口处验证目标扫描必须为 MS2 级别
 
 ### 3.10 `result-import`（lib crate）
 
@@ -909,10 +930,14 @@ Layer 0: 用户
 | `check_engine` | search-engine | (无) | Vec\<(EngineInfo, HealthStatus)\> | 检查引擎可用性 |
 | `generate_summary` | report | search_result | SearchResultSummary | 生成结果摘要 |
 | `export_results` | report | search_result, format, output_path | ExportResult | 导出结果文件 |
+| `annotate_spectrum` | report + xic | run_id/file+peptide+charge, scan | AnnotateResult + HTML | 谱图注释（DIA 自动含 XIC+SILAC） |
 | `extract_dia_precursors` | dia-extraction | file_path, params? | RunId + ExtractionSummary | DIA 前体提取 |
 | `extract_spectrum_precursors` | dia-extraction | file_path, scan_number | SingleSpectrumExtractionResult | 单谱图母离子提取 |
 | `extract_xic` | xic | run_id?, file_path?, scan_number, peptide?, charge? | HTML file path | XIC 碎片离子色谱图（支持 SILAC 轻重标记） |
 | `import_search_results` | result-import | result_path, mzml_files, format? | RunId + ImportSummary | 导入外部搜索结果（DIA-NN / custom JSON） |
+| `list_searches` | mcp-server | status_filter?, limit? | Vec\<SearchHistoryEntry\> | 搜索历史 |
+| `get_search_status` | mcp-server | run_id | SearchProgress | 查询搜索进度 |
+| `cancel_search` | mcp-server | run_id | SearchProgress | 取消搜索 |
 
 ---
 
@@ -964,8 +989,11 @@ Layer 0: 用户
 2. ~~验证 rmcp `#[tool_router]` 宏在最小示例中的可用性~~ ✅
 3. ~~实现 spectrum-io 的 mgf 解析~~ ✅
 
-> MVP 已完成，BUG-1（碎片离子固定修饰）已修复。当前重点：
-> - ~~修复碎片离子评分中固定修饰未应用的 bug（matching.rs）~~ ✅ 已修复
-> - 实现可变修饰组合枚举（FW-2）
-> - 接入 pFind 搜索引擎 adapter
-> - 详见 `tasks/001-mvp-proteomics-search-platform.md` Biology Audit 部分
+> MVP 已完成，BUG-1（碎片离子固定修饰）已修复。
+> Post-MVP 功能已完成：异步搜索、索引访问、DIA 支持、XIC、外部结果导入、Biology Audit。
+> 统一标注+XIC 视图已完成：
+> - 文件名 + Scan/RT 显示
+> - DDA 自动跳过 XIC（基于 fragment trace 数据点判断，非窗口宽度阈值）
+> - 客户端 SILAC 重计算引擎（raw peaks 嵌入 HTML）
+> - 逐离子 L/H 开关网格 + 批量切换按钮
+> - 详见 `tasks/001-mvp-proteomics-search-platform.md`

@@ -73,7 +73,7 @@ crates/
 | `generate_summary` | FDR 过滤统计摘要 |
 | `export_results` | 导出 TSV/JSON 文件 |
 | `list_searches` | 列出搜索历史（活跃 + 持久化） |
-| `annotate_spectrum` | 单张谱图 b/y 离子注释 + HTML 可视化 |
+| `annotate_spectrum` | 谱图注释（DIA: 标注+XIC+SILAC 统一视图；DDA: 标注 only） |
 | `extract_dia_precursors` | DIA MS1 前体离子提取（同位素模式检测） |
 | `extract_spectrum_precursors` | 单张 MS2 谱图母离子提取（调试用） |
 | `extract_xic` | 碎片离子 XIC 色谱图（支持 SILAC 轻重标记） |
@@ -85,7 +85,7 @@ crates/
 - **MCP 协议**：所有能力通过 MCP tools 暴露给 LLM
 - **DDA + DIA 支持**：自动检测采集模式，DIA 数据通过 MS1 同位素模式提取前体离子后搜索
 - **外部结果导入**：DIA-NN parquet / 自定义 JSON → RT 匹配 mzML 扫描号 → 标准 SearchResult
-- **可测试**：499 个单元/集成测试，0 clippy warnings
+- **可测试**：510 个单元/集成测试，0 clippy warnings
 - **可审计**：每次搜索生成 run_id + 完整参数 + 引擎版本记录
 
 ## 当前进度
@@ -102,6 +102,7 @@ crates/
 | Post-MVP | ✅ 异步搜索 + 历史持久化 + 谱图注释 + FW-1/2/3/4/6 |
 | DIA 支持 | ✅ DIA 前体提取 + 搜索集成 + 端到端工作流 |
 | XIC 可视化 | ✅ 碎片离子 XIC + SILAC 轻重标记 + Plotly.js HTML |
+| 统一标注+XIC | ✅ 标注+XIC 合并视图 + 客户端 SILAC + 逐离子 L/H 开关 |
 | 外部结果导入 | ✅ DIA-NN parquet + custom JSON + RT 扫描匹配 + UnimodDb |
 | Biology Audit | ✅ 全部审计，单位统一，score 方向规范化 |
 

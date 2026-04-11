@@ -242,7 +242,23 @@ status 值：`Running` / `Completed` / `Failed: <reason>` / `Cancelled`
 
 ## annotate_spectrum
 
-对单张谱图进行 b/y 离子匹配注释，生成交互式 HTML 可视化（SVG 谱图 + 肽段覆盖图 + hover 工具提示）。
+对单张谱图进行 b/y 离子匹配注释，生成交互式 HTML 可视化。
+
+**渲染模式自动选择**：
+- **mzML + DIA（fragment XIC >1 点）**：统一视图（标注 + XIC + SILAC 交互控件）
+- **mzML + DDA（fragment XIC ≤1 点）**：统一视图（标注 only，跳过无意义的 XIC）
+- **mgf 等非 mzML**：纯标注视图（SVG 谱图 + 覆盖图）
+
+> DDA/DIA 判断基于 fragment XIC 数据点数量，不依赖隔离窗口宽度阈值，
+> 因此窄窗 DIA（如 Scanning SWATH 2 Da）也能正确显示 XIC。
+
+**统一视图包含**：
+- 📄 源文件名 + Scan/RT 合并显示
+- Fragment Ion Coverage（SVG bracket 标注）
+- 谱图（SVG，b/y 离子着色 + hover tooltip）
+- SILAC 预设切换（None / Standard / Medium / Custom）
+- 逐离子 L/H 开关网格（Precursor, y₁, b₂... 竖向排列）
+- MS1 Precursor XIC + MS2 Fragment Ion XIC（Plotly.js）
 
 **模式一：基于搜索结果**
 ```json
@@ -255,10 +271,21 @@ status 值：`Running` / `Completed` / `Failed: <reason>` / `Cancelled`
 **模式二：直接指定肽段**
 ```json
 {
-  "file_path": "/data/sample.mgf",
-  "peptide": "PEPTIDEK",
+  "file_path": "/data/sample.mzML",
+  "peptide_sequence": "PEPTIDEK",
   "charge": 2,
   "scan_number": 42
+}
+```
+
+**可选 XIC 参数**（仅 mzML 有效）：
+```json
+{
+  "n_cycles": 5,
+  "top_n_ions": 6,
+  "label_type": { "Silac": { "k_delta": 8.014199, "r_delta": 10.008269 } },
+  "extraction_tolerance": { "value": 20, "unit": "Ppm" },
+  "plotly_mode": "Cdn"
 }
 ```
 
@@ -268,11 +295,10 @@ status 值：`Running` / `Completed` / `Failed: <reason>` / `Cancelled`
   "score": 0.85,
   "matched_ions": 12,
   "total_ions": 18,
-  "html_path": "./output/annotated_scan42.html"
+  "output_path": "./output/annotation_scan42.html",
+  "message": "...Includes XIC + SILAC controls (DIA)."
 }
 ```
-
-> HTML 文件包含交互式 SVG 谱图（b 离子蓝色、y 离子红色）、肽段序列覆盖图和匹配离子详情表。
 
 ---
 
