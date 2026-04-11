@@ -166,3 +166,26 @@ pub struct IonMetadataEntry {
     /// Count of R (Arginine) residues in this fragment.
     pub r_count: u32,
 }
+
+/// Raw peak data from scans in the XIC RT window.
+/// Used for client-side SILAC recomputation in the unified HTML.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RawScanData {
+    /// MS1 scans (trimmed to narrow m/z window around precursor).
+    pub ms1_scans: Vec<RawScan>,
+    /// MS2 scans (full peak lists from matching isolation windows).
+    pub ms2_scans: Vec<RawScan>,
+}
+
+/// A single raw scan's peak list.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RawScan {
+    /// Scan number (1-based).
+    pub scan_number: u32,
+    /// Retention time in seconds.
+    pub retention_time_sec: f64,
+    /// m/z values (sorted ascending).
+    pub mz_array: Vec<f64>,
+    /// Intensity values (parallel to mz_array).
+    pub intensity_array: Vec<f64>,
+}

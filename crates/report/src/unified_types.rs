@@ -5,7 +5,7 @@ use protein_copilot_xic::XicData;
 use serde::Serialize;
 
 // Re-export types that live in xic crate
-pub use protein_copilot_xic::IonMetadataEntry;
+pub use protein_copilot_xic::{IonMetadataEntry, RawScan, RawScanData};
 
 /// Combined data for the unified HTML template.
 #[derive(Debug, Clone, Serialize)]
@@ -20,28 +20,6 @@ pub struct UnifiedViewData {
     pub ion_metadata: Vec<IonMetadataEntry>,
     /// Peptide-level info for SILAC computation.
     pub peptide_info: PeptideInfo,
-}
-
-/// Raw peak data from scans in the XIC RT window.
-#[derive(Debug, Clone, Serialize)]
-pub struct RawScanData {
-    /// MS1 scans (trimmed to narrow m/z window around precursor).
-    pub ms1_scans: Vec<RawScan>,
-    /// MS2 scans (full peak lists).
-    pub ms2_scans: Vec<RawScan>,
-}
-
-/// A single raw scan's peak list.
-#[derive(Debug, Clone, Serialize)]
-pub struct RawScan {
-    /// Scan number (1-based).
-    pub scan_number: u32,
-    /// Retention time in seconds.
-    pub retention_time_sec: f64,
-    /// m/z values (sorted ascending).
-    pub mz_array: Vec<f64>,
-    /// Intensity values (parallel to mz_array).
-    pub intensity_array: Vec<f64>,
 }
 
 /// Peptide-level SILAC info.
