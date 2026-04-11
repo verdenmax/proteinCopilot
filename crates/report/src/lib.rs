@@ -67,4 +67,13 @@ impl ReportGenerator {
     ) -> Result<(), ReportError> {
         xic_visualize::render_xic_html(xic_data, output_path, plotly_mode)
     }
+
+    /// Renders unified annotation + XIC as a self-contained HTML file.
+    pub fn render_unified(
+        data: &crate::unified_types::UnifiedViewData,
+        output_path: &Path,
+        plotly_mode: protein_copilot_xic::PlotlyMode,
+    ) -> Result<(), ReportError> {
+        unified_visualize::render_unified_html(data, output_path, plotly_mode)
+    }
 }
