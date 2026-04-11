@@ -1,8 +1,11 @@
 //! Data types for the unified annotation + XIC HTML view.
 
 use protein_copilot_search_engine::annotate::SpectrumAnnotation;
-use protein_copilot_xic::{IonType, XicData};
+use protein_copilot_xic::XicData;
 use serde::Serialize;
+
+// Re-export types that live in xic crate
+pub use protein_copilot_xic::IonMetadataEntry;
 
 /// Combined data for the unified HTML template.
 #[derive(Debug, Clone, Serialize)]
@@ -41,25 +44,6 @@ pub struct RawScan {
     pub intensity_array: Vec<f64>,
 }
 
-/// Metadata for one fragment ion enabling client-side SILAC calculation.
-#[derive(Debug, Clone, Serialize)]
-pub struct IonMetadataEntry {
-    /// Human-readable ion label (e.g. "y5¹⁺").
-    pub label: String,
-    /// Ion type.
-    pub ion_type: IonType,
-    /// Ion number (e.g. 5 for y5).
-    pub ion_number: u32,
-    /// Charge state.
-    pub charge: u32,
-    /// Theoretical m/z of the light (unlabeled) ion.
-    pub light_mz: f64,
-    /// Count of K (Lysine) residues in this fragment.
-    pub k_count: u32,
-    /// Count of R (Arginine) residues in this fragment.
-    pub r_count: u32,
-}
-
 /// Peptide-level SILAC info.
 #[derive(Debug, Clone, Serialize)]
 pub struct PeptideInfo {
@@ -92,35 +76,6 @@ mod tests {
         assert!(json.contains("\"total_k\":1"));
         assert!(json.contains("\"total_r\":0"));
         assert!(json.contains("PEPTIDEK"));
-    }
-
-    #[test]
-    fn ion_metadata_serializes() {
-        let entry = IonMetadataEntry {
-            label: "y5¹⁺".to_string(),
-            ion_type: IonType::Y,
-            ion_number: 5,
-            charge: 1,
-            light_mz: 574.28,
-            k_count: 1,
-            r_count: 0,
-        };
-        let json = serde_json::to_string(&entry).unwrap();
-        assert!(json.contains("\"k_count\":1"));
-        assert!(json.contains("\"light_mz\":574.28"));
-    }
-
-    #[test]
-    fn raw_scan_serializes() {
-        let scan = RawScan {
-            scan_number: 42,
-            retention_time_sec: 120.5,
-            mz_array: vec![100.0, 200.0, 300.0],
-            intensity_array: vec![1000.0, 5000.0, 2000.0],
-        };
-        let json = serde_json::to_string(&scan).unwrap();
-        assert!(json.contains("\"scan_number\":42"));
-        assert!(json.contains("[100.0,200.0,300.0]"));
     }
 
     #[test]

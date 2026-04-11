@@ -158,6 +158,39 @@ pub fn build_target_ions(
     ions
 }
 
+/// Compute ion metadata with K/R residue counts for SILAC calculation.
+///
+/// For each target ion, counts the K and R residues in the fragment
+/// (prefix for b-ions, suffix for y-ions) so the browser can compute
+/// heavy m/z shifts client-side.
+pub fn compute_ion_metadata(ions: &[TargetIon], peptide: &str) -> Vec<crate::IonMetadataEntry> {
+    let chars: Vec<char> = peptide.chars().collect();
+    let n = chars.len();
+
+    ions.iter()
+        .map(|ion| {
+            let fragment_chars: &[char] = match ion.ion_type {
+                IonType::B => &chars[..(ion.ion_number as usize).min(n)],
+                IonType::Y => {
+                    let start = n.saturating_sub(ion.ion_number as usize);
+                    &chars[start..]
+                }
+                IonType::Precursor => &chars[..],
+            };
+
+            crate::IonMetadataEntry {
+                label: ion.label.clone(),
+                ion_type: ion.ion_type,
+                ion_number: ion.ion_number,
+                charge: ion.charge,
+                light_mz: ion.mz,
+                k_count: fragment_chars.iter().filter(|&&c| c == 'K').count() as u32,
+                r_count: fragment_chars.iter().filter(|&&c| c == 'R').count() as u32,
+            }
+        })
+        .collect()
+}
+
 /// Extract XIC data for a peptide from an mzML file.
 ///
 /// Uses the 1.5-pass strategy:
@@ -576,5 +609,52 @@ mod tests {
     fn build_target_ions_empty_sequence() {
         let ions = build_target_ions("", &[], 2);
         assert!(ions.is_empty());
+    }
+
+    #[test]
+    fn compute_ion_metadata_counts_k_r_for_b_ions() {
+        // "KPEPTIDER" — b1="K" (K=1,R=0), b3="KPE" (K=1,R=0), b8="KPEPTIDE" (K=1,R=0)
+        let ions = build_target_ions("KPEPTIDER", &[], 2);
+        let meta = compute_ion_metadata(&ions, "KPEPTIDER");
+
+        // Find b1 (1+ charge)
+        let b1 = meta.iter().find(|m| m.label == "b1¹⁺").unwrap();
+        assert_eq!(b1.k_count, 1);
+        assert_eq!(b1.r_count, 0);
+
+        // Find y1 (suffix "R")
+        let y1 = meta.iter().find(|m| m.label == "y1¹⁺").unwrap();
+        assert_eq!(y1.k_count, 0);
+        assert_eq!(y1.r_count, 1);
+
+        // y8 suffix = "PEPTIDER" (K=0, R=1)
+        let y8 = meta.iter().find(|m| m.label == "y8¹⁺").unwrap();
+        assert_eq!(y8.k_count, 0);
+        assert_eq!(y8.r_count, 1);
+    }
+
+    #[test]
+    fn compute_ion_metadata_no_k_r() {
+        // "PEPTIDE" — no K or R
+        let ions = build_target_ions("PEPTIDE", &[], 2);
+        let meta = compute_ion_metadata(&ions, "PEPTIDE");
+        for m in &meta {
+            assert_eq!(m.k_count, 0, "ion {} should have k_count=0", m.label);
+            assert_eq!(m.r_count, 0, "ion {} should have r_count=0", m.label);
+        }
+    }
+
+    #[test]
+    fn compute_ion_metadata_preserves_light_mz() {
+        let ions = build_target_ions("PEPTIDEK", &[], 2);
+        let meta = compute_ion_metadata(&ions, "PEPTIDEK");
+        // Every metadata entry's light_mz must match the corresponding ion's mz
+        for (ion, m) in ions.iter().zip(meta.iter()) {
+            assert!(
+                (ion.mz - m.light_mz).abs() < 1e-6,
+                "mismatch for {}: ion.mz={}, meta.light_mz={}",
+                m.label, ion.mz, m.light_mz
+            );
+        }
     }
 }

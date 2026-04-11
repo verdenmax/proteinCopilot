@@ -147,3 +147,22 @@ pub enum PlotlyMode {
     /// Embed plotly-basic.min.js inline (larger file, works offline).
     Embedded,
 }
+
+/// Metadata for one fragment ion enabling client-side SILAC calculation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IonMetadataEntry {
+    /// Human-readable ion label (e.g. "y5¹⁺").
+    pub label: String,
+    /// Ion type.
+    pub ion_type: IonType,
+    /// Ion number (e.g. 5 for y5).
+    pub ion_number: u32,
+    /// Charge state.
+    pub charge: u32,
+    /// Theoretical m/z of the light (unlabeled) ion.
+    pub light_mz: f64,
+    /// Count of K (Lysine) residues in this fragment.
+    pub k_count: u32,
+    /// Count of R (Arginine) residues in this fragment.
+    pub r_count: u32,
+}
