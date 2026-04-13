@@ -100,6 +100,7 @@ mod tests {
                 label_type: None,
                 intensity_rule: IntensityRule::MaxInWindow,
             },
+            heavy_warning: None,
         }
     }
 

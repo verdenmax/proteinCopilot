@@ -85,6 +85,10 @@ pub struct XicData {
     pub heavy_fragment_xic_traces: Vec<XicTrace>,
     /// Parameters used for extraction.
     pub extraction_params: ExtractionParams,
+    /// Warning message when heavy MS2 extraction is incomplete (e.g. heavy
+    /// precursor m/z outside all DIA windows). `None` when extraction is normal.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub heavy_warning: Option<String>,
 }
 
 /// Parameters controlling XIC extraction.
@@ -178,6 +182,10 @@ pub struct RawScanData {
     pub ms1_scans: Vec<RawScan>,
     /// MS2 scans (full peak lists from matching isolation windows).
     pub ms2_scans: Vec<RawScan>,
+    /// MS2 scans from the heavy precursor's isolation window (DIA+SILAC only).
+    /// Empty when not applicable (DDA, no label, or heavy window not found).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ms2_heavy_scans: Vec<RawScan>,
 }
 
 /// A single raw scan's peak list.

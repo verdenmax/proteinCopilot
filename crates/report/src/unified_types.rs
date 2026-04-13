@@ -68,6 +68,7 @@ mod tests {
                 intensity_array: vec![1000.0],
             }],
             ms2_scans: vec![],
+            ms2_heavy_scans: vec![],
         };
         let json = serde_json::to_string(&data).unwrap();
         assert!(json.contains("\"ms1_scans\""));

@@ -162,6 +162,7 @@ mod tests {
                 label_type: None,
                 intensity_rule: IntensityRule::MaxInWindow,
             },
+            heavy_warning: None,
         }
     }
 
@@ -178,6 +179,7 @@ mod tests {
                     intensity_array: vec![100.0, 5000.0, 200.0],
                 }],
                 ms2_scans: vec![],
+                ms2_heavy_scans: vec![],
             }),
             ion_metadata: vec![IonMetadataEntry {
                 label: "b3".to_string(),

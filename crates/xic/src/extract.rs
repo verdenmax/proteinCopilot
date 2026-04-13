@@ -530,6 +530,7 @@ pub fn extract_xic(
         fragment_xic_traces: fragment_traces,
         heavy_fragment_xic_traces: heavy_traces,
         extraction_params: params.clone(),
+        heavy_warning: None,
     })
 }
 
@@ -906,11 +907,13 @@ pub fn extract_xic_with_raw(
         fragment_xic_traces: fragment_traces,
         heavy_fragment_xic_traces: heavy_traces,
         extraction_params: params.clone(),
+        heavy_warning: None,
     };
 
     let raw_scans = crate::RawScanData {
         ms1_scans: raw_ms1_trimmed,
         ms2_scans: raw_ms2_trimmed,
+        ms2_heavy_scans: Vec::new(),
     };
 
     // Ion metadata for the top-N selected light ions
