@@ -269,6 +269,12 @@
       panel.appendChild(fileHeader);
     }
 
+    // Heavy warning banner (SILAC DIA: heavy precursor outside all windows)
+    if (U && U.xic && U.xic.heavy_warning) {
+      var warn = el("div", { style: "background:#fff3cd;border:1px solid #ffc107;color:#856404;padding:8px 12px;margin:8px 0;border-radius:4px;font-size:13px;" }, "\u26A0\uFE0F " + U.xic.heavy_warning);
+      panel.appendChild(warn);
+    }
+
     panel.appendChild(el("h2", null, "Identification"));
     var grid = el("div", { "class": "info-grid" });
     function add(label, value, cls) {
