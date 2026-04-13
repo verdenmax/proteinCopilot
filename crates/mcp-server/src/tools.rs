@@ -1573,6 +1573,77 @@ impl ProteinCopilotServer {
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_default();
 
+        // ── DIA + SILAC: find and annotate heavy scan ──
+        if let Some(ref label) = input.label_type {
+            let is_dia = spectrum
+                .precursors
+                .first()
+                .and_then(|p| p.isolation_window.as_ref())
+                .map(|w| (w.lower_offset + w.upper_offset) > 3.0)
+                .unwrap_or(false);
+
+            if is_dia {
+                let core_label: &protein_copilot_core::label::LabelType = label;
+                let heavy_prec_mz = protein_copilot_core::label::compute_heavy_precursor_mz(
+                    annotation.precursor_mz,
+                    charge,
+                    &peptide_seq,
+                    core_label,
+                );
+
+                // Read nearby spectra to find the heavy DIA window
+                let scan_start = resolved_scan.saturating_sub(50);
+                let scan_end = resolved_scan + 50;
+                let mut nearby_spectra = Vec::new();
+                for s in scan_start..=scan_end {
+                    if let Ok(spec) = reader.read_spectrum(&spectrum_file, s) {
+                        if spec.ms_level == protein_copilot_core::spectrum::MsLevel::MS2 {
+                            nearby_spectra.push(spec);
+                        }
+                    }
+                }
+
+                if let Some((heavy_scan_num, _window)) =
+                    protein_copilot_xic::heavy::find_heavy_dia_window_from_spectra(
+                        &nearby_spectra,
+                        spectrum.retention_time_min,
+                        heavy_prec_mz,
+                    )
+                {
+                    if let Ok(heavy_spectrum) = reader.read_spectrum(&spectrum_file, heavy_scan_num)
+                    {
+                        match protein_copilot_search_engine::annotate::annotate_heavy_spectrum(
+                            &heavy_spectrum,
+                            &peptide_seq,
+                            charge,
+                            &frag_tol,
+                            &modifications,
+                            core_label,
+                        ) {
+                            Ok(heavy_ann) => {
+                                tracing::info!(
+                                    heavy_scan = heavy_scan_num,
+                                    heavy_prec_mz = format!("{:.4}", heavy_prec_mz),
+                                    matched = heavy_ann.matched_ions,
+                                    total = heavy_ann.total_ions,
+                                    "Heavy annotation complete"
+                                );
+                                annotation.heavy_annotation = Some(heavy_ann);
+                            }
+                            Err(e) => {
+                                tracing::warn!("Heavy annotation failed: {e}");
+                            }
+                        }
+                    }
+                } else {
+                    tracing::info!(
+                        heavy_prec_mz = format!("{:.4}", heavy_prec_mz),
+                        "No DIA window found for heavy precursor"
+                    );
+                }
+            }
+        }
+
         let out_path = input.output_path.map(PathBuf::from).unwrap_or_else(|| {
             PathBuf::from(format!("output/annotation_scan{}.html", resolved_scan))
         });
