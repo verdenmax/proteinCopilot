@@ -11,16 +11,14 @@ use protein_copilot_core::spectrum::{IsolationWindow, Spectrum};
 
 /// Compute heavy-label m/z for a precursor ion.
 ///
-/// Adds `(count_K × heavy_k_delta + count_R × heavy_r_delta) / charge`
-/// to the light precursor m/z.
+/// Delegates to [`protein_copilot_core::label::compute_heavy_precursor_mz`].
 pub fn compute_heavy_precursor_mz(
     light_mz: f64,
     charge: i32,
     peptide_sequence: &str,
     label: &LabelType,
 ) -> f64 {
-    let total_delta = total_heavy_delta(peptide_sequence, label);
-    light_mz + total_delta / charge.abs().max(1) as f64
+    protein_copilot_core::label::compute_heavy_precursor_mz(light_mz, charge, peptide_sequence, label)
 }
 
 /// Compute heavy-label target ions from light target ions.
