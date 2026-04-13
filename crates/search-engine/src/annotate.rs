@@ -137,8 +137,12 @@ pub struct HeavyAnnotation {
     pub scan_number: u32,
     /// Retention time of the heavy scan in minutes.
     pub retention_time_min: f64,
-    /// Heavy precursor m/z.
+    /// Theoretical heavy precursor m/z (computed from theoretical light + SILAC delta).
     pub precursor_mz: f64,
+    /// Precursor mass deviation in ppm (heavy observed vs heavy theoretical).
+    /// `None` when observed heavy precursor m/z is unavailable (DIA wide-window).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub delta_mass_ppm: Option<f64>,
     /// All experimental peaks in the heavy scan with optional annotations.
     pub peaks: Vec<AnnotatedPeak>,
     /// Theoretical heavy b-ions with match status.
@@ -531,6 +535,12 @@ pub fn annotate_heavy_spectrum(
     let heavy_precursor_mz =
         compute_heavy_precursor_mz(light_precursor_mz, charge, peptide_sequence, label);
 
+    // Compute delta_mass_ppm if the heavy spectrum has a precursor m/z
+    let delta_mass_ppm = heavy_spectrum
+        .precursors
+        .first()
+        .map(|p| (p.mz - heavy_precursor_mz) / heavy_precursor_mz * 1e6);
+
     // Generate heavy theoretical fragments
     let max_frag_charge: u32 = if charge >= 3 { 2 } else { 1 };
     let chars: Vec<char> = peptide_sequence.chars().collect();
@@ -655,6 +665,7 @@ pub fn annotate_heavy_spectrum(
         scan_number: heavy_spectrum.scan_number,
         retention_time_min: heavy_spectrum.retention_time_min,
         precursor_mz: heavy_precursor_mz,
+        delta_mass_ppm,
         peaks,
         b_ions: heavy_b_ions,
         y_ions: heavy_y_ions,

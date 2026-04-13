@@ -1585,7 +1585,7 @@ impl ProteinCopilotServer {
             if is_dia {
                 let core_label: &protein_copilot_core::label::LabelType = label;
                 let heavy_prec_mz = protein_copilot_core::label::compute_heavy_precursor_mz(
-                    annotation.precursor_mz,
+                    annotation.theoretical_mz,
                     charge,
                     &peptide_seq,
                     core_label,

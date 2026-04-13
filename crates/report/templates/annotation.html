@@ -187,17 +187,22 @@
       style: "max-width:" + totalW + "px"
     });
 
-    // Build match lookups
+    // Build match lookups (aggregate across charge states for multi-charge ions)
     var bMatched = [], yMatched = [];
     var bNumbers = [], yNumbers = [];
     for (var ci = 0; ci < n - 1; ci++) {
-      var bIon = D.b_ions[ci];
-      bMatched[ci] = !!(bIon && bIon.matched);
-      bNumbers[ci] = bIon ? bIon.number : (ci + 1);
-      var yIdx = n - 2 - ci;
-      var yIon = D.y_ions[yIdx];
-      yMatched[ci] = !!(yIon && yIon.matched);
-      yNumbers[ci] = yIon ? yIon.number : (n - 1 - ci);
+      var bNum = ci + 1;
+      bNumbers[ci] = bNum;
+      bMatched[ci] = false;
+      for (var bi = 0; bi < D.b_ions.length; bi++) {
+        if (D.b_ions[bi].number === bNum && D.b_ions[bi].matched) { bMatched[ci] = true; break; }
+      }
+      var yNum = n - 1 - ci;
+      yNumbers[ci] = yNum;
+      yMatched[ci] = false;
+      for (var yi = 0; yi < D.y_ions.length; yi++) {
+        if (D.y_ions[yi].number === yNum && D.y_ions[yi].matched) { yMatched[ci] = true; break; }
+      }
     }
 
     // Amino acid letters

@@ -305,7 +305,10 @@
 
     if (DH) {
       add("Heavy Scan / RT", "Scan " + DH.scan_number + "  \u2014  " + fmt(DH.retention_time_min, 2) + " min");
-      add("Heavy Precursor", fmt(DH.precursor_mz, 4) + " m/z");
+      add("Heavy Precursor", fmt(DH.precursor_mz, 4) + " m/z (theoretical)");
+      if (DH.delta_mass_ppm != null) {
+        add("Heavy \u0394 mass", fmt(DH.delta_mass_ppm, 2) + " ppm");
+      }
       var heavyBadgeCls = "score-badge " + (DH.score > 0.5 ? "good" : DH.score >= 0.2 ? "mid" : "low");
       var heavyBadge = el("span", { "class": heavyBadgeCls }, fmt(DH.score, 3));
       var heavyScoreWrap = document.createElement("span");
@@ -347,17 +350,22 @@
       style: "max-width:" + totalW + "px"
     });
 
-    // Build match lookups
+    // Build match lookups (aggregate across charge states for multi-charge ions)
     var bMatched = [], yMatched = [];
     var bNumbers = [], yNumbers = [];
     for (var ci = 0; ci < n - 1; ci++) {
-      var bIon = D.b_ions[ci];
-      bMatched[ci] = !!(bIon && bIon.matched);
-      bNumbers[ci] = bIon ? bIon.number : (ci + 1);
-      var yIdx = n - 2 - ci;
-      var yIon = D.y_ions[yIdx];
-      yMatched[ci] = !!(yIon && yIon.matched);
-      yNumbers[ci] = yIon ? yIon.number : (n - 1 - ci);
+      var bNum = ci + 1;
+      bNumbers[ci] = bNum;
+      bMatched[ci] = false;
+      for (var bi = 0; bi < D.b_ions.length; bi++) {
+        if (D.b_ions[bi].number === bNum && D.b_ions[bi].matched) { bMatched[ci] = true; break; }
+      }
+      var yNum = n - 1 - ci;
+      yNumbers[ci] = yNum;
+      yMatched[ci] = false;
+      for (var yi = 0; yi < D.y_ions.length; yi++) {
+        if (D.y_ions[yi].number === yNum && D.y_ions[yi].matched) { yMatched[ci] = true; break; }
+      }
     }
 
     // Amino acid letters
@@ -446,13 +454,18 @@
       var bMatchedH = [], yMatchedH = [];
       var bNumbersH = [], yNumbersH = [];
       for (var ch = 0; ch < n - 1; ch++) {
-        var bIonH = DH.b_ions[ch];
-        bMatchedH[ch] = !!(bIonH && bIonH.matched);
-        bNumbersH[ch] = bIonH ? bIonH.number : (ch + 1);
-        var yIdxH = n - 2 - ch;
-        var yIonH = DH.y_ions[yIdxH];
-        yMatchedH[ch] = !!(yIonH && yIonH.matched);
-        yNumbersH[ch] = yIonH ? yIonH.number : (n - 1 - ch);
+        var bNumH = ch + 1;
+        bNumbersH[ch] = bNumH;
+        bMatchedH[ch] = false;
+        for (var biH = 0; biH < DH.b_ions.length; biH++) {
+          if (DH.b_ions[biH].number === bNumH && DH.b_ions[biH].matched) { bMatchedH[ch] = true; break; }
+        }
+        var yNumH = n - 1 - ch;
+        yNumbersH[ch] = yNumH;
+        yMatchedH[ch] = false;
+        for (var yiH = 0; yiH < DH.y_ions.length; yiH++) {
+          if (DH.y_ions[yiH].number === yNumH && DH.y_ions[yiH].matched) { yMatchedH[ch] = true; break; }
+        }
       }
 
       for (var sh = 0; sh < n; sh++) {
