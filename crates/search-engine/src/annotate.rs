@@ -120,6 +120,37 @@ pub struct SpectrumAnnotation {
     pub y_ions: Vec<TheoreticalIon>,
     /// Fixed modifications applied.
     pub modifications: Vec<Modification>,
+    /// Heavy-label annotation from a separate DIA scan (DIA+SILAC only).
+    /// `None` for DDA or when no heavy label is configured.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub heavy_annotation: Option<HeavyAnnotation>,
+}
+
+/// Annotation data from a heavy-label DIA scan.
+///
+/// When SILAC + DIA is active, the heavy precursor falls in a different
+/// isolation window, so its fragments appear in a different MS2 scan.
+/// This struct holds the annotation of that separate scan.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct HeavyAnnotation {
+    /// Scan number of the heavy MS2 scan.
+    pub scan_number: u32,
+    /// Retention time of the heavy scan in minutes.
+    pub retention_time_min: f64,
+    /// Heavy precursor m/z.
+    pub precursor_mz: f64,
+    /// All experimental peaks in the heavy scan with optional annotations.
+    pub peaks: Vec<AnnotatedPeak>,
+    /// Theoretical heavy b-ions with match status.
+    pub b_ions: Vec<TheoreticalIon>,
+    /// Theoretical heavy y-ions with match status.
+    pub y_ions: Vec<TheoreticalIon>,
+    /// Match score (matched_ions / total_ions).
+    pub score: f64,
+    /// Number of matched heavy fragment ions.
+    pub matched_ions: u32,
+    /// Total number of theoretical heavy fragment ions.
+    pub total_ions: u32,
 }
 
 // ---------------------------------------------------------------------------
@@ -453,11 +484,185 @@ pub fn annotate_spectrum(
         b_ions: b_ions_out,
         y_ions: y_ions_out,
         modifications: fixed_modifications.to_vec(),
+        heavy_annotation: None,
     })
 }
 
-// ---------------------------------------------------------------------------
-// Tests
+/// Annotate a heavy-label spectrum for mirror plot display.
+///
+/// Given a heavy MS2 spectrum and the peptide sequence + label type,
+/// computes heavy theoretical fragment m/z values and matches them
+/// against the heavy spectrum's peaks.
+///
+/// This is called separately from `annotate_spectrum` because in DIA mode,
+/// the heavy fragments appear in a different MS2 scan.
+#[allow(clippy::too_many_arguments)]
+pub fn annotate_heavy_spectrum(
+    heavy_spectrum: &Spectrum,
+    peptide_sequence: &str,
+    charge: i32,
+    fragment_tolerance: &MassTolerance,
+    fixed_modifications: &[Modification],
+    label: &protein_copilot_core::label::LabelType,
+) -> Result<HeavyAnnotation, SearchEngineError> {
+    use protein_copilot_core::label::{compute_heavy_precursor_mz, residue_heavy_delta};
+
+    if charge <= 0 {
+        return Err(SearchEngineError::ExecutionError {
+            detail: format!("charge must be >= 1, got {charge}"),
+        });
+    }
+    if heavy_spectrum.mz_array.is_empty() {
+        return Err(SearchEngineError::ExecutionError {
+            detail: "heavy spectrum has no peaks".to_string(),
+        });
+    }
+
+    // Compute heavy precursor m/z
+    let light_precursor_mz = {
+        let neutral = peptide_mass(peptide_sequence).ok_or_else(|| {
+            SearchEngineError::ExecutionError {
+                detail: format!("cannot compute mass for '{}'", peptide_sequence),
+            }
+        })?;
+        let mod_delta = apply_fixed_mod_mass(peptide_sequence, fixed_modifications);
+        peptide_mz(neutral + mod_delta, charge)
+    };
+    let heavy_precursor_mz =
+        compute_heavy_precursor_mz(light_precursor_mz, charge, peptide_sequence, label);
+
+    // Generate heavy theoretical fragments
+    let max_frag_charge: u32 = if charge >= 3 { 2 } else { 1 };
+    let chars: Vec<char> = peptide_sequence.chars().collect();
+    let n = chars.len();
+
+    // Heavy b-ions
+    let light_b = generate_b_entries(peptide_sequence, fixed_modifications, max_frag_charge)
+        .ok_or_else(|| SearchEngineError::ExecutionError {
+            detail: format!("cannot generate b-ions for '{}'", peptide_sequence),
+        })?;
+    let heavy_b_entries: Vec<FragmentEntry> = light_b
+        .iter()
+        .map(|e| {
+            let prefix = &chars[..(e.ion_number as usize).min(n)];
+            let delta = residue_heavy_delta(prefix, label);
+            FragmentEntry {
+                ion_type: e.ion_type,
+                ion_number: e.ion_number,
+                charge: e.charge,
+                mz: e.mz + delta / e.charge as f64,
+            }
+        })
+        .collect();
+
+    // Heavy y-ions
+    let light_y = generate_y_entries(peptide_sequence, fixed_modifications, max_frag_charge)
+        .ok_or_else(|| SearchEngineError::ExecutionError {
+            detail: format!("cannot generate y-ions for '{}'", peptide_sequence),
+        })?;
+    let heavy_y_entries: Vec<FragmentEntry> = light_y
+        .iter()
+        .map(|e| {
+            let start = n.saturating_sub(e.ion_number as usize);
+            let suffix = &chars[start..];
+            let delta = residue_heavy_delta(suffix, label);
+            FragmentEntry {
+                ion_type: e.ion_type,
+                ion_number: e.ion_number,
+                charge: e.charge,
+                mz: e.mz + delta / e.charge as f64,
+            }
+        })
+        .collect();
+
+    // Match against heavy spectrum peaks
+    let exp_mz = &heavy_spectrum.mz_array;
+    let exp_int = &heavy_spectrum.intensity_array;
+    let mut peak_annotations: Vec<Option<IonAnnotation>> = vec![None; exp_mz.len()];
+    let total_count = (heavy_b_entries.len() + heavy_y_entries.len()) as u32;
+
+    // Reuse the same matching approach as annotate_spectrum
+    let mut match_heavy_entries = |entries: &[FragmentEntry]| -> Vec<TheoreticalIon> {
+        let mut ions_out = Vec::with_capacity(entries.len());
+        for entry in entries {
+            let (_, best_idx) = find_best_match(entry.mz, exp_mz, fragment_tolerance);
+            if let Some(idx) = best_idx {
+                let obs_mz = exp_mz[idx];
+                let dppm = (obs_mz - entry.mz) / entry.mz * 1e6;
+                let new_ann = IonAnnotation {
+                    ion_type: entry.ion_type,
+                    ion_number: entry.ion_number,
+                    charge: entry.charge,
+                    theoretical_mz: entry.mz,
+                    delta_mz: obs_mz - entry.mz,
+                    delta_ppm: dppm,
+                };
+                match &peak_annotations[idx] {
+                    Some(existing) if existing.delta_mz.abs() <= new_ann.delta_mz.abs() => {}
+                    _ => {
+                        peak_annotations[idx] = Some(new_ann);
+                    }
+                }
+                ions_out.push(TheoreticalIon {
+                    ion_type: entry.ion_type,
+                    number: entry.ion_number,
+                    charge: entry.charge,
+                    theoretical_mz: entry.mz,
+                    matched: true,
+                    matched_mz: Some(obs_mz),
+                    delta_ppm: Some(dppm),
+                });
+            } else {
+                ions_out.push(TheoreticalIon {
+                    ion_type: entry.ion_type,
+                    number: entry.ion_number,
+                    charge: entry.charge,
+                    theoretical_mz: entry.mz,
+                    matched: false,
+                    matched_mz: None,
+                    delta_ppm: None,
+                });
+            }
+        }
+        ions_out
+    };
+
+    let heavy_b_ions = match_heavy_entries(&heavy_b_entries);
+    let heavy_y_ions = match_heavy_entries(&heavy_y_entries);
+
+    // Build annotated peaks
+    let peaks: Vec<AnnotatedPeak> = exp_mz
+        .iter()
+        .zip(exp_int.iter())
+        .zip(peak_annotations)
+        .map(|((&mz, &intensity), annotation)| AnnotatedPeak {
+            mz,
+            intensity,
+            annotation,
+        })
+        .collect();
+
+    let matched_b = heavy_b_ions.iter().filter(|i| i.matched).count() as u32;
+    let matched_y = heavy_y_ions.iter().filter(|i| i.matched).count() as u32;
+    let matched_count = matched_b + matched_y;
+    let score = if total_count > 0 {
+        matched_count as f64 / total_count as f64
+    } else {
+        0.0
+    };
+
+    Ok(HeavyAnnotation {
+        scan_number: heavy_spectrum.scan_number,
+        retention_time_min: heavy_spectrum.retention_time_min,
+        precursor_mz: heavy_precursor_mz,
+        peaks,
+        b_ions: heavy_b_ions,
+        y_ions: heavy_y_ions,
+        score,
+        matched_ions: matched_count,
+        total_ions: total_count,
+    })
+}
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
@@ -792,5 +997,52 @@ mod tests {
                 "y-ion should NOT be shifted by N-term mod, got diff {diff:.4}"
             );
         }
+    }
+
+    #[test]
+    fn test_annotate_heavy_spectrum_basic() {
+        use protein_copilot_core::label::LabelType;
+        use protein_copilot_core::search_params::ToleranceUnit;
+
+        // Heavy spectrum with a peak near heavy b2+ m/z for "AK" prefix
+        // AK: A=71.03711 + K=128.09496 = 199.13207 neutral b2
+        // Heavy K delta = 8.014199 → heavy b2 neutral = 207.146269
+        // b2+ m/z = (207.146269 + 1.007276) / 1 = 208.153545
+        let heavy_b2_mz = 208.1535;
+
+        let spectrum = Spectrum::new(
+            100,
+            MsLevel::MS2,
+            25.0,
+            vec![PrecursorInfo {
+                mz: 300.0,
+                charge: Some(2),
+                intensity: Some(5000.0),
+                isolation_window: None,
+                source_scan: None,
+            }],
+            vec![heavy_b2_mz, 300.0, 500.0],
+            vec![1000.0, 200.0, 150.0],
+        )
+        .expect("test spectrum");
+
+        let label = LabelType::standard_silac();
+        let tolerance = MassTolerance {
+            value: 20.0,
+            unit: ToleranceUnit::Ppm,
+        };
+
+        let result =
+            annotate_heavy_spectrum(&spectrum, "AKDEF", 2, &tolerance, &[], &label).unwrap();
+
+        assert_eq!(result.scan_number, 100);
+        assert!(result.matched_ions >= 1, "should match at least heavy b2+");
+        assert!(result.total_ions > 0);
+        assert!(result.score > 0.0);
+        let matched_b = result.b_ions.iter().filter(|i| i.matched).count();
+        assert!(
+            matched_b >= 1,
+            "should have at least one matched heavy b-ion"
+        );
     }
 }
