@@ -5,7 +5,8 @@
 //! each fragment.
 
 use crate::extract::TargetIon;
-use crate::{IonType, LabelType};
+use crate::IonType;
+use protein_copilot_core::label::{residue_heavy_delta, total_heavy_delta, LabelType};
 use protein_copilot_core::spectrum::{IsolationWindow, Spectrum};
 
 /// Compute heavy-label m/z for a precursor ion.
@@ -64,34 +65,6 @@ pub fn compute_heavy_target_ions(
             }
         })
         .collect()
-}
-
-/// Total heavy mass delta for an entire peptide.
-fn total_heavy_delta(peptide_sequence: &str, label: &LabelType) -> f64 {
-    let chars: Vec<char> = peptide_sequence.chars().collect();
-    residue_heavy_delta(&chars, label)
-}
-
-/// Heavy mass delta for a set of residues.
-fn residue_heavy_delta(residues: &[char], label: &LabelType) -> f64 {
-    match label {
-        LabelType::Silac {
-            heavy_k_delta,
-            heavy_r_delta,
-        } => {
-            let count_k = residues.iter().filter(|&&c| c == 'K' || c == 'k').count() as f64;
-            let count_r = residues.iter().filter(|&&c| c == 'R' || c == 'r').count() as f64;
-            count_k * heavy_k_delta + count_r * heavy_r_delta
-        }
-        LabelType::Custom { residue_deltas } => {
-            let mut delta = 0.0;
-            for &(res, d) in residue_deltas {
-                let count = residues.iter().filter(|&&c| c == res).count() as f64;
-                delta += count * d;
-            }
-            delta
-        }
-    }
 }
 
 /// Check if an isolation window contains a given m/z value.

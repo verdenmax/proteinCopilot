@@ -8,7 +8,6 @@ use serde::{Deserialize, Serialize};
 
 /// Heavy-label type for SILAC or custom isotope labeling.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(tag = "type")]
 pub enum LabelType {
     /// SILAC heavy amino acids.
     Silac {

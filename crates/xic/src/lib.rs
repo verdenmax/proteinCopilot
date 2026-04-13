@@ -118,32 +118,8 @@ pub enum IntensityRule {
     NearestPeak,
 }
 
-/// Heavy-label type for SILAC comparison.
-#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
-pub enum LabelType {
-    /// SILAC heavy amino acids.
-    Silac {
-        /// Mass shift for heavy Lysine (default: 8.014199 Da for ¹³C₆¹⁵N₂-Lys).
-        heavy_k_delta: f64,
-        /// Mass shift for heavy Arginine (default: 10.008269 Da for ¹³C₆¹⁵N₄-Arg).
-        heavy_r_delta: f64,
-    },
-    /// Custom residue mass shifts.
-    Custom {
-        /// (residue, mass_delta) pairs.
-        residue_deltas: Vec<(char, f64)>,
-    },
-}
-
-impl LabelType {
-    /// Standard SILAC heavy labels (K+8, R+10).
-    pub fn standard_silac() -> Self {
-        LabelType::Silac {
-            heavy_k_delta: 8.014199,
-            heavy_r_delta: 10.008269,
-        }
-    }
-}
+/// Re-export `LabelType` from core crate (shared with search-engine).
+pub use protein_copilot_core::label::LabelType;
 
 /// Plotly.js loading mode for HTML output.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, schemars::JsonSchema)]
