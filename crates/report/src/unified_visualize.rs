@@ -138,11 +138,13 @@ mod tests {
                         retention_time_min: 115.0,
                         scan_number: 90,
                         intensity: 1000.0,
+                        observed_mz: None,
                     },
                     XicDataPoint {
                         retention_time_min: 120.0,
                         scan_number: 100,
                         intensity: 5000.0,
+                        observed_mz: None,
                     },
                 ],
                 is_heavy: false,

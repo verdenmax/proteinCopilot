@@ -780,12 +780,13 @@
     var tolDa = targetMz * tolPpm * 1e-6;
     var lo = binarySearchLo(mzArr, targetMz - tolDa * 1.5);
     var best = 0;
+    var bestMz = null;
     for (var i = lo; i < mzArr.length && mzArr[i] <= targetMz + tolDa * 1.5; i++) {
       if (Math.abs(mzArr[i] - targetMz) / targetMz * 1e6 <= tolPpm) {
-        if (intArr[i] > best) best = intArr[i];
+        if (intArr[i] > best) { best = intArr[i]; bestMz = mzArr[i]; }
       }
     }
-    return best;
+    return { intensity: best, observed_mz: bestMz };
   }
 
   /* ── Heavy recomputation engine ────────────────────────── */
@@ -806,20 +807,35 @@
     var ms1Heavy = null;
     if (U.raw_scans && U.raw_scans.ms1_scans.length > 0) {
       ms1Heavy = U.raw_scans.ms1_scans.map(function(s) {
+        var r = extractIntensity(heavyPrecMz, s.mz_array, s.intensity_array, tol);
         return { rt: s.retention_time_min, scan: s.scan_number,
-                 intensity: extractIntensity(heavyPrecMz, s.mz_array, s.intensity_array, tol) };
+                 intensity: r.intensity, observed_mz: r.observed_mz };
       });
     }
 
     var ms2Heavy = heavyIons.map(function(ion) {
       if (!U.raw_scans) return [];
       return U.raw_scans.ms2_scans.map(function(s) {
+        var r = extractIntensity(ion.heavy_mz, s.mz_array, s.intensity_array, tol);
         return { rt: s.retention_time_min, scan: s.scan_number,
-                 intensity: extractIntensity(ion.heavy_mz, s.mz_array, s.intensity_array, tol) };
+                 intensity: r.intensity, observed_mz: r.observed_mz };
       });
     });
 
     return { ms1Heavy: ms1Heavy, ms2Heavy: ms2Heavy, heavyIons: heavyIons, heavyPrecMz: heavyPrecMz };
+  }
+
+  /* ── Helper: build customdata array with scan, observed m/z, ppm ── */
+  function buildCustomData(dataPoints, theoreticalMz) {
+    return dataPoints.map(function(p) {
+      var obsMz = p.observed_mz;
+      var ppm = (obsMz != null) ? ((obsMz - theoreticalMz) / theoreticalMz * 1e6).toFixed(1) : '';
+      return [
+        p.scan_number || p.scan || '',
+        obsMz != null ? obsMz.toFixed(4) : '-',
+        ppm !== '' ? ppm + ' ppm' : '-'
+      ];
+    });
   }
 
   /* ── Plotly rendering (uses ionVis for per-ion visibility) ─── */
@@ -835,27 +851,29 @@
     /* — MS1 Plot — */
     var ms1Traces = [];
     if (precVis.light && X.ms1_precursor_xic) {
+      var precMzTheo = X.ms1_precursor_xic.theoretical_mz;
       ms1Traces.push({
         x: X.ms1_precursor_xic.data_points.map(function(p) { return p.retention_time_min; }),
         y: X.ms1_precursor_xic.data_points.map(function(p) { return p.intensity; }),
-        customdata: X.ms1_precursor_xic.data_points.map(function(p) { return p.scan_number; }),
+        customdata: buildCustomData(X.ms1_precursor_xic.data_points, precMzTheo),
         name: X.ms1_precursor_xic.ion_label + ' (L)',
         mode: 'lines+markers',
         line: { color: colors[0], width: 2, dash: 'solid' },
         marker: { size: 3 },
-        hovertemplate: X.ms1_precursor_xic.ion_label + ' (Light)<br>RT: %{x:.2f} min<br>Scan: %{customdata}<br>Intensity: %{y:.0f}<extra></extra>'
+        hovertemplate: X.ms1_precursor_xic.ion_label + ' (Light)<br>RT: %{x:.2f} min<br>Scan: %{customdata[0]}<br>Intensity: %{y:.0f}<br>m/z theo: ' + precMzTheo.toFixed(4) + '<br>m/z obs: %{customdata[1]}<br>Δppm: %{customdata[2]}<extra></extra>'
       });
     }
     if (precVis.heavy && heavyResult && heavyResult.ms1Heavy) {
+      var heavyPrecMzTheo = heavyResult.heavyPrecMz;
       ms1Traces.push({
         x: heavyResult.ms1Heavy.map(function(p) { return p.rt; }),
         y: heavyResult.ms1Heavy.map(function(p) { return p.intensity; }),
-        customdata: heavyResult.ms1Heavy.map(function(p) { return p.scan || ''; }),
-        name: 'Precursor (H) ' + heavyResult.heavyPrecMz.toFixed(4),
+        customdata: buildCustomData(heavyResult.ms1Heavy, heavyPrecMzTheo),
+        name: 'Precursor (H) ' + heavyPrecMzTheo.toFixed(4),
         mode: 'lines+markers',
         line: { color: colors[0], width: 2, dash: 'dash' },
         marker: { size: 3 },
-        hovertemplate: 'Precursor (Heavy)<br>RT: %{x:.2f} min<br>Scan: %{customdata}<br>Intensity: %{y:.0f}<extra></extra>'
+        hovertemplate: 'Precursor (Heavy)<br>RT: %{x:.2f} min<br>Scan: %{customdata[0]}<br>Intensity: %{y:.0f}<br>m/z theo: ' + heavyPrecMzTheo.toFixed(4) + '<br>m/z obs: %{customdata[1]}<br>Δppm: %{customdata[2]}<extra></extra>'
       });
     }
 
@@ -882,27 +900,28 @@
           ms2Traces.push({
             x: t.data_points.map(function(p) { return p.retention_time_min; }),
             y: t.data_points.map(function(p) { return p.intensity; }),
-            customdata: t.data_points.map(function(p) { return p.scan_number; }),
+            customdata: buildCustomData(t.data_points, t.theoretical_mz),
             name: t.ion_label + ' (L)',
             mode: 'lines+markers',
             line: { color: colors[i % colors.length], width: 2, dash: 'solid' },
             marker: { size: 3 },
-            hovertemplate: t.ion_label + ' (Light)<br>RT: %{x:.2f} min<br>Scan: %{customdata}<br>Intensity: %{y:.0f}<br>m/z: ' + t.theoretical_mz.toFixed(4) + '<extra></extra>'
+            hovertemplate: t.ion_label + ' (Light)<br>RT: %{x:.2f} min<br>Scan: %{customdata[0]}<br>Intensity: %{y:.0f}<br>m/z theo: ' + t.theoretical_mz.toFixed(4) + '<br>m/z obs: %{customdata[1]}<br>Δppm: %{customdata[2]}<extra></extra>'
           });
         }
         if (fragVis.heavy && heavyResult && heavyResult.ms2Heavy && heavyResult.ms2Heavy[i]) {
           var pts = heavyResult.ms2Heavy[i];
           if (pts && pts.length > 0) {
             var ionLabel = heavyResult.heavyIons[i] ? heavyResult.heavyIons[i].label + ' (H)' : 'Heavy ion ' + i;
+            var heavyTheoMz = heavyResult.heavyIons[i] ? heavyResult.heavyIons[i].heavy_mz : 0;
             ms2Traces.push({
               x: pts.map(function(p) { return p.rt; }),
               y: pts.map(function(p) { return p.intensity; }),
-              customdata: pts.map(function(p) { return p.scan || ''; }),
+              customdata: buildCustomData(pts, heavyTheoMz),
               name: ionLabel,
               mode: 'lines+markers',
               line: { color: colors[i % colors.length], width: 2, dash: 'dash' },
               marker: { size: 3 },
-              hovertemplate: ionLabel + '<br>RT: %{x:.2f} min<br>Scan: %{customdata}<br>Intensity: %{y:.0f}<extra></extra>'
+              hovertemplate: ionLabel + '<br>RT: %{x:.2f} min<br>Scan: %{customdata[0]}<br>Intensity: %{y:.0f}<br>m/z theo: ' + heavyTheoMz.toFixed(4) + '<br>m/z obs: %{customdata[1]}<br>Δppm: %{customdata[2]}<extra></extra>'
             });
           }
         }

@@ -28,16 +28,23 @@ pub struct TargetIon {
 /// Extract intensity for a target m/z from a spectrum's peak list.
 ///
 /// Uses binary search for efficiency (mzML peaks are sorted by m/z).
-/// Returns 0.0 if no peak is found within tolerance.
+/// Returns `(intensity, observed_mz)` where `observed_mz` is the actual
+/// peak m/z that contributed to the result. Returns `(0.0, None)` if no
+/// peak is found within tolerance.
+///
+/// The observed m/z depends on the intensity rule:
+/// - `MaxInWindow`: m/z of the highest-intensity peak
+/// - `SumInWindow`: m/z of the peak closest to `target_mz`
+/// - `NearestPeak`: m/z of the nearest peak
 pub fn extract_intensity(
     target_mz: f64,
     exp_mz: &[f64],
     exp_int: &[f64],
     tolerance: &MassTolerance,
     rule: IntensityRule,
-) -> f64 {
+) -> (f64, Option<f64>) {
     if exp_mz.is_empty() || exp_mz.len() != exp_int.len() {
-        return 0.0;
+        return (0.0, None);
     }
 
     let pos = exp_mz.partition_point(|&m| m < target_mz);
@@ -56,9 +63,11 @@ pub fn extract_intensity(
     };
 
     let mut best_intensity = 0.0;
+    let mut best_mz = 0.0;
     let mut sum_intensity = 0.0;
     let mut nearest_dist = f64::MAX;
     let mut nearest_intensity = 0.0;
+    let mut nearest_mz = 0.0;
     let mut found = false;
 
     for i in scan_start..scan_end {
@@ -67,24 +76,26 @@ pub fn extract_intensity(
             let intensity = exp_int[i];
             if intensity > best_intensity {
                 best_intensity = intensity;
+                best_mz = exp_mz[i];
             }
             sum_intensity += intensity;
             let dist = (exp_mz[i] - target_mz).abs();
             if dist < nearest_dist {
                 nearest_dist = dist;
                 nearest_intensity = intensity;
+                nearest_mz = exp_mz[i];
             }
         }
     }
 
     if !found {
-        return 0.0;
+        return (0.0, None);
     }
 
     match rule {
-        IntensityRule::MaxInWindow => best_intensity,
-        IntensityRule::SumInWindow => sum_intensity,
-        IntensityRule::NearestPeak => nearest_intensity,
+        IntensityRule::MaxInWindow => (best_intensity, Some(best_mz)),
+        IntensityRule::SumInWindow => (sum_intensity, Some(nearest_mz)),
+        IntensityRule::NearestPeak => (nearest_intensity, Some(nearest_mz)),
     }
 }
 
@@ -279,7 +290,7 @@ pub fn extract_xic(
     });
 
     // --- Pass 1: Stream spectra and extract intensities ---
-    let mut ms2_points: Vec<(u32, f64, Vec<f64>, Vec<f64>)> = Vec::new();
+    let mut ms2_points: Vec<(u32, f64, Vec<(f64, Option<f64>)>, Vec<(f64, Option<f64>)>)> = Vec::new();
     let mut ms1_light_points: Vec<XicDataPoint> = Vec::new();
     let mut ms1_heavy_points: Vec<XicDataPoint> = Vec::new();
 
@@ -288,7 +299,7 @@ pub fn extract_xic(
 
         match spec.ms_level {
             MsLevel::MS1 => {
-                let light_int = extract_intensity(
+                let (light_int, light_obs) = extract_intensity(
                     precursor_mz,
                     &spec.mz_array,
                     &spec.intensity_array,
@@ -299,10 +310,11 @@ pub fn extract_xic(
                     retention_time_min: rt,
                     scan_number: spec.scan_number,
                     intensity: light_int,
+                    observed_mz: light_obs,
                 });
 
                 if let Some(heavy_mz) = heavy_precursor_mz {
-                    let heavy_int = extract_intensity(
+                    let (heavy_int, heavy_obs) = extract_intensity(
                         heavy_mz,
                         &spec.mz_array,
                         &spec.intensity_array,
@@ -313,6 +325,7 @@ pub fn extract_xic(
                         retention_time_min: rt,
                         scan_number: spec.scan_number,
                         intensity: heavy_int,
+                        observed_mz: heavy_obs,
                     });
                 }
             }
@@ -327,7 +340,7 @@ pub fn extract_xic(
                 };
 
                 if matches_window {
-                    let light_intensities: Vec<f64> = light_ions
+                    let light_intensities: Vec<(f64, Option<f64>)> = light_ions
                         .iter()
                         .map(|ion| {
                             extract_intensity(
@@ -340,7 +353,7 @@ pub fn extract_xic(
                         })
                         .collect();
 
-                    let heavy_intensities: Vec<f64> = heavy_ions
+                    let heavy_intensities: Vec<(f64, Option<f64>)> = heavy_ions
                         .iter()
                         .map(|ion| {
                             extract_intensity(
@@ -398,7 +411,8 @@ pub fn extract_xic(
                 .map(|(scan, rt, ints, _)| XicDataPoint {
                     retention_time_min: *rt,
                     scan_number: *scan,
-                    intensity: ints.get(i).copied().unwrap_or(0.0),
+                    intensity: ints.get(i).map(|(int, _)| *int).unwrap_or(0.0),
+                    observed_mz: ints.get(i).and_then(|(_, mz)| *mz),
                 })
                 .collect(),
             is_heavy: false,
@@ -439,7 +453,8 @@ pub fn extract_xic(
                     .map(|(scan, rt, _, heavy_ints)| XicDataPoint {
                         retention_time_min: *rt,
                         scan_number: *scan,
-                        intensity: heavy_ints.get(i).copied().unwrap_or(0.0),
+                        intensity: heavy_ints.get(i).map(|(int, _)| *int).unwrap_or(0.0),
+                        observed_mz: heavy_ints.get(i).and_then(|(_, mz)| *mz),
                     })
                     .collect(),
                 is_heavy: true,
@@ -600,7 +615,7 @@ pub fn extract_xic_with_raw(
     });
 
     // --- Pass 1: Stream spectra, extract intensities, AND capture raw peaks ---
-    let mut ms2_points: Vec<(u32, f64, Vec<f64>, Vec<f64>)> = Vec::new();
+    let mut ms2_points: Vec<(u32, f64, Vec<(f64, Option<f64>)>, Vec<(f64, Option<f64>)>)> = Vec::new();
     let mut ms1_light_points: Vec<XicDataPoint> = Vec::new();
     let mut ms1_heavy_points: Vec<XicDataPoint> = Vec::new();
     let mut raw_ms1_scans: Vec<crate::RawScan> = Vec::new();
@@ -611,7 +626,7 @@ pub fn extract_xic_with_raw(
 
         match spec.ms_level {
             MsLevel::MS1 => {
-                let light_int = extract_intensity(
+                let (light_int, light_obs) = extract_intensity(
                     precursor_mz,
                     &spec.mz_array,
                     &spec.intensity_array,
@@ -622,10 +637,11 @@ pub fn extract_xic_with_raw(
                     retention_time_min: rt,
                     scan_number: spec.scan_number,
                     intensity: light_int,
+                    observed_mz: light_obs,
                 });
 
                 if let Some(heavy_mz) = heavy_precursor_mz {
-                    let heavy_int = extract_intensity(
+                    let (heavy_int, heavy_obs) = extract_intensity(
                         heavy_mz,
                         &spec.mz_array,
                         &spec.intensity_array,
@@ -636,6 +652,7 @@ pub fn extract_xic_with_raw(
                         retention_time_min: rt,
                         scan_number: spec.scan_number,
                         intensity: heavy_int,
+                        observed_mz: heavy_obs,
                     });
                 }
 
@@ -666,7 +683,7 @@ pub fn extract_xic_with_raw(
                 };
 
                 if matches_window {
-                    let light_intensities: Vec<f64> = light_ions
+                    let light_intensities: Vec<(f64, Option<f64>)> = light_ions
                         .iter()
                         .map(|ion| {
                             extract_intensity(
@@ -679,7 +696,7 @@ pub fn extract_xic_with_raw(
                         })
                         .collect();
 
-                    let heavy_intensities: Vec<f64> = heavy_ions
+                    let heavy_intensities: Vec<(f64, Option<f64>)> = heavy_ions
                         .iter()
                         .map(|ion| {
                             extract_intensity(
@@ -756,7 +773,8 @@ pub fn extract_xic_with_raw(
                 .map(|(scan, rt, ints, _)| XicDataPoint {
                     retention_time_min: *rt,
                     scan_number: *scan,
-                    intensity: ints.get(i).copied().unwrap_or(0.0),
+                    intensity: ints.get(i).map(|(int, _)| *int).unwrap_or(0.0),
+                    observed_mz: ints.get(i).and_then(|(_, mz)| *mz),
                 })
                 .collect(),
             is_heavy: false,
@@ -795,7 +813,8 @@ pub fn extract_xic_with_raw(
                     .map(|(scan, rt, _, heavy_ints)| XicDataPoint {
                         retention_time_min: *rt,
                         scan_number: *scan,
-                        intensity: heavy_ints.get(i).copied().unwrap_or(0.0),
+                        intensity: heavy_ints.get(i).map(|(int, _)| *int).unwrap_or(0.0),
+                        observed_mz: heavy_ints.get(i).and_then(|(_, mz)| *mz),
                     })
                     .collect(),
                 is_heavy: true,
@@ -925,8 +944,9 @@ mod tests {
             value: 0.05,
             unit: ToleranceUnit::Da,
         };
-        let result = extract_intensity(200.01, &mz, &int, &tol, IntensityRule::MaxInWindow);
-        assert!((result - 200.0).abs() < 0.01, "expected 200.0, got {result}");
+        let (intensity, obs_mz) = extract_intensity(200.01, &mz, &int, &tol, IntensityRule::MaxInWindow);
+        assert!((intensity - 200.0).abs() < 0.01, "expected 200.0, got {intensity}");
+        assert_eq!(obs_mz, Some(200.01), "max peak is at 200.01");
     }
 
     #[test]
@@ -937,8 +957,9 @@ mod tests {
             value: 0.05,
             unit: ToleranceUnit::Da,
         };
-        let result = extract_intensity(200.01, &mz, &int, &tol, IntensityRule::SumInWindow);
-        assert!((result - 450.0).abs() < 0.01, "expected 450.0, got {result}");
+        let (intensity, obs_mz) = extract_intensity(200.01, &mz, &int, &tol, IntensityRule::SumInWindow);
+        assert!((intensity - 450.0).abs() < 0.01, "expected 450.0, got {intensity}");
+        assert_eq!(obs_mz, Some(200.01), "nearest peak to target is at 200.01");
     }
 
     #[test]
@@ -949,8 +970,9 @@ mod tests {
             value: 0.05,
             unit: ToleranceUnit::Da,
         };
-        let result = extract_intensity(200.01, &mz, &int, &tol, IntensityRule::NearestPeak);
-        assert!((result - 200.0).abs() < 0.01, "expected 200.0, got {result}");
+        let (intensity, obs_mz) = extract_intensity(200.01, &mz, &int, &tol, IntensityRule::NearestPeak);
+        assert!((intensity - 200.0).abs() < 0.01, "expected 200.0, got {intensity}");
+        assert_eq!(obs_mz, Some(200.01), "nearest peak is at 200.01");
     }
 
     #[test]
@@ -961,8 +983,9 @@ mod tests {
             value: 0.01,
             unit: ToleranceUnit::Da,
         };
-        let result = extract_intensity(250.0, &mz, &int, &tol, IntensityRule::MaxInWindow);
-        assert!((result - 0.0).abs() < f64::EPSILON);
+        let (intensity, obs_mz) = extract_intensity(250.0, &mz, &int, &tol, IntensityRule::MaxInWindow);
+        assert!((intensity - 0.0).abs() < f64::EPSILON);
+        assert_eq!(obs_mz, None, "no match means no observed m/z");
     }
 
     #[test]
@@ -971,10 +994,9 @@ mod tests {
             value: 0.05,
             unit: ToleranceUnit::Da,
         };
-        assert_eq!(
-            extract_intensity(200.0, &[], &[], &tol, IntensityRule::MaxInWindow),
-            0.0
-        );
+        let (intensity, obs_mz) = extract_intensity(200.0, &[], &[], &tol, IntensityRule::MaxInWindow);
+        assert_eq!(intensity, 0.0);
+        assert_eq!(obs_mz, None);
     }
 
     #[test]
@@ -985,8 +1007,9 @@ mod tests {
             value: 20.0,
             unit: ToleranceUnit::Ppm,
         };
-        let result = extract_intensity(500.005, &mz, &int, &tol, IntensityRule::MaxInWindow);
-        assert!(result > 0.0, "should find a peak within 20 ppm");
+        let (intensity, obs_mz) = extract_intensity(500.005, &mz, &int, &tol, IntensityRule::MaxInWindow);
+        assert!(intensity > 0.0, "should find a peak within 20 ppm");
+        assert!(obs_mz.is_some(), "should have observed m/z");
     }
 
     #[test]

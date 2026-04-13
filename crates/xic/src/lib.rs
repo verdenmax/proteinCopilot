@@ -38,6 +38,9 @@ pub struct XicDataPoint {
     pub scan_number: u32,
     /// Extracted intensity (0.0 if no peak found in tolerance window).
     pub intensity: f64,
+    /// Observed m/z of the matched peak (`None` when no peak found).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub observed_mz: Option<f64>,
 }
 
 /// A single XIC trace for one ion.

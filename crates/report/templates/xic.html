@@ -61,15 +61,24 @@
         var colors = ['#1f77b4','#ff7f0e','#2ca02c','#d62728','#9467bd','#8c564b','#e377c2','#7f7f7f','#bcbd22','#17becf'];
 
         function makeTrace(xicTrace, colorIdx, dash) {
+            var theoMz = xicTrace.theoretical_mz;
             return {
                 x: xicTrace.data_points.map(function(p) { return p.retention_time_min; }),
                 y: xicTrace.data_points.map(function(p) { return p.intensity; }),
-                customdata: xicTrace.data_points.map(function(p) { return p.scan_number; }),
+                customdata: xicTrace.data_points.map(function(p) {
+                    var obsMz = p.observed_mz;
+                    var ppm = (obsMz != null) ? ((obsMz - theoMz) / theoMz * 1e6).toFixed(1) : '';
+                    return [
+                        p.scan_number,
+                        obsMz != null ? obsMz.toFixed(4) : '-',
+                        ppm !== '' ? ppm + ' ppm' : '-'
+                    ];
+                }),
                 name: xicTrace.ion_label + (xicTrace.is_heavy ? ' (H)' : ''),
                 mode: 'lines+markers',
                 line: { color: colors[colorIdx % colors.length], width: 2, dash: dash || 'solid' },
                 marker: { size: 3 },
-                hovertemplate: xicTrace.ion_label + '<br>RT: %{x:.2f} min<br>Scan: %{customdata}<br>Intensity: %{y:.0f}<br>m/z: ' + xicTrace.theoretical_mz.toFixed(4) + '<extra></extra>'
+                hovertemplate: xicTrace.ion_label + '<br>RT: %{x:.2f} min<br>Scan: %{customdata[0]}<br>Intensity: %{y:.0f}<br>m/z theo: ' + theoMz.toFixed(4) + '<br>m/z obs: %{customdata[1]}<br>Δppm: %{customdata[2]}<extra></extra>'
             };
         }
 
