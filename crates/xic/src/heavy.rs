@@ -6,6 +6,7 @@
 
 use crate::extract::TargetIon;
 use crate::{IonType, LabelType};
+use protein_copilot_core::spectrum::{IsolationWindow, Spectrum};
 
 /// Compute heavy-label m/z for a precursor ion.
 ///
@@ -91,6 +92,42 @@ fn residue_heavy_delta(residues: &[char], label: &LabelType) -> f64 {
             delta
         }
     }
+}
+
+/// Check if an isolation window contains a given m/z value.
+///
+/// Returns `true` when `mz` falls within `[target_mz - lower_offset, target_mz + upper_offset]`.
+pub fn window_contains_mz(window: &IsolationWindow, mz: f64) -> bool {
+    let lo = window.target_mz - window.lower_offset;
+    let hi = window.target_mz + window.upper_offset;
+    mz >= lo && mz <= hi
+}
+
+/// Search a slice of MS2 spectra for the isolation window covering `target_mz`.
+///
+/// Finds the MS2 scan closest to `reference_rt_min` whose isolation window
+/// contains `target_mz`. Returns `(scan_number, isolation_window)` if found.
+pub fn find_heavy_dia_window_from_spectra(
+    spectra: &[Spectrum],
+    reference_rt_min: f64,
+    target_mz: f64,
+) -> Option<(u32, IsolationWindow)> {
+    spectra
+        .iter()
+        .filter_map(|spec| {
+            let win = spec
+                .precursors
+                .first()
+                .and_then(|p| p.isolation_window.as_ref())?;
+            if window_contains_mz(win, target_mz) {
+                let rt_delta = (spec.retention_time_min - reference_rt_min).abs();
+                Some((spec.scan_number, win.clone(), rt_delta))
+            } else {
+                None
+            }
+        })
+        .min_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal))
+        .map(|(scan, win, _)| (scan, win))
 }
 
 #[cfg(test)]
@@ -190,5 +227,78 @@ mod tests {
         let heavy = compute_heavy_target_ions(&light, "KPEPTIDE", &silac());
         let expected = 100.0 + 8.014199 / 2.0;
         assert!((heavy[0].mz - expected).abs() < 1e-4);
+    }
+
+    #[test]
+    fn window_contains_mz_inside() {
+        let w = IsolationWindow {
+            target_mz: 500.0,
+            lower_offset: 12.5,
+            upper_offset: 12.5,
+        };
+        assert!(window_contains_mz(&w, 500.0));
+        assert!(window_contains_mz(&w, 487.5)); // exactly at lower edge
+        assert!(window_contains_mz(&w, 512.5)); // exactly at upper edge
+        assert!(window_contains_mz(&w, 505.0)); // inside
+    }
+
+    #[test]
+    fn window_contains_mz_outside() {
+        let w = IsolationWindow {
+            target_mz: 500.0,
+            lower_offset: 12.5,
+            upper_offset: 12.5,
+        };
+        assert!(!window_contains_mz(&w, 487.4)); // just below
+        assert!(!window_contains_mz(&w, 512.6)); // just above
+        assert!(!window_contains_mz(&w, 600.0)); // far away
+    }
+
+    #[test]
+    fn find_heavy_dia_window_basic() {
+        let spectra = vec![
+            make_ms2_spec(100, 10.0, 400.0, 12.5),
+            make_ms2_spec(101, 10.01, 425.0, 12.5),
+            make_ms2_spec(102, 10.02, 450.0, 12.5),
+        ];
+
+        // heavy m/z = 440.0 should match window #3 (450 ±12.5 = [437.5, 462.5])
+        let result = find_heavy_dia_window_from_spectra(&spectra, 10.0, 440.0);
+        assert!(result.is_some(), "should find window containing 440.0");
+        let (scan, win) = result.unwrap();
+        assert_eq!(scan, 102);
+        assert!((win.target_mz - 450.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn find_heavy_dia_window_not_found() {
+        let spectra = vec![
+            make_ms2_spec(100, 10.0, 400.0, 12.5),
+            make_ms2_spec(101, 10.01, 425.0, 12.5),
+        ];
+        let result = find_heavy_dia_window_from_spectra(&spectra, 10.0, 600.0);
+        assert!(result.is_none());
+    }
+
+    fn make_ms2_spec(scan: u32, rt_min: f64, center_mz: f64, half_width: f64) -> Spectrum {
+        use protein_copilot_core::spectrum::{MsLevel, PrecursorInfo};
+        Spectrum {
+            scan_number: scan,
+            ms_level: MsLevel::MS2,
+            retention_time_min: rt_min,
+            mz_array: vec![],
+            intensity_array: vec![],
+            precursors: vec![PrecursorInfo {
+                mz: center_mz,
+                charge: Some(2),
+                intensity: None,
+                source_scan: None,
+                isolation_window: Some(IsolationWindow {
+                    target_mz: center_mz,
+                    lower_offset: half_width,
+                    upper_offset: half_width,
+                }),
+            }],
+        }
     }
 }
