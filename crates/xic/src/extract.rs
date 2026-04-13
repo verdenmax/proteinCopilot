@@ -15,6 +15,10 @@ use protein_copilot_search_engine::matching::{
 use crate::{ExtractionParams, IntensityRule, XicData, XicDataPoint, XicError, XicTrace};
 use crate::IonType;
 
+/// An MS2 data point: (scan_number, RT_min, extracted_intensities).
+/// Each intensity entry is (intensity, Option<observed_mz>).
+type Ms2Point = (u32, f64, Vec<(f64, Option<f64>)>);
+
 /// A target ion for XIC extraction.
 #[derive(Debug, Clone)]
 pub struct TargetIon {
@@ -291,9 +295,9 @@ pub fn extract_xic(
 
     // --- Pass 1: Stream spectra and extract intensities ---
     // Light MS2 points: (scan, RT, light_intensities)
-    let mut ms2_light_points: Vec<(u32, f64, Vec<(f64, Option<f64>)>)> = Vec::new();
+    let mut ms2_light_points: Vec<Ms2Point> = Vec::new();
     // Heavy MS2 points: (scan, RT, heavy_intensities) — from different DIA window
-    let mut ms2_heavy_points: Vec<(u32, f64, Vec<(f64, Option<f64>)>)> = Vec::new();
+    let mut ms2_heavy_points: Vec<Ms2Point> = Vec::new();
     // Whether heavy uses a separate DIA window (DIA+SILAC)
     let is_dia = target_window.is_some();
     let needs_separate_heavy_window = is_dia && !heavy_ions.is_empty();
@@ -435,7 +439,7 @@ pub fn extract_xic(
 
     // --- Heavy windowing (independent scan sequence) ---
     ms2_heavy_points.sort_by_key(|(scan, _, _)| *scan);
-    let heavy_windowed: &[(u32, f64, Vec<(f64, Option<f64>)>)] = if ms2_heavy_points.is_empty() {
+    let heavy_windowed: &[Ms2Point] = if ms2_heavy_points.is_empty() {
         &[]
     } else {
         // Find the heavy scan closest to target_scan's RT
@@ -622,6 +626,7 @@ pub fn extract_xic(
 ///
 /// MS1 peaks are trimmed to ±`ms1_mz_window_da` around `precursor_mz`
 /// to control embedded data volume.
+#[allow(clippy::too_many_arguments)]
 pub fn extract_xic_with_raw(
     file_path: &Path,
     target_scan: u32,
@@ -695,8 +700,8 @@ pub fn extract_xic_with_raw(
     });
 
     // --- Pass 1: Stream spectra, extract intensities, AND capture raw peaks ---
-    let mut ms2_light_points: Vec<(u32, f64, Vec<(f64, Option<f64>)>)> = Vec::new();
-    let mut ms2_heavy_points: Vec<(u32, f64, Vec<(f64, Option<f64>)>)> = Vec::new();
+    let mut ms2_light_points: Vec<Ms2Point> = Vec::new();
+    let mut ms2_heavy_points: Vec<Ms2Point> = Vec::new();
     let is_dia = target_window.is_some();
     let needs_separate_heavy_window = is_dia && !heavy_ions.is_empty();
     let mut ms1_light_points: Vec<XicDataPoint> = Vec::new();
@@ -877,7 +882,7 @@ pub fn extract_xic_with_raw(
 
     // --- Heavy windowing (independent scan sequence) ---
     ms2_heavy_points.sort_by_key(|(scan, _, _)| *scan);
-    let heavy_windowed: &[(u32, f64, Vec<(f64, Option<f64>)>)] = if ms2_heavy_points.is_empty() {
+    let heavy_windowed: &[Ms2Point] = if ms2_heavy_points.is_empty() {
         &[]
     } else {
         let target_rt_for_heavy = target_rt;
@@ -1307,7 +1312,6 @@ mod tests {
         let fixture = std::path::Path::new("tests/fixtures");
         if !fixture.exists() {
             // Skip if no fixture available (unit test environment)
-            return;
         }
         // Integration test — will be covered in Task 7
     }
