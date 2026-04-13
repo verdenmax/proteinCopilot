@@ -238,6 +238,7 @@
   "use strict";
   var D = window.__UNIFIED_DATA__.annotation;
   if (!D) return;
+  var DH = D.heavy_annotation || null;  // Heavy annotation data (DIA+SILAC)
 
   /* ── helpers ──────────────────────────────────────────── */
   function fmt(n, d) { return Number(n).toFixed(d === undefined ? 2 : d); }
@@ -301,6 +302,18 @@
     add("Score", scoreWrap);
     add("Precursor m/z", fmt(D.precursor_mz, 4));
     add("\u0394 mass", fmt(D.delta_mass_ppm, 2) + " ppm");
+
+    if (DH) {
+      add("Heavy Scan / RT", "Scan " + DH.scan_number + "  \u2014  " + fmt(DH.retention_time_min, 2) + " min");
+      add("Heavy Precursor", fmt(DH.precursor_mz, 4) + " m/z");
+      var heavyBadgeCls = "score-badge " + (DH.score > 0.5 ? "good" : DH.score >= 0.2 ? "mid" : "low");
+      var heavyBadge = el("span", { "class": heavyBadgeCls }, fmt(DH.score, 3));
+      var heavyScoreWrap = document.createElement("span");
+      heavyScoreWrap.appendChild(heavyBadge);
+      heavyScoreWrap.appendChild(document.createTextNode("  (" + DH.matched_ions + "/" + DH.total_ions + " ions)"));
+      add("Heavy Score", heavyScoreWrap);
+    }
+
     panel.appendChild(grid);
   })();
 
@@ -416,6 +429,66 @@
     }
 
     panel.appendChild(covSvg);
+
+    // Heavy coverage (DIA+SILAC mirror)
+    if (DH) {
+      var heavyLabel = el("div", { style: "margin-top:12px; font-size:13px; color:#e67e22; font-weight:600;" },
+        "\u25BC Heavy \u2014 Scan " + DH.scan_number + " (" + DH.matched_ions + "/" + DH.total_ions + " ions)");
+      panel.appendChild(heavyLabel);
+
+      var covSvgH = svgEl("svg", {
+        width: "100%", height: "auto",
+        viewBox: "0 0 " + totalW + " " + svgH,
+        preserveAspectRatio: "xMidYMid meet",
+        style: "max-width:" + totalW + "px"
+      });
+
+      var bMatchedH = [], yMatchedH = [];
+      var bNumbersH = [], yNumbersH = [];
+      for (var ch = 0; ch < n - 1; ch++) {
+        var bIonH = DH.b_ions[ch];
+        bMatchedH[ch] = !!(bIonH && bIonH.matched);
+        bNumbersH[ch] = bIonH ? bIonH.number : (ch + 1);
+        var yIdxH = n - 2 - ch;
+        var yIonH = DH.y_ions[yIdxH];
+        yMatchedH[ch] = !!(yIonH && yIonH.matched);
+        yNumbersH[ch] = yIonH ? yIonH.number : (n - 1 - ch);
+      }
+
+      for (var sh = 0; sh < n; sh++) {
+        var axh = xOff + sh * cellW + cellW / 2;
+        var aah = svgEl("text", {
+          x: axh, y: seqY, "text-anchor": "middle", "dominant-baseline": "central",
+          "font-size": "20", "font-family": "'Courier New', Courier, monospace",
+          "font-weight": "700", fill: "#e67e22"
+        });
+        aah.textContent = seq[sh];
+        covSvgH.appendChild(aah);
+      }
+
+      for (var ch2 = 0; ch2 < n - 1; ch2++) {
+        var cleavXH = xOff + (ch2 + 1) * cellW;
+        var rightCXH = cleavXH + cellW / 2;
+        var leftCXH = cleavXH - cellW / 2;
+        var bColH = bMatchedH[ch2] ? "#d35400" : "#e0e0e0";
+        var bStH = bMatchedH[ch2] ? 2.5 : 1.2;
+        var yColH = yMatchedH[ch2] ? "#e67e22" : "#e0e0e0";
+        var yStH = yMatchedH[ch2] ? 2.5 : 1.2;
+
+        covSvgH.appendChild(svgEl("line", { x1: cleavXH, y1: yVertTop, x2: cleavXH, y2: yVertBot, stroke: yColH, "stroke-width": yStH, "stroke-linecap": "round" }));
+        covSvgH.appendChild(svgEl("line", { x1: cleavXH, y1: yHorizY, x2: rightCXH, y2: yHorizY, stroke: yColH, "stroke-width": yStH, "stroke-linecap": "round" }));
+        var yLblH = svgEl("text", { x: cleavXH + 2, y: yLabelY, "font-size": "10", "font-weight": "600", fill: yColH, "text-anchor": "start" });
+        yLblH.textContent = "y" + subscript(yNumbersH[ch2]);
+        covSvgH.appendChild(yLblH);
+
+        covSvgH.appendChild(svgEl("line", { x1: cleavXH, y1: bVertTop, x2: cleavXH, y2: bVertBot, stroke: bColH, "stroke-width": bStH, "stroke-linecap": "round" }));
+        covSvgH.appendChild(svgEl("line", { x1: cleavXH, y1: bHorizY, x2: leftCXH, y2: bHorizY, stroke: bColH, "stroke-width": bStH, "stroke-linecap": "round" }));
+        var bLblH = svgEl("text", { x: cleavXH - 2, y: bLabelY, "font-size": "10", "font-weight": "600", fill: bColH, "text-anchor": "end" });
+        bLblH.textContent = "b" + subscript(bNumbersH[ch2]);
+        covSvgH.appendChild(bLblH);
+      }
+      panel.appendChild(covSvgH);
+    }
   })();
 
   /* ── 3. Interactive Spectrum ──────────────────────────── */
@@ -423,25 +496,37 @@
     var container = document.getElementById("spectrum-container");
     var tooltip = document.getElementById("tooltip");
 
-    var W = 1200, H = 500;
+    var mirrorMode = !!DH;
+    var W = 1200, H = mirrorMode ? 800 : 500;
     var margin = { top: 40, right: 30, bottom: 55, left: 65 };
     var pw = W - margin.left - margin.right;
-    var ph = H - margin.top - margin.bottom;
+    var totalPlotH = H - margin.top - margin.bottom;
+    var lightH = mirrorMode ? totalPlotH / 2 : totalPlotH;
+    var heavyH = mirrorMode ? totalPlotH / 2 : 0;
 
     var peaks = D.peaks;
-    if (!peaks.length) return;
+    var heavyPeaks = DH ? DH.peaks : [];
+    if (!peaks.length && !heavyPeaks.length) return;
     var maxMz = 0, maxInt = 0;
     for (var i = 0; i < peaks.length; i++) {
       if (peaks[i].mz > maxMz) maxMz = peaks[i].mz;
       if (peaks[i].intensity > maxInt) maxInt = peaks[i].intensity;
     }
+    if (mirrorMode) {
+      for (var hp = 0; hp < heavyPeaks.length; hp++) {
+        if (heavyPeaks[hp].mz > maxMz) maxMz = heavyPeaks[hp].mz;
+        if (heavyPeaks[hp].intensity > maxInt) maxInt = heavyPeaks[hp].intensity;
+      }
+    }
     var mzMin = 0;
     var mzMax = maxMz * 1.05;
     var intMax = maxInt;
-    var minMatchedH = ph * 0.05;
+    var minMatchedH = lightH * 0.05;
 
+    var lightBaseline = margin.top + lightH;  // Center line (or bottom for non-mirror)
     function xScale(v) { return margin.left + (v - mzMin) / (mzMax - mzMin) * pw; }
-    function yScale(v) { return margin.top + ph - (v / intMax) * ph; }
+    function yScaleLight(v) { return lightBaseline - (v / intMax) * lightH; }
+    function yScaleHeavy(v) { return lightBaseline + (v / intMax) * heavyH; }
 
     var svg = svgEl("svg", {
       width: "100%", height: "auto",
@@ -451,37 +536,46 @@
 
     // Background
     svg.appendChild(svgEl("rect", {
-      x: margin.left, y: margin.top, width: pw, height: ph,
+      x: margin.left, y: margin.top, width: pw, height: totalPlotH,
       fill: "#f8f9fa"
     }));
 
-    // Horizontal grid lines at 25%, 50%, 75%, 100%
+    // Horizontal grid lines at 25%, 50%, 75%, 100% (light half)
     var gGrid = svgEl("g");
     var gridPcts = [25, 50, 75, 100];
     for (var gi = 0; gi < gridPcts.length; gi++) {
-      var gy = yScale(gridPcts[gi] / 100 * intMax);
+      var gy = yScaleLight(gridPcts[gi] / 100 * intMax);
       gGrid.appendChild(svgEl("line", {
         x1: margin.left, y1: gy, x2: margin.left + pw, y2: gy,
         stroke: "#e8e8e8", "stroke-width": "0.5", "stroke-dasharray": "4,3"
       }));
+    }
+    if (mirrorMode) {
+      for (var gi2 = 0; gi2 < gridPcts.length; gi2++) {
+        var gyH = yScaleHeavy(gridPcts[gi2] / 100 * intMax);
+        gGrid.appendChild(svgEl("line", {
+          x1: margin.left, y1: gyH, x2: margin.left + pw, y2: gyH,
+          stroke: "#e8e8e8", "stroke-width": "0.5", "stroke-dasharray": "4,3"
+        }));
+      }
     }
     svg.appendChild(gGrid);
 
     // Axes
     var gAxis = svgEl("g", { "class": "axis" });
 
-    // x-axis
+    // x-axis (at bottom of plot area)
     gAxis.appendChild(svgEl("line", {
-      x1: margin.left, y1: margin.top + ph,
-      x2: margin.left + pw, y2: margin.top + ph, stroke: "#dee2e6"
+      x1: margin.left, y1: margin.top + totalPlotH,
+      x2: margin.left + pw, y2: margin.top + totalPlotH, stroke: "#dee2e6"
     }));
     var xTicks = niceRange(mzMin, mzMax, 10);
     for (var xi = 0; xi < xTicks.length; xi++) {
       var tx = xScale(xTicks[xi]);
       gAxis.appendChild(svgEl("line", {
-        x1: tx, y1: margin.top + ph, x2: tx, y2: margin.top + ph + 5, stroke: "#dee2e6"
+        x1: tx, y1: margin.top + totalPlotH, x2: tx, y2: margin.top + totalPlotH + 5, stroke: "#dee2e6"
       }));
-      var tl = svgEl("text", { x: tx, y: margin.top + ph + 18, "text-anchor": "middle" });
+      var tl = svgEl("text", { x: tx, y: margin.top + totalPlotH + 18, "text-anchor": "middle" });
       tl.textContent = xTicks[xi];
       gAxis.appendChild(tl);
     }
@@ -495,12 +589,12 @@
     // y-axis
     gAxis.appendChild(svgEl("line", {
       x1: margin.left, y1: margin.top,
-      x2: margin.left, y2: margin.top + ph, stroke: "#dee2e6"
+      x2: margin.left, y2: margin.top + totalPlotH, stroke: "#dee2e6"
     }));
     var yTicks = [0, 25, 50, 75, 100];
     for (var yi = 0; yi < yTicks.length; yi++) {
       var pct = yTicks[yi];
-      var ty = yScale(pct / 100 * intMax);
+      var ty = yScaleLight(pct / 100 * intMax);
       gAxis.appendChild(svgEl("line", {
         x1: margin.left - 5, y1: ty, x2: margin.left, y2: ty, stroke: "#dee2e6"
       }));
@@ -508,17 +602,28 @@
       yl.textContent = pct + "%";
       gAxis.appendChild(yl);
     }
+    if (mirrorMode) {
+      for (var yi2 = 1; yi2 < yTicks.length; yi2++) {
+        var pct2 = yTicks[yi2];
+        var tyH = yScaleHeavy(pct2 / 100 * intMax);
+        gAxis.appendChild(svgEl("line", {
+          x1: margin.left - 5, y1: tyH, x2: margin.left, y2: tyH, stroke: "#dee2e6"
+        }));
+        var ylH = svgEl("text", { x: margin.left - 8, y: tyH + 4, "text-anchor": "end" });
+        ylH.textContent = pct2 + "%";
+        gAxis.appendChild(ylH);
+      }
+    }
     var yLabelEl = svgEl("text", {
-      x: 16, y: margin.top + ph / 2,
+      x: 16, y: margin.top + totalPlotH / 2,
       "text-anchor": "middle", "class": "axis-label",
-      transform: "rotate(-90,16," + (margin.top + ph / 2) + ")"
+      transform: "rotate(-90,16," + (margin.top + totalPlotH / 2) + ")"
     });
     yLabelEl.textContent = "Relative Intensity";
     gAxis.appendChild(yLabelEl);
     svg.appendChild(gAxis);
 
     // Separate peaks into layers: noise → unmatched → matched (draw order)
-    var baseline = margin.top + ph;
     var gNoise = svgEl("g");
     var gUnmatched = svgEl("g");
     var gMatched = svgEl("g");
@@ -535,23 +640,20 @@
       var ann = pk.annotation;
 
       if (ann) {
-        // Matched peak: 3px stroke, vivid color, minimum height enforced
-        var peakH = relInt * ph;
+        var peakH = relInt * lightH;
         if (peakH < minMatchedH) peakH = minMatchedH;
-        var y2m = baseline - peakH;
+        var y2m = lightBaseline - peakH;
         var col = ann.ion_type === "B" ? "#d63031" : "#0984e3";
 
         gMatched.appendChild(svgEl("line", {
-          x1: x, y1: baseline, x2: x, y2: y2m,
+          x1: x, y1: lightBaseline, x2: x, y2: y2m,
           stroke: col, "stroke-width": "3", "stroke-linecap": "round"
         }));
 
-        // Label with subscript digits
         var ionPrefix = ann.ion_type === "B" ? "b" : "y";
         var labelText = ionPrefix + subscript(ann.ion_number);
         var labelY = y2m - 6;
 
-        // Stagger to avoid overlap
         for (var li = 0; li < labelPositions.length; li++) {
           if (Math.abs(labelPositions[li].x - x) < 20) {
             var diff = Math.abs(labelPositions[li].y - labelY);
@@ -571,28 +673,26 @@
         gLabels.appendChild(lt);
 
       } else if (relInt < 0.05) {
-        // Noise peak: very thin, very light
-        var y2n = yScale(pk.intensity);
+        var y2n = yScaleLight(pk.intensity);
         gNoise.appendChild(svgEl("line", {
-          x1: x, y1: baseline, x2: x, y2: y2n,
+          x1: x, y1: lightBaseline, x2: x, y2: y2n,
           stroke: "#f0f0f0", "stroke-width": "0.5"
         }));
       } else {
-        // Unmatched peak above 5%: thin, light gray
-        var y2u = yScale(pk.intensity);
+        var y2u = yScaleLight(pk.intensity);
         gUnmatched.appendChild(svgEl("line", {
-          x1: x, y1: baseline, x2: x, y2: y2u,
+          x1: x, y1: lightBaseline, x2: x, y2: y2u,
           stroke: "#d0d0d0", "stroke-width": "1"
         }));
       }
 
-      // Hitbox for all peaks (wider for easier hovering)
+      // Hitbox for all peaks
       (function (peak, px, ann2) {
         var peakTop = ann2
-          ? baseline - Math.max((peak.intensity / intMax) * ph, minMatchedH)
-          : yScale(peak.intensity);
+          ? lightBaseline - Math.max((peak.intensity / intMax) * lightH, minMatchedH)
+          : yScaleLight(peak.intensity);
         var hitbox = svgEl("line", {
-          x1: px, y1: baseline, x2: px, y2: peakTop,
+          x1: px, y1: lightBaseline, x2: px, y2: peakTop,
           stroke: "transparent", "stroke-width": "12", fill: "none",
           cursor: "pointer"
         });
@@ -603,6 +703,9 @@
           var relI = (peak.intensity / intMax * 100);
           var html = "<div class=\"tip-row\"><span class=\"tip-label\">m/z</span><span class=\"tip-val\">" + fmt(peak.mz, 4) + "</span></div>";
           html += "<div class=\"tip-row\"><span class=\"tip-label\">Intensity</span><span class=\"tip-val\">" + fmt(peak.intensity, 1) + " (" + fmt(relI, 1) + "%)</span></div>";
+          if (mirrorMode) {
+            html += "<div class=\"tip-row\"><span class=\"tip-label\">Source</span><span class=\"tip-val\" style=\"color:#0984e3\">Light Scan " + D.scan_number + "</span></div>";
+          }
           if (ann2) {
             html += "<hr class=\"tip-sep\">";
             var lbl = (ann2.ion_type === "B" ? "b" : "y") + "<sub>" + ann2.ion_number + "</sub>";
@@ -612,7 +715,6 @@
           tooltip.innerHTML = html;
           tooltip.style.display = "block";
 
-          // Highlight corresponding bracket in coverage diagram
           if (ionId) {
             var brackets = document.querySelectorAll(".cov-bracket[data-ion='" + ionId + "']");
             for (var bi = 0; bi < brackets.length; bi++) {
@@ -635,6 +737,111 @@
         });
         gHitboxes.appendChild(hitbox);
       })(pk, x, ann);
+    }
+
+    // ── Mirror mode: draw heavy peaks downward ──
+    if (mirrorMode && heavyPeaks.length > 0) {
+      var heavyLabelPositions = [];
+      for (var ph2 = 0; ph2 < heavyPeaks.length; ph2++) {
+        var pkH = heavyPeaks[ph2];
+        var relIntH = pkH.intensity / intMax;
+        var xH = xScale(pkH.mz);
+        var annH = pkH.annotation;
+
+        if (annH) {
+          var peakHH = relIntH * heavyH;
+          if (peakHH < minMatchedH) peakHH = minMatchedH;
+          var y2mH = lightBaseline + peakHH;
+          var colH = annH.ion_type === "B" ? "#d35400" : "#e67e22";
+
+          gMatched.appendChild(svgEl("line", {
+            x1: xH, y1: lightBaseline, x2: xH, y2: y2mH,
+            stroke: colH, "stroke-width": "3", "stroke-linecap": "round"
+          }));
+
+          var ionPrefH = annH.ion_type === "B" ? "b" : "y";
+          var labelTxtH = ionPrefH + subscript(annH.ion_number);
+          var labelYH = y2mH + 16;
+
+          for (var liH = 0; liH < heavyLabelPositions.length; liH++) {
+            if (Math.abs(heavyLabelPositions[liH].x - xH) < 20) {
+              var diffH = Math.abs(heavyLabelPositions[liH].y - labelYH);
+              if (diffH < 16) {
+                labelYH = heavyLabelPositions[liH].y + 18;
+              }
+            }
+          }
+          if (labelYH > lightBaseline + heavyH - 4) labelYH = lightBaseline + heavyH - 4;
+          heavyLabelPositions.push({ x: xH, y: labelYH });
+
+          var ltH = svgEl("text", {
+            x: xH, y: labelYH, "text-anchor": "middle",
+            fill: colH, "font-size": "14", "font-weight": "700"
+          });
+          ltH.textContent = labelTxtH;
+          gLabels.appendChild(ltH);
+
+        } else if (relIntH < 0.05) {
+          gNoise.appendChild(svgEl("line", {
+            x1: xH, y1: lightBaseline, x2: xH, y2: lightBaseline + relIntH * heavyH,
+            stroke: "#f5e6d0", "stroke-width": "0.5"
+          }));
+        } else {
+          gUnmatched.appendChild(svgEl("line", {
+            x1: xH, y1: lightBaseline, x2: xH, y2: lightBaseline + relIntH * heavyH,
+            stroke: "#ead0b0", "stroke-width": "1"
+          }));
+        }
+
+        // Hitbox for heavy peaks
+        (function(peak, px, ann2) {
+          var peakTopH = ann2
+            ? lightBaseline + Math.max((peak.intensity / intMax) * heavyH, minMatchedH)
+            : lightBaseline + (peak.intensity / intMax) * heavyH;
+          var hitboxH = svgEl("line", {
+            x1: px, y1: lightBaseline, x2: px, y2: peakTopH,
+            stroke: "transparent", "stroke-width": "12", fill: "none", cursor: "pointer"
+          });
+          hitboxH.addEventListener("mouseenter", function() {
+            var relI = (peak.intensity / intMax * 100);
+            var html = "<div class=\"tip-row\"><span class=\"tip-label\">m/z</span><span class=\"tip-val\">" + fmt(peak.mz, 4) + "</span></div>";
+            html += "<div class=\"tip-row\"><span class=\"tip-label\">Intensity</span><span class=\"tip-val\">" + fmt(peak.intensity, 1) + " (" + fmt(relI, 1) + "%)</span></div>";
+            html += "<div class=\"tip-row\"><span class=\"tip-label\">Source</span><span class=\"tip-val\" style=\"color:#e67e22\">Heavy Scan " + DH.scan_number + "</span></div>";
+            if (ann2) {
+              html += "<hr class=\"tip-sep\">";
+              var lbl = (ann2.ion_type === "B" ? "b" : "y") + "<sub>" + ann2.ion_number + "</sub>";
+              html += "<div class=\"tip-row\"><span class=\"tip-label\">Ion</span><span class=\"tip-val\">" + lbl + " (Heavy)</span></div>";
+              html += "<div class=\"tip-row\"><span class=\"tip-label\">\u0394 ppm</span><span class=\"tip-val\">" + fmt(ann2.delta_ppm, 2) + "</span></div>";
+            }
+            tooltip.innerHTML = html;
+            tooltip.style.display = "block";
+          });
+          hitboxH.addEventListener("mousemove", function(ev) {
+            tooltip.style.left = (ev.clientX + 14) + "px";
+            tooltip.style.top = (ev.clientY - 28) + "px";
+          });
+          hitboxH.addEventListener("mouseleave", function() { tooltip.style.display = "none"; });
+          gHitboxes.appendChild(hitboxH);
+        })(pkH, xH, annH);
+      }
+
+      // Center divider line
+      svg.appendChild(svgEl("line", {
+        x1: margin.left, y1: lightBaseline, x2: margin.left + pw, y2: lightBaseline,
+        stroke: "#666", "stroke-width": "1.5"
+      }));
+
+      // Light label (top-left)
+      var lightLbl = svgEl("text", { x: margin.left + 5, y: margin.top + 15,
+        "font-size": "13", "font-weight": "700", fill: "#0984e3" });
+      lightLbl.textContent = "\u25B2 Light \u2014 Scan " + D.scan_number;
+      svg.appendChild(lightLbl);
+
+      // Heavy label (bottom-left)
+      var heavyLbl = svgEl("text", { x: margin.left + 5, y: lightBaseline + 15,
+        "font-size": "13", "font-weight": "700", fill: "#e67e22" });
+      heavyLbl.textContent = "\u25BC Heavy \u2014 Scan " + DH.scan_number;
+      svg.appendChild(heavyLbl);
     }
 
     svg.appendChild(gNoise);
@@ -819,9 +1026,14 @@
       });
     }
 
+    // Use ms2_heavy_scans for DIA+SILAC (different isolation window),
+    // fall back to ms2_scans for DDA (same window).
+    var heavyMs2Source = (U.raw_scans.ms2_heavy_scans && U.raw_scans.ms2_heavy_scans.length > 0)
+      ? U.raw_scans.ms2_heavy_scans
+      : U.raw_scans.ms2_scans;
     var ms2Heavy = heavyIons.map(function(ion) {
       if (!U.raw_scans) return [];
-      return U.raw_scans.ms2_scans.map(function(s) {
+      return heavyMs2Source.map(function(s) {
         var r = extractIntensity(ion.heavy_mz, s.mz_array, s.intensity_array, tol);
         return { rt: s.retention_time_min, scan: s.scan_number,
                  intensity: r.intensity, observed_mz: r.observed_mz };

@@ -212,7 +212,7 @@ impl ResultParser for DiannParser {
                     sequence,
                     charge,
                     precursor_mz,
-                    rt_min: rt_min, // DIA-NN reports in minutes; store as-is
+                    rt_min, // DIA-NN reports in minutes; store as-is
                     modifications,
                     score: Some(1.0 - qvalue), // invert: Q.Value (lower=better) → score (higher=better)
                     q_value: Some(qvalue),

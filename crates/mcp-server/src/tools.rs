@@ -1039,7 +1039,7 @@ impl ProteinCopilotServer {
             if !p.exists() {
                 return Err(mcp_err(
                     ErrorCode::INVALID_PARAMS,
-                    &format!("input file does not exist: {file_str}"),
+                    format!("input file does not exist: {file_str}"),
                 ));
             }
         }

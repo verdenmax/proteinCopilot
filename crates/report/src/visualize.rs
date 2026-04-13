@@ -105,6 +105,7 @@ mod tests {
                 delta_ppm: None,
             }],
             modifications: vec![],
+            heavy_annotation: None,
         }
     }
 
