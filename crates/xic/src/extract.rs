@@ -695,11 +695,15 @@ pub fn extract_xic_with_raw(
     });
 
     // --- Pass 1: Stream spectra, extract intensities, AND capture raw peaks ---
-    let mut ms2_points: Vec<(u32, f64, Vec<(f64, Option<f64>)>, Vec<(f64, Option<f64>)>)> = Vec::new();
+    let mut ms2_light_points: Vec<(u32, f64, Vec<(f64, Option<f64>)>)> = Vec::new();
+    let mut ms2_heavy_points: Vec<(u32, f64, Vec<(f64, Option<f64>)>)> = Vec::new();
+    let is_dia = target_window.is_some();
+    let needs_separate_heavy_window = is_dia && !heavy_ions.is_empty();
     let mut ms1_light_points: Vec<XicDataPoint> = Vec::new();
     let mut ms1_heavy_points: Vec<XicDataPoint> = Vec::new();
     let mut raw_ms1_scans: Vec<crate::RawScan> = Vec::new();
-    let mut raw_ms2_scans: Vec<crate::RawScan> = Vec::new();
+    let mut raw_ms2_light_scans: Vec<crate::RawScan> = Vec::new();
+    let mut raw_ms2_heavy_scans: Vec<crate::RawScan> = Vec::new();
 
     reader.for_each_spectrum(file_path, &mut |spec| {
         let rt = spec.retention_time_min;
@@ -753,16 +757,16 @@ pub fn extract_xic_with_raw(
                 }
             }
             MsLevel::MS2 => {
-                let matches_window = match (&target_window, spec.precursors.first()) {
+                let matches_light_window = match (&target_window, spec.precursors.first()) {
                     (Some(tw), Some(prec)) => prec
                         .isolation_window
                         .as_ref()
                         .is_some_and(|w| same_isolation_window(tw, w)),
-                    (None, _) => true, // DDA: no window filtering, rely on n_cycles post-filter
+                    (None, _) => true,
                     _ => false,
                 };
 
-                if matches_window {
+                if matches_light_window {
                     let light_intensities: Vec<(f64, Option<f64>)> = light_ions
                         .iter()
                         .map(|ion| {
@@ -776,38 +780,71 @@ pub fn extract_xic_with_raw(
                         })
                         .collect();
 
-                    let heavy_intensities: Vec<(f64, Option<f64>)> = heavy_ions
-                        .iter()
-                        .map(|ion| {
-                            extract_intensity(
-                                ion.mz,
-                                &spec.mz_array,
-                                &spec.intensity_array,
-                                &params.mz_tolerance,
-                                params.intensity_rule,
-                            )
-                        })
-                        .collect();
+                    ms2_light_points.push((spec.scan_number, rt, light_intensities));
 
-                    ms2_points.push((
-                        spec.scan_number,
-                        rt,
-                        light_intensities,
-                        heavy_intensities,
-                    ));
+                    // DDA: heavy also from same scans
+                    if !needs_separate_heavy_window && !heavy_ions.is_empty() {
+                        let heavy_intensities: Vec<(f64, Option<f64>)> = heavy_ions
+                            .iter()
+                            .map(|ion| {
+                                extract_intensity(
+                                    ion.mz,
+                                    &spec.mz_array,
+                                    &spec.intensity_array,
+                                    &params.mz_tolerance,
+                                    params.intensity_rule,
+                                )
+                            })
+                            .collect();
+                        ms2_heavy_points.push((spec.scan_number, rt, heavy_intensities));
+                    }
 
-                    // Capture raw MS2 peaks — only if likely to survive n_cycles windowing.
-                    // For DDA (no isolation window), use RT proximity as a pre-filter to
-                    // avoid cloning the entire run's MS2 peak arrays into memory.
-                    // A generous ±300s RT window covers far more than n_cycles would keep.
+                    // Capture raw light MS2 peaks
                     let rt_close = (rt - target_rt).abs() < 300.0;
                     if target_window.is_some() || rt_close {
-                        raw_ms2_scans.push(crate::RawScan {
+                        raw_ms2_light_scans.push(crate::RawScan {
                             scan_number: spec.scan_number,
                             retention_time_min: rt,
                             mz_array: spec.mz_array.clone(),
                             intensity_array: spec.intensity_array.clone(),
                         });
+                    }
+                }
+
+                // DIA+SILAC: check heavy window
+                if needs_separate_heavy_window {
+                    if let Some(heavy_mz) = heavy_precursor_mz {
+                        let matches_heavy = spec
+                            .precursors
+                            .first()
+                            .and_then(|p| p.isolation_window.as_ref())
+                            .is_some_and(|w| crate::heavy::window_contains_mz(w, heavy_mz));
+
+                        if matches_heavy {
+                            let heavy_intensities: Vec<(f64, Option<f64>)> = heavy_ions
+                                .iter()
+                                .map(|ion| {
+                                    extract_intensity(
+                                        ion.mz,
+                                        &spec.mz_array,
+                                        &spec.intensity_array,
+                                        &params.mz_tolerance,
+                                        params.intensity_rule,
+                                    )
+                                })
+                                .collect();
+                            ms2_heavy_points.push((spec.scan_number, rt, heavy_intensities));
+
+                            let rt_close = (rt - target_rt).abs() < 300.0;
+                            if rt_close {
+                                raw_ms2_heavy_scans.push(crate::RawScan {
+                                    scan_number: spec.scan_number,
+                                    retention_time_min: rt,
+                                    mz_array: spec.mz_array.clone(),
+                                    intensity_array: spec.intensity_array.clone(),
+                                });
+                            }
+                        }
                     }
                 }
             }
@@ -816,17 +853,17 @@ pub fn extract_xic_with_raw(
         Ok(true)
     })?;
 
-    // --- Post-processing (identical to extract_xic) ---
-    ms2_points.sort_by_key(|(scan, _, _, _)| *scan);
+    // --- Post-processing: light windowing ---
+    ms2_light_points.sort_by_key(|(scan, _, _)| *scan);
 
-    let target_pos = ms2_points
+    let target_pos = ms2_light_points
         .iter()
-        .position(|(scan, _, _, _)| *scan == target_scan);
+        .position(|(scan, _, _)| *scan == target_scan);
     let (start, end) = match target_pos {
         Some(pos) => {
             let n = params.n_cycles as usize;
             let start = pos.saturating_sub(n);
-            let end = (pos + n + 1).min(ms2_points.len());
+            let end = (pos + n + 1).min(ms2_light_points.len());
             (start, end)
         }
         None => {
@@ -836,7 +873,29 @@ pub fn extract_xic_with_raw(
             });
         }
     };
-    let windowed = &ms2_points[start..end];
+    let light_windowed = &ms2_light_points[start..end];
+
+    // --- Heavy windowing (independent scan sequence) ---
+    ms2_heavy_points.sort_by_key(|(scan, _, _)| *scan);
+    let heavy_windowed: &[(u32, f64, Vec<(f64, Option<f64>)>)] = if ms2_heavy_points.is_empty() {
+        &[]
+    } else {
+        let target_rt_for_heavy = target_rt;
+        let heavy_center = ms2_heavy_points
+            .iter()
+            .enumerate()
+            .min_by(|(_, a), (_, b)| {
+                let da = (a.1 - target_rt_for_heavy).abs();
+                let db = (b.1 - target_rt_for_heavy).abs();
+                da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .map(|(idx, _)| idx)
+            .unwrap_or(0);
+        let n = params.n_cycles as usize;
+        let h_start = heavy_center.saturating_sub(n);
+        let h_end = (heavy_center + n + 1).min(ms2_heavy_points.len());
+        &ms2_heavy_points[h_start..h_end]
+    };
 
     // Build fragment XIC traces
     let mut fragment_traces: Vec<XicTrace> = light_ions
@@ -848,9 +907,9 @@ pub fn extract_xic_with_raw(
             ion_number: ion.ion_number,
             charge: ion.charge,
             theoretical_mz: ion.mz,
-            data_points: windowed
+            data_points: light_windowed
                 .iter()
-                .map(|(scan, rt, ints, _)| XicDataPoint {
+                .map(|(scan, rt, ints)| XicDataPoint {
                     retention_time_min: *rt,
                     scan_number: *scan,
                     intensity: ints.get(i).map(|(int, _)| *int).unwrap_or(0.0),
@@ -873,7 +932,7 @@ pub fn extract_xic_with_raw(
     fragment_traces.truncate(top_n);
     fragment_traces.retain(|t| t.data_points.iter().any(|p| p.intensity > 0.0));
 
-    let heavy_traces: Vec<XicTrace> = if heavy_ions.is_empty() {
+    let heavy_traces: Vec<XicTrace> = if heavy_ions.is_empty() || heavy_windowed.is_empty() {
         Vec::new()
     } else {
         let top_labels: Vec<String> =
@@ -888,9 +947,9 @@ pub fn extract_xic_with_raw(
                 ion_number: ion.ion_number,
                 charge: ion.charge,
                 theoretical_mz: ion.mz,
-                data_points: windowed
+                data_points: heavy_windowed
                     .iter()
-                    .map(|(scan, rt, _, heavy_ints)| XicDataPoint {
+                    .map(|(scan, rt, heavy_ints)| XicDataPoint {
                         retention_time_min: *rt,
                         scan_number: *scan,
                         intensity: heavy_ints.get(i).map(|(int, _)| *int).unwrap_or(0.0),
@@ -902,11 +961,21 @@ pub fn extract_xic_with_raw(
             .collect()
     };
 
-    // Trim MS1 to same RT range as MS2
-    let rt_range = if let (Some(first), Some(last)) = (windowed.first(), windowed.last()) {
+    // RT range: union of light and heavy MS2 windows
+    let light_rt_range = if let (Some(first), Some(last)) = (light_windowed.first(), light_windowed.last()) {
         Some((first.1, last.1))
     } else {
         None
+    };
+    let heavy_rt_range = if let (Some(first), Some(last)) = (heavy_windowed.first(), heavy_windowed.last()) {
+        Some((first.1, last.1))
+    } else {
+        None
+    };
+    let rt_range = match (light_rt_range, heavy_rt_range) {
+        (Some((l_lo, l_hi)), Some((h_lo, h_hi))) => Some((l_lo.min(h_lo), l_hi.max(h_hi))),
+        (Some(r), None) | (None, Some(r)) => Some(r),
+        (None, None) => None,
     };
 
     let ms1_precursor_xic = if ms1_light_points.is_empty() {
@@ -969,11 +1038,27 @@ pub fn extract_xic_with_raw(
     };
     // MS2 raw scans: keep only the windowed ones
     let windowed_scans: std::collections::HashSet<u32> =
-        windowed.iter().map(|(scan, _, _, _)| *scan).collect();
-    let raw_ms2_trimmed: Vec<crate::RawScan> = raw_ms2_scans
+        light_windowed.iter().map(|(scan, _, _)| *scan).collect();
+    let raw_ms2_trimmed: Vec<crate::RawScan> = raw_ms2_light_scans
         .into_iter()
         .filter(|s| windowed_scans.contains(&s.scan_number))
         .collect();
+
+    let heavy_windowed_scans: std::collections::HashSet<u32> =
+        heavy_windowed.iter().map(|(scan, _, _)| *scan).collect();
+    let raw_ms2_heavy_trimmed: Vec<crate::RawScan> = raw_ms2_heavy_scans
+        .into_iter()
+        .filter(|s| heavy_windowed_scans.contains(&s.scan_number))
+        .collect();
+
+    let heavy_warning = if needs_separate_heavy_window && ms2_heavy_points.is_empty() {
+        Some(format!(
+            "Heavy precursor m/z ({:.4}) is outside all DIA MS2 isolation windows. Heavy MS2 traces unavailable.",
+            heavy_precursor_mz.unwrap_or(0.0)
+        ))
+    } else {
+        None
+    };
 
     let xic_data = XicData {
         peptide_sequence: peptide_sequence.to_string(),
@@ -986,13 +1071,13 @@ pub fn extract_xic_with_raw(
         fragment_xic_traces: fragment_traces,
         heavy_fragment_xic_traces: heavy_traces,
         extraction_params: params.clone(),
-        heavy_warning: None,
+        heavy_warning,
     };
 
     let raw_scans = crate::RawScanData {
         ms1_scans: raw_ms1_trimmed,
         ms2_scans: raw_ms2_trimmed,
-        ms2_heavy_scans: Vec::new(),
+        ms2_heavy_scans: raw_ms2_heavy_trimmed,
     };
 
     // Ion metadata for the top-N selected light ions
