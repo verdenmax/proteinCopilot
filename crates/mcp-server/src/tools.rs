@@ -1607,85 +1607,96 @@ impl ProteinCopilotServer {
 
         // ── SILAC: find and annotate heavy scan (DIA or DDA) ──
         if let Some(ref label) = input.label_type {
-            let is_dia = spectrum
-                .precursors
-                .first()
-                .and_then(|p| p.isolation_window.as_ref())
-                .map(|w| (w.lower_offset + w.upper_offset) > 1.0)
-                .unwrap_or(false);
-
             let core_label: &protein_copilot_core::label::LabelType = label;
-            let heavy_prec_mz = protein_copilot_core::label::compute_heavy_precursor_mz(
-                annotation.theoretical_mz,
-                charge,
-                &peptide_seq,
-                core_label,
-            );
+            let heavy_delta =
+                protein_copilot_core::label::total_heavy_delta(&peptide_seq, core_label);
 
-            // Read nearby spectra to find the heavy scan
-            let scan_start = resolved_scan.saturating_sub(50);
-            let scan_end = resolved_scan + 50;
-            let mut nearby_spectra = Vec::new();
-            for s in scan_start..=scan_end {
-                if let Ok(spec) = reader.read_spectrum(&spectrum_file, s) {
-                    if spec.ms_level == protein_copilot_core::spectrum::MsLevel::MS2 {
-                        nearby_spectra.push(spec);
-                    }
-                }
-            }
-
-            // DIA: find scan whose isolation window contains heavy m/z
-            // DDA: find scan whose selected precursor m/z matches heavy m/z
-            let heavy_scan_num = if is_dia {
-                protein_copilot_xic::heavy::find_heavy_dia_window_from_spectra(
-                    &nearby_spectra,
-                    spectrum.retention_time_min,
-                    heavy_prec_mz,
-                )
-                .map(|(scan, _window)| scan)
-            } else {
-                protein_copilot_xic::heavy::find_dda_heavy_scan(
-                    &nearby_spectra,
-                    spectrum.retention_time_min,
-                    heavy_prec_mz,
-                    20.0, // 20 ppm tolerance for precursor matching
-                )
-            };
-
-            if let Some(heavy_scan_num) = heavy_scan_num {
-                if let Ok(heavy_spectrum) = reader.read_spectrum(&spectrum_file, heavy_scan_num)
-                {
-                    match protein_copilot_search_engine::annotate::annotate_heavy_spectrum(
-                        &heavy_spectrum,
-                        &peptide_seq,
-                        charge,
-                        &frag_tol,
-                        &modifications,
-                        core_label,
-                    ) {
-                        Ok(heavy_ann) => {
-                            tracing::info!(
-                                heavy_scan = heavy_scan_num,
-                                heavy_prec_mz = format!("{:.4}", heavy_prec_mz),
-                                matched = heavy_ann.matched_ions,
-                                total = heavy_ann.total_ions,
-                                is_dia = is_dia,
-                                "Heavy annotation complete"
-                            );
-                            annotation.heavy_annotation = Some(heavy_ann);
-                        }
-                        Err(e) => {
-                            tracing::warn!("Heavy annotation failed: {e}");
-                        }
-                    }
-                }
-            } else {
-                let mode = if is_dia { "DIA window" } else { "DDA precursor" };
+            if heavy_delta.abs() < 1e-6 {
                 tracing::info!(
-                    heavy_prec_mz = format!("{:.4}", heavy_prec_mz),
-                    mode = mode,
-                    "No {mode} found for heavy precursor"
+                    peptide = peptide_seq,
+                    "Skipping heavy annotation: peptide has no K/R, zero SILAC shift"
                 );
+            } else {
+                let is_dia = spectrum
+                    .precursors
+                    .first()
+                    .and_then(|p| p.isolation_window.as_ref())
+                    .map(|w| (w.lower_offset + w.upper_offset) > 1.0)
+                    .unwrap_or(false);
+
+                let heavy_prec_mz = protein_copilot_core::label::compute_heavy_precursor_mz(
+                    annotation.theoretical_mz,
+                    charge,
+                    &peptide_seq,
+                    core_label,
+                );
+
+                // Read nearby spectra to find the heavy scan
+                let scan_start = resolved_scan.saturating_sub(50);
+                let scan_end = resolved_scan + 50;
+                let mut nearby_spectra = Vec::new();
+                for s in scan_start..=scan_end {
+                    if let Ok(spec) = reader.read_spectrum(&spectrum_file, s) {
+                        if spec.ms_level == protein_copilot_core::spectrum::MsLevel::MS2 {
+                            nearby_spectra.push(spec);
+                        }
+                    }
+                }
+
+                // DIA: find scan whose isolation window contains heavy m/z
+                // DDA: find scan whose selected precursor m/z matches heavy m/z
+                let heavy_scan_num = if is_dia {
+                    protein_copilot_xic::heavy::find_heavy_dia_window_from_spectra(
+                        &nearby_spectra,
+                        spectrum.retention_time_min,
+                        heavy_prec_mz,
+                    )
+                    .map(|(scan, _window)| scan)
+                } else {
+                    protein_copilot_xic::heavy::find_dda_heavy_scan(
+                        &nearby_spectra,
+                        spectrum.retention_time_min,
+                        heavy_prec_mz,
+                        20.0, // 20 ppm tolerance for precursor matching
+                    )
+                };
+
+                if let Some(heavy_scan_num) = heavy_scan_num {
+                    if let Ok(heavy_spectrum) =
+                        reader.read_spectrum(&spectrum_file, heavy_scan_num)
+                    {
+                        match protein_copilot_search_engine::annotate::annotate_heavy_spectrum(
+                            &heavy_spectrum,
+                            &peptide_seq,
+                            charge,
+                            &frag_tol,
+                            &modifications,
+                            core_label,
+                        ) {
+                            Ok(heavy_ann) => {
+                                tracing::info!(
+                                    heavy_scan = heavy_scan_num,
+                                    heavy_prec_mz = format!("{:.4}", heavy_prec_mz),
+                                    matched = heavy_ann.matched_ions,
+                                    total = heavy_ann.total_ions,
+                                    is_dia = is_dia,
+                                    "Heavy annotation complete"
+                                );
+                                annotation.heavy_annotation = Some(heavy_ann);
+                            }
+                            Err(e) => {
+                                tracing::warn!("Heavy annotation failed: {e}");
+                            }
+                        }
+                    }
+                } else {
+                    let mode = if is_dia { "DIA window" } else { "DDA precursor" };
+                    tracing::info!(
+                        heavy_prec_mz = format!("{:.4}", heavy_prec_mz),
+                        mode = mode,
+                        "No {mode} found for heavy precursor"
+                    );
+                }
             }
         }
 

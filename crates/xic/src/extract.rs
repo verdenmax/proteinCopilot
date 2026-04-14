@@ -284,12 +284,16 @@ pub fn extract_xic(
 
     // --- Build target ion list ---
     let light_ions = build_target_ions(peptide_sequence, modifications, charge);
-    let heavy_ions = match &params.label_type {
+    // Zero-offset guard: skip heavy when peptide has no K/R (zero SILAC shift)
+    let effective_label = params.label_type.as_ref().filter(|label| {
+        protein_copilot_core::label::total_heavy_delta(peptide_sequence, label).abs() > 1e-6
+    });
+    let heavy_ions = match &effective_label {
         Some(label) => crate::heavy::compute_heavy_target_ions(&light_ions, peptide_sequence, label),
         None => Vec::new(),
     };
 
-    let heavy_precursor_mz = params.label_type.as_ref().map(|label| {
+    let heavy_precursor_mz = effective_label.map(|label| {
         crate::heavy::compute_heavy_precursor_mz(precursor_mz, charge, peptide_sequence, label)
     });
 
@@ -693,14 +697,18 @@ pub fn extract_xic_with_raw(
 
     // --- Build target ion list ---
     let light_ions = build_target_ions(peptide_sequence, modifications, charge);
-    let heavy_ions = match &params.label_type {
+    // Zero-offset guard: skip heavy when peptide has no K/R (zero SILAC shift)
+    let effective_label = params.label_type.as_ref().filter(|label| {
+        protein_copilot_core::label::total_heavy_delta(peptide_sequence, label).abs() > 1e-6
+    });
+    let heavy_ions = match &effective_label {
         Some(label) => {
             crate::heavy::compute_heavy_target_ions(&light_ions, peptide_sequence, label)
         }
         None => Vec::new(),
     };
 
-    let heavy_precursor_mz = params.label_type.as_ref().map(|label| {
+    let heavy_precursor_mz = effective_label.map(|label| {
         crate::heavy::compute_heavy_precursor_mz(precursor_mz, charge, peptide_sequence, label)
     });
 
@@ -1324,5 +1332,34 @@ mod tests {
             // Skip if no fixture available (unit test environment)
         }
         // Integration test — will be covered in Task 7
+    }
+
+    #[test]
+    fn zero_offset_peptide_skips_heavy() {
+        use protein_copilot_core::label::LabelType;
+
+        // "PEPTIDE" has no K or R → zero SILAC shift
+        let peptide = "PEPTIDE";
+        let label = LabelType::Silac {
+            heavy_k_delta: 8.014199,
+            heavy_r_delta: 10.008269,
+        };
+        let delta = protein_copilot_core::label::total_heavy_delta(peptide, &label);
+        assert!(delta.abs() < 1e-6, "peptide without K/R should have zero delta");
+
+        // effective_label filter should exclude this
+        let effective = Some(&label).filter(|l| {
+            protein_copilot_core::label::total_heavy_delta(peptide, l).abs() > 1e-6
+        });
+        assert!(effective.is_none(), "zero-offset label should be filtered out");
+
+        // With K/R, delta should be non-zero
+        let peptide_kr = "PEPTIDEK";
+        let delta_kr = protein_copilot_core::label::total_heavy_delta(peptide_kr, &label);
+        assert!(delta_kr.abs() > 1.0, "peptide with K should have non-zero delta");
+        let effective_kr = Some(&label).filter(|l| {
+            protein_copilot_core::label::total_heavy_delta(peptide_kr, l).abs() > 1e-6
+        });
+        assert!(effective_kr.is_some(), "non-zero offset should keep label");
     }
 }
