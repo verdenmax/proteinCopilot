@@ -298,8 +298,13 @@ pub fn extract_xic(
     let mut ms2_light_points: Vec<Ms2Point> = Vec::new();
     // Heavy MS2 points: (scan, RT, heavy_intensities) — from different DIA window
     let mut ms2_heavy_points: Vec<Ms2Point> = Vec::new();
+    // DIA detection: isolation window width > 1 Th indicates DIA
+    // (DDA windows are typically < 1 Th; DIA narrow windows start at ~2 Th)
+    let is_dia = target_window
+        .as_ref()
+        .map(|w| (w.lower_offset + w.upper_offset) > 1.0)
+        .unwrap_or(false);
     // Whether heavy uses a separate DIA window (DIA+SILAC)
-    let is_dia = target_window.is_some();
     let needs_separate_heavy_window = is_dia && !heavy_ions.is_empty();
     let mut ms1_light_points: Vec<XicDataPoint> = Vec::new();
     let mut ms1_heavy_points: Vec<XicDataPoint> = Vec::new();
@@ -702,7 +707,12 @@ pub fn extract_xic_with_raw(
     // --- Pass 1: Stream spectra, extract intensities, AND capture raw peaks ---
     let mut ms2_light_points: Vec<Ms2Point> = Vec::new();
     let mut ms2_heavy_points: Vec<Ms2Point> = Vec::new();
-    let is_dia = target_window.is_some();
+    // DIA detection: isolation window width > 1 Th indicates DIA
+    // (DDA windows are typically < 1 Th; DIA narrow windows start at ~2 Th)
+    let is_dia = target_window
+        .as_ref()
+        .map(|w| (w.lower_offset + w.upper_offset) > 1.0)
+        .unwrap_or(false);
     let needs_separate_heavy_window = is_dia && !heavy_ions.is_empty();
     let mut ms1_light_points: Vec<XicDataPoint> = Vec::new();
     let mut ms1_heavy_points: Vec<XicDataPoint> = Vec::new();

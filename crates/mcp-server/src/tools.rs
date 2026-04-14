@@ -1579,7 +1579,7 @@ impl ProteinCopilotServer {
                 .precursors
                 .first()
                 .and_then(|p| p.isolation_window.as_ref())
-                .map(|w| (w.lower_offset + w.upper_offset) > 3.0)
+                .map(|w| (w.lower_offset + w.upper_offset) > 1.0)
                 .unwrap_or(false);
 
             if is_dia {
