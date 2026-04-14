@@ -13,6 +13,8 @@ tools:
   - export_results
   - list_searches
   - annotate_spectrum
+  - extract_xic
+  - import_search_results
   - extract_dia_precursors
   - extract_spectrum_precursors
 ---
@@ -93,6 +95,8 @@ tools:
 ## 谱图标注
 
 当用户想查看某一张谱图的匹配详情时：
+
+### 普通标注（非 SILAC）
   - 用户说"看一下 scan 1234 的匹配情况"
     → 调用 `annotate_spectrum(run_id=xxx, scan_number=1234)`
     → 告知用户"标注文件已生成，请在浏览器中打开 xxx.html 查看"
@@ -101,6 +105,37 @@ tools:
   - 用户说"用 PEPTIDEK 去匹配 scan 100"
     → 调用 `annotate_spectrum(file_path=xxx, scan_number=100, peptide_sequence="PEPTIDEK", charge=2)`
     → 展示匹配结果和分数
+
+### SILAC / 重标标注（关键！）
+
+**SILAC 数据不传 `label_type` = 结果错误。有重标 = 必须 Mirror Plot。**
+
+检测规则（任一条件满足即为 SILAC）：
+1. 用户提到：SILAC、重标、heavy label、轻重标、K+8、R+10、mirror plot
+2. 之前的搜索使用了 SILAC 修饰
+3. 文件名包含 `SILAC`、`Heavy`、`H/L` 等关键词
+4. 不确定时，主动询问用户
+
+**为什么不传 `label_type` 是错误的（不是可选项）：**
+- DIA 模式下重标母离子落在不同的隔离窗口，不传 `label_type` → XIC 从错误的窗口取数据，结果是**错的**
+- 谱图标注缺少重标信息，无法验证 SILAC 标记质量
+- 传了 `label_type` → 工具自动找到正确的重标 DIA 窗口，生成 Mirror Plot + 双轨 XIC
+
+SILAC 标注调用示例：
+```
+annotate_spectrum(
+  file_path=xxx,
+  scan_number=1234,
+  peptide_sequence="DGFLLDGFPR",
+  charge=2,
+  label_type={"Silac": {"heavy_k_delta": 8.014199, "heavy_r_delta": 10.008269}}
+)
+```
+
+输出包含：
+- **Mirror Plot**：轻标（蓝色，朝上）+ 重标（橙色，朝下）
+- **双轨 XIC**：实线=轻标，虚线=重标（MS1 母离子 + MS2 碎片离子）
+- 轻标和重标各自的匹配分数和离子覆盖
 
 ## 可用工具说明
 
@@ -112,10 +147,33 @@ tools:
   MS2 spectrum. Reads mzML, finds the target scan, correlates to nearest MS1,
   runs isotope pattern analysis. Use for debugging or inspecting individual spectra.
 
+- **extract_xic**: Extract Ion Chromatogram for a peptide. Generates interactive
+  HTML with MS1 precursor and MS2 fragment ion chromatograms. Supports SILAC
+  heavy-label comparison (实线=轻标, 虚线=重标). Two modes: run_id-based or manual.
+  **SILAC 数据必须传 `label_type`，否则 DIA 重标窗口不会被提取。**
+
+- **import_search_results**: Import external search results (DIA-NN parquet,
+  pFind .spectra, custom JSON) and match to mzML scans. Returns a run_id for use
+  with annotate_spectrum, extract_xic, and generate_summary.
+
 ### DIA Data Workflow
 1. Use `read_spectra` to check if data is DIA (wide isolation windows)
 2. Call `extract_dia_precursors` to extract candidate precursors from MS1
 3. Use the returned run_id with `run_search` to search the extracted spectra
+
+### XIC Extraction Workflow
+1. 从搜索结果中选择感兴趣的 PSM（或手动指定肽段）
+2. **判断是否为 SILAC 数据**（见"谱图标注"中的检测规则）
+3. 调用 `extract_xic`：
+   - 非 SILAC：`extract_xic(run_id=xxx, scan_number=1234)`
+   - **SILAC（必须传，否则结果错误）**：`extract_xic(run_id=xxx, scan_number=1234, label_type={"Silac": {"heavy_k_delta": 8.014199, "heavy_r_delta": 10.008269}})`
+4. SILAC XIC 输出：MS1 轻+重母离子色谱，MS2 碎片离子双轨色谱（实线轻标/虚线重标）
+
+### External Results Import Workflow
+1. 用户提供外部搜索结果文件（DIA-NN .parquet, pFind .spectra, 自定义 JSON）
+2. 确认 mzML 文件所在目录
+3. 调用 `import_search_results(result_file=xxx, mzml_dir=yyy)`
+4. 使用返回的 run_id 进行后续分析：`annotate_spectrum`、`extract_xic`、`generate_summary`
 
 ### Single Spectrum Inspection
 1. Call `extract_spectrum_precursors` with file path and scan number
@@ -140,10 +198,21 @@ tools:
 - **Phospho (S/T/Y)**：磷酸化修饰，用于信号通路研究
 - **TMT6plex (K, N-term)**：串联质量标签，用于定量蛋白质组学
 
+### SILAC 标记（重标实验）
+- **SILAC**（Stable Isotope Labeling by Amino acids in Cell culture）：用稳定同位素标记的氨基酸进行定量
+- **标准 SILAC**：K+8（¹³C₆¹⁵N₂-Lys，Δm=8.014199 Da）+ R+10（¹³C₆¹⁵N₄-Arg，Δm=10.008269 Da）
+- **识别线索**：文件名含 `SILAC`/`Heavy`/`H/L`/`K8R10`，搜索参数含 SILAC 修饰，用户提到重标/轻重标
+- **⚠️ 正确性要求**：SILAC 数据的标注和 XIC **必须**传 `label_type`。不传不是功能缺失，而是**结果错误** — DIA 重标母离子在不同窗口，XIC 会从错误窗口取数据
+- **有重标 = 必须 Mirror Plot**：SILAC 标注只有一种正确方式 — Mirror Plot（轻标朝上 + 重标朝下）
+- **DIA + SILAC**：轻标和重标母离子 m/z 不同，落在不同的 DIA 隔离窗口
+- **DDA + SILAC**：轻重标可能在同一窗口，但仍必须传 `label_type` 以启用 mirror plot 和正确的重标匹配
+- **label_type 参数**：`{"Silac": {"heavy_k_delta": 8.014199, "heavy_r_delta": 10.008269}}`
+
 ### 鉴定率参考
 - 标准 HeLa 搜索：25-40%
 - 磷酸化富集样品：5-15%
 - DIA 数据：取决于谱图库质量
+- SILAC 数据：与非标记类似，但双通道验证可提高可信度
 - 低于预期可能原因：参数不对、数据库不匹配、样品质量问题
 
 ## 历史查询
