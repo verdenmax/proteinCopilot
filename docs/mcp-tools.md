@@ -1,6 +1,6 @@
 # MCP Tools 参考
 
-ProteinCopilot MCP Server 提供 14 个工具，通过 JSON-RPC over stdio 暴露给 LLM。
+ProteinCopilot MCP Server 提供 16 个工具，通过 JSON-RPC over stdio 暴露给 LLM。
 
 > **当前搜索引擎**：MVP 使用内置的 **SimpleSearchEngine**（基于 b/y 离子匹配的简化搜索），
 > 后续将接入 pFind 作为生产级搜索引擎。SimpleSearch 足以验证完整流程，但搜索质量和性能不如专业引擎。
@@ -356,6 +356,56 @@ status 值：`Running` / `Completed` / `Failed: <reason>` / `Cancelled`
 ```
 
 > 用于调试和检查单张谱图的母离子提取结果，了解 MS1 关联方法和同位素模式匹配详情。
+
+---
+
+## extract_xic
+
+从 mzML 文件提取肽段的 XIC（Extracted Ion Chromatogram）。生成交互式 HTML 文件，展示 MS1 母离子和 MS2 碎片离子色谱图。支持 SILAC 重标比较。
+
+两种模式：(1) 提供 `run_id` + `scan_number` 使用已有 PSM 上下文；(2) 提供 `file_path` + `scan_number` + `peptide_sequence` + `charge` + `precursor_mz` 手动指定。
+
+**输入**：
+```json
+{
+  "run_id": "abc-123",
+  "scan_number": 42,
+  "label_type": { "Silac": { "heavy_k_delta": 8.014199, "heavy_r_delta": 10.008269 } },
+  "top_n_ions": 6
+}
+```
+
+**输出**：生成 HTML 文件路径 + XIC 数据摘要。
+
+> 用于验证 PSM 的色谱峰形，检查轻标/重标 SILAC 对的共洗脱行为。
+
+---
+
+## import_search_results
+
+导入外部搜索结果（DIA-NN、pFind、自定义 JSON），匹配到 mzML 谱图。返回 `run_id` 供后续 `annotate_spectrum`、`extract_xic`、`generate_summary` 使用。
+
+**输入**：
+```json
+{
+  "result_file": "/data/diann_report.parquet",
+  "mzml_dir": "/data/mzml/",
+  "format": "auto",
+  "filter_qvalue": 0.01
+}
+```
+
+**输出**：`ImportResult`
+```json
+{
+  "run_id": "def-456",
+  "total_psms_imported": 12345,
+  "runs_found": ["sample_01", "sample_02"],
+  "scan_match_rate": 0.95
+}
+```
+
+> 用于将 DIA-NN 或 pFind 的搜索结果导入 ProteinCopilot 进行可视化和进一步分析。
 
 ---
 

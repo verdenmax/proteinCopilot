@@ -45,9 +45,9 @@
 ### 2.2 Workspace 与 Crate 结构
 
 - 项目是一个 **Rust workspace**，根目录有 `Cargo.toml` workspace 定义。
-- 每个 MCP Server 是一个独立 crate（如 `crates/mcp-spectrum-io`）。
+- MCP Server 是 `crates/mcp-server`（bin crate），其余为 library crate。
 - 共享数据结构放在 `crates/core` crate 中。
-- 搜索引擎 adapter 放在 `crates/mcp-search-engine/src/adapters/` 下。
+- 搜索引擎 adapter 放在 `crates/search-engine/src/adapters/` 下。
 - 所有 crate 必须能独立编译和测试。
 
 ### 2.3 MCP 协议规范
@@ -216,9 +216,11 @@ proteinCopilot/
 │   │   │   ├── ai_decision.rs        ← AI 决策输出结构
 │   │   │   ├── error.rs              ← 领域错误类型
 │   │   │   ├── engine.rs             ← 搜索引擎 Adapter trait
+│   │   │   ├── label.rs              ← SILAC/重标 LabelType + delta 计算
+│   │   │   ├── progress.rs           ← 搜索进度回调
 │   │   │   └── run_metadata.rs       ← 运行元数据
 │   │   └── Cargo.toml
-│   ├── spectrum-io/                  ← 谱图读取（lib crate，非 MCP）
+│   ├── spectrum-io/                  ← 谱图读取（lib crate）
 │   │   ├── src/
 │   │   │   ├── lib.rs                ← detect_format + create_reader
 │   │   │   ├── reader.rs             ← SpectrumReader trait
@@ -228,13 +230,19 @@ proteinCopilot/
 │   │   └── Cargo.toml
 │   ├── param-recommend/              ← 参数推荐（lib crate）
 │   ├── search-engine/                ← 搜索引擎调度（lib crate）
-│   │   └── src/adapters/
-│   │       ├── mod.rs
-│   │       ├── pfind.rs              ← pFind adapter
-│   │       ├── msfragger.rs          ← MSFragger adapter（预留）
-│   │       └── comet.rs              ← Comet adapter（预留）
-│   ├── report/                       ← 报告生成（lib crate）
-│   └── mcp-server/                   ← MCP Server 组装（bin crate）
+│   │   └── src/
+│   │       ├── adapters/
+│   │       │   ├── mod.rs
+│   │       │   └── pfind.rs          ← pFind adapter
+│   │       ├── annotate.rs           ← 谱图标注（b/y 离子匹配 + 重标 mirror）
+│   │       ├── registry.rs           ← EngineRegistry
+│   │       └── simple_engine.rs      ← MVP 简化搜索引擎
+│   ├── report/                       ← 报告与可视化（lib crate）
+│   ├── xic/                          ← XIC 提取（lib crate，DDA/DIA + SILAC）
+│   ├── dia-extraction/               ← DIA 前体离子提取（lib crate）
+│   ├── fdr/                          ← FDR 计算（lib crate）
+│   ├── result-import/                ← 外部搜索结果导入（DIA-NN/pFind）
+│   └── mcp-server/                   ← MCP Server 组装（bin crate，16 tools）
 ├── .github/
 │   ├── agents/                       ← 领域 Agent 定义
 │   ├── prompts/                      ← Skill / Prompt 模板
