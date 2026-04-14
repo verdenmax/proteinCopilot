@@ -74,6 +74,34 @@ pub fn window_contains_mz(window: &IsolationWindow, mz: f64) -> bool {
     mz >= lo && mz <= hi
 }
 
+/// Search DDA MS2 spectra for a scan whose precursor m/z matches the heavy target.
+///
+/// In DDA, each MS2 scan selects a specific precursor. The heavy peptide has a
+/// different precursor m/z than the light one, so it will be in a different scan.
+/// Finds the MS2 scan closest to `reference_rt_min` whose precursor m/z is within
+/// `tolerance_ppm` of `target_mz`. Returns `scan_number` if found.
+pub fn find_dda_heavy_scan(
+    spectra: &[Spectrum],
+    reference_rt_min: f64,
+    target_mz: f64,
+    tolerance_ppm: f64,
+) -> Option<u32> {
+    spectra
+        .iter()
+        .filter_map(|spec| {
+            let prec_mz = spec.precursors.first()?.mz;
+            let ppm_err = ((prec_mz - target_mz) / target_mz * 1e6).abs();
+            if ppm_err < tolerance_ppm {
+                let rt_delta = (spec.retention_time_min - reference_rt_min).abs();
+                Some((spec.scan_number, rt_delta))
+            } else {
+                None
+            }
+        })
+        .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+        .map(|(scan, _)| scan)
+}
+
 /// Search a slice of MS2 spectra for the isolation window covering `target_mz`.
 ///
 /// Finds the MS2 scan closest to `reference_rt_min` whose isolation window
@@ -249,6 +277,63 @@ mod tests {
         ];
         let result = find_heavy_dia_window_from_spectra(&spectra, 10.0, 600.0);
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn find_dda_heavy_scan_basic() {
+        // DDA scans with narrow windows, different precursor m/z values
+        let spectra = vec![
+            make_dda_spec(100, 10.0, 500.0),   // light
+            make_dda_spec(101, 10.01, 504.01),  // heavy (K+8 at charge 2 ≈ +4.007)
+            make_dda_spec(102, 10.02, 600.0),   // unrelated
+        ];
+        // heavy target m/z = 504.007 (light 500 + 8.014/2)
+        let result = find_dda_heavy_scan(&spectra, 10.0, 504.007, 20.0);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap(), 101);
+    }
+
+    #[test]
+    fn find_dda_heavy_scan_picks_closest_rt() {
+        let spectra = vec![
+            make_dda_spec(100, 10.0, 504.01),  // matches but far in RT
+            make_dda_spec(200, 15.0, 504.01),  // matches and closer to ref RT=14.0
+            make_dda_spec(300, 20.0, 504.01),  // matches but farther
+        ];
+        let result = find_dda_heavy_scan(&spectra, 14.0, 504.007, 20.0);
+        assert_eq!(result.unwrap(), 200);
+    }
+
+    #[test]
+    fn find_dda_heavy_scan_not_found() {
+        let spectra = vec![
+            make_dda_spec(100, 10.0, 500.0),
+            make_dda_spec(101, 10.01, 510.0), // too far from target
+        ];
+        let result = find_dda_heavy_scan(&spectra, 10.0, 504.007, 20.0);
+        assert!(result.is_none());
+    }
+
+    fn make_dda_spec(scan: u32, rt_min: f64, precursor_mz: f64) -> Spectrum {
+        use protein_copilot_core::spectrum::{MsLevel, PrecursorInfo};
+        Spectrum {
+            scan_number: scan,
+            ms_level: MsLevel::MS2,
+            retention_time_min: rt_min,
+            mz_array: vec![],
+            intensity_array: vec![],
+            precursors: vec![PrecursorInfo {
+                mz: precursor_mz,
+                charge: Some(2),
+                intensity: None,
+                source_scan: None,
+                isolation_window: Some(IsolationWindow {
+                    target_mz: precursor_mz,
+                    lower_offset: 0.35,
+                    upper_offset: 0.35,
+                }),
+            }],
+        }
     }
 
     fn make_ms2_spec(scan: u32, rt_min: f64, center_mz: f64, half_width: f64) -> Spectrum {
