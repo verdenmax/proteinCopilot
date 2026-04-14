@@ -167,6 +167,37 @@ where
     }
 }
 
+/// Deserialize `Option<LabelType>` accepting both JSON object and JSON-in-string.
+///
+/// Some MCP clients serialize nested objects as JSON strings rather than proper
+/// objects.  This handles both `{"Silac": {...}}` and `"{\"Silac\": {...}}"`.
+fn deserialize_label_type<'de, D>(
+    deserializer: D,
+) -> Result<Option<protein_copilot_core::label::LabelType>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use protein_copilot_core::label::LabelType;
+    use serde::de::Error;
+    let value: Option<serde_json::Value> = Option::deserialize(deserializer)?;
+    match value {
+        None => Ok(None),
+        Some(serde_json::Value::Null) => Ok(None),
+        Some(serde_json::Value::Object(map)) => {
+            let t: LabelType =
+                serde_json::from_value(serde_json::Value::Object(map)).map_err(D::Error::custom)?;
+            Ok(Some(t))
+        }
+        Some(serde_json::Value::String(s)) => {
+            let t: LabelType = serde_json::from_str(&s).map_err(D::Error::custom)?;
+            Ok(Some(t))
+        }
+        Some(other) => Err(D::Error::custom(format!(
+            "label_type must be an object or JSON string, got: {other}"
+        ))),
+    }
+}
+
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct GenerateSummaryInput {
     /// Search result to summarize (provide either this or run_id)
@@ -265,7 +296,7 @@ struct AnnotateSpectrumInput {
     #[serde(default)]
     top_n_ions: Option<usize>,
     /// Heavy-label type for SILAC comparison.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_label_type")]
     label_type: Option<protein_copilot_xic::LabelType>,
     /// m/z extraction tolerance for XIC (default: 20 ppm).
     #[serde(default, deserialize_with = "deserialize_tolerance")]
@@ -366,6 +397,7 @@ struct ExtractXicInput {
     #[schemars(description = "Number of top fragment ions to display. Default: all (zero-intensity excluded).")]
     top_n_ions: Option<usize>,
     /// Heavy-label type for SILAC comparison.
+    #[serde(default, deserialize_with = "deserialize_label_type")]
     #[schemars(description = "Heavy-label configuration. Use {\"Silac\": {\"heavy_k_delta\": 8.014199, \"heavy_r_delta\": 10.008269}} for standard SILAC.")]
     label_type: Option<protein_copilot_xic::LabelType>,
     /// m/z extraction tolerance (default: 20 ppm).
