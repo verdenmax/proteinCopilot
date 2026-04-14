@@ -1062,6 +1062,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "protein-copilot-integration-tests"
+version = "0.1.0"
+dependencies = [
+ "protein-copilot-core",
+ "protein-copilot-fdr",
+ "protein-copilot-param-recommend",
+ "protein-copilot-report",
+ "protein-copilot-result-import",
+ "protein-copilot-search-engine",
+ "protein-copilot-spectrum-io",
+ "protein-copilot-xic",
+ "serde_json",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "protein-copilot-mcp-server"
 version = "0.1.0"
 dependencies = [

@@ -1,0 +1,24 @@
+[package]
+name = "protein-copilot-integration-tests"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+name = "test_helpers"
+path = "src/lib.rs"
+
+[dependencies]
+protein-copilot-core = { workspace = true }
+protein-copilot-search-engine = { workspace = true }
+protein-copilot-xic = { workspace = true }
+protein-copilot-spectrum-io = { workspace = true }
+protein-copilot-param-recommend = { workspace = true }
+protein-copilot-report = { workspace = true }
+protein-copilot-fdr = { workspace = true }
+protein-copilot-result-import = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+tempfile = "3"
