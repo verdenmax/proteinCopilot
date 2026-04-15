@@ -19,11 +19,15 @@ pub mod unified_visualize;
 
 pub use error::ReportError;
 
-/// Escapes `</script>` sequences in JSON to prevent XSS when embedded in HTML `<script>` tags.
+/// Escapes JSON for safe embedding inside HTML `<script>` tags.
+///
+/// Replaces `<` with `\u003c` and `>` with `\u003e` to prevent:
+/// - Premature `</script>` tag closure
+/// - HTML injection via `<` and `>` in JSON string values
+///
+/// The escaped string remains valid JSON (parseable by `JSON.parse()`).
 pub fn escape_json_for_html(json: &str) -> String {
-    json.replace("</script>", "<\\/script>")
-        .replace("</Script>", "<\\/Script>")
-        .replace("</SCRIPT>", "<\\/SCRIPT>")
+    json.replace('<', r"\u003c").replace('>', r"\u003e")
 }
 
 use std::path::Path;
@@ -82,5 +86,36 @@ impl ReportGenerator {
         plotly_mode: protein_copilot_xic::PlotlyMode,
     ) -> Result<(), ReportError> {
         unified_visualize::render_unified_html(data, output_path, plotly_mode)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn escape_script_close_tag() {
+        let input = r#"{"val":"</script><b>"}"#;
+        let escaped = escape_json_for_html(input);
+        assert!(!escaped.contains("</script>"), "must not contain literal </script>");
+        assert!(!escaped.contains('<'), "must not contain literal <");
+        assert!(!escaped.contains('>'), "must not contain literal >");
+    }
+
+    #[test]
+    fn escape_angle_brackets() {
+        let input = r#"{"key":"<img onerror=alert(1)>"}"#;
+        let escaped = escape_json_for_html(input);
+        assert!(!escaped.contains('<'));
+        assert!(!escaped.contains('>'));
+        assert!(escaped.contains(r"\u003c"));
+        assert!(escaped.contains(r"\u003e"));
+    }
+
+    #[test]
+    fn escape_preserves_normal_json() {
+        let input = r#"{"score":0.95,"peptide":"ACDK"}"#;
+        let escaped = escape_json_for_html(input);
+        assert_eq!(input, escaped, "no angle brackets = no changes");
     }
 }
