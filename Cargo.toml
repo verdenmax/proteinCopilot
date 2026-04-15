@@ -45,3 +45,12 @@ protein-copilot-fdr = { path = "crates/fdr" }
 protein-copilot-dia-extraction = { path = "crates/dia-extraction" }
 protein-copilot-xic = { path = "crates/xic" }
 protein-copilot-result-import = { path = "crates/result-import" }
+
+# HTTP client (for FASTA download)
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
+
+# Hashing
+sha2 = "0.10"
+
+# Internal
+protein-copilot-fasta-db = { path = "crates/fasta-db" }
