@@ -145,10 +145,11 @@ fn build_mgf_index(path: &Path) -> Result<ScanIndex, SpectrumIoError> {
         let scan_num = scan.unwrap_or(fallback_scan);
         if offsets.contains_key(&scan_num) {
             tracing::warn!(
-                "duplicate scan number {} in MGF file {:?}; later occurrence overwrites earlier",
+                "duplicate scan number {} in MGF file {:?}; keeping first occurrence, skipping later",
                 scan_num,
                 path,
             );
+            continue;
         }
         offsets.insert(scan_num, offset);
     }
@@ -398,6 +399,32 @@ mod tests {
                 "RT mismatch for scan {scan}"
             );
         }
+    }
+
+    #[test]
+    fn duplicate_scan_keeps_first_occurrence() {
+        use std::io::Write;
+        let dir = tempfile::tempdir().unwrap();
+        let mgf_path = dir.path().join("dup.mgf");
+        let mut f = std::fs::File::create(&mgf_path).unwrap();
+        // Two spectra with same SCANS=5
+        write!(f, "BEGIN IONS\nSCANS=5\nPEPMASS=500.0\n100.0 1000\nEND IONS\n").unwrap();
+        write!(f, "BEGIN IONS\nSCANS=5\nPEPMASS=600.0\n200.0 2000\nEND IONS\n").unwrap();
+        drop(f);
+
+        let index = build_mgf_index(&mgf_path).unwrap();
+        // Should have only 1 entry for scan 5
+        assert_eq!(index.len(), 1, "duplicate should be deduplicated");
+
+        // Read the spectrum — should be the FIRST one (PEPMASS=500)
+        let reader = IndexedMgfReader::open(&mgf_path).unwrap();
+        let spec = reader.read_spectrum(&mgf_path, 5).unwrap();
+        let prec_mz = spec.precursors[0].mz;
+        assert!(
+            prec_mz > 499.0 && prec_mz < 501.0,
+            "should keep first occurrence with PEPMASS=500, got {}",
+            prec_mz
+        );
     }
 
     #[test]
