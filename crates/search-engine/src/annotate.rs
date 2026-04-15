@@ -1102,7 +1102,7 @@ mod tests {
             position: ModPosition::ProteinNTerm,
         };
         // With is_protein_nterm=true, mod should be applied
-        let delta_applied = apply_fixed_mod_mass("PEPTIDE", &[nterm_mod.clone()], true, false);
+        let delta_applied = apply_fixed_mod_mass("PEPTIDE", std::slice::from_ref(&nterm_mod), true, false);
         assert!((delta_applied - 42.010565).abs() < 1e-6);
 
         // With is_protein_nterm=false, mod should be skipped
