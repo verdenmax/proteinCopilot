@@ -730,6 +730,12 @@ fn validate_file_path(path: &str) -> Result<(), ErrorData> {
             "file_path cannot be empty",
         ));
     }
+    if !std::path::Path::new(path).exists() {
+        return Err(mcp_err(
+            ErrorCode::INVALID_PARAMS,
+            format!("file does not exist: {path}"),
+        ));
+    }
     Ok(())
 }
 
@@ -1534,6 +1540,12 @@ impl ProteinCopilotServer {
                 return Err(mcp_err(
                     ErrorCode::INVALID_PARAMS,
                     "peptide_sequence cannot be empty in manual annotation mode",
+                ));
+            }
+            if ch <= 0 {
+                return Err(mcp_err(
+                    ErrorCode::INVALID_PARAMS,
+                    format!("charge must be > 0, got {ch}"),
                 ));
             }
             (

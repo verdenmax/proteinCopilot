@@ -283,7 +283,7 @@ status 值：`Running` / `Completed` / `Failed: <reason>` / `Cancelled`
 {
   "n_cycles": 5,
   "top_n_ions": 6,
-  "label_type": { "Silac": { "k_delta": 8.014199, "r_delta": 10.008269 } },
+  "label_type": { "Silac": { "heavy_k_delta": 8.014199, "heavy_r_delta": 10.008269 } },
   "extraction_tolerance": { "value": 20, "unit": "Ppm" },
   "plotly_mode": "Cdn"
 }

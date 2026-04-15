@@ -86,6 +86,9 @@ pub fn find_dda_heavy_scan(
     target_mz: f64,
     tolerance_ppm: f64,
 ) -> Option<u32> {
+    if spectra.is_empty() || tolerance_ppm <= 0.0 || !target_mz.is_finite() || target_mz <= 0.0 {
+        return None;
+    }
     spectra
         .iter()
         .filter_map(|spec| {
@@ -111,6 +114,9 @@ pub fn find_heavy_dia_window_from_spectra(
     reference_rt_min: f64,
     target_mz: f64,
 ) -> Option<(u32, IsolationWindow)> {
+    if spectra.is_empty() || !target_mz.is_finite() || target_mz <= 0.0 {
+        return None;
+    }
     spectra
         .iter()
         .filter_map(|spec| {
