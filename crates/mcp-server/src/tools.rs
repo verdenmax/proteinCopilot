@@ -467,6 +467,14 @@ struct ListDatabasesOutput {
     databases: Vec<protein_copilot_fasta_db::DatabaseStatus>,
 }
 
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct ExportResultsOutput {
+    /// Directory where files were exported.
+    output_dir: String,
+    /// List of exported file names.
+    files: Vec<String>,
+}
+
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct ListDatabasesInput {
     /// Override cache directory. Default: .proteincopilot/databases/
@@ -1446,7 +1454,7 @@ impl ProteinCopilotServer {
     fn export_results(
         &self,
         Parameters(input): Parameters<ExportResultsInput>,
-    ) -> Result<String, ErrorData> {
+    ) -> Result<Json<ExportResultsOutput>, ErrorData> {
         let result = self.get_result(&input.result, &input.run_id)?;
         let output_dir = Path::new(&input.output_dir);
 
@@ -1457,10 +1465,18 @@ impl ProteinCopilotServer {
         ReportGenerator::export_metadata(&result.metadata, &output_dir.join("run_metadata.json"))
             .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
 
-        Ok(format!(
-            "Exported to {}: psm.tsv, peptide.tsv, protein.tsv, result.json, run_metadata.json",
-            output_dir.display()
-        ))
+        let files = vec![
+            "psm.tsv".to_string(),
+            "peptide.tsv".to_string(),
+            "protein.tsv".to_string(),
+            "result.json".to_string(),
+            "run_metadata.json".to_string(),
+        ];
+
+        Ok(Json(ExportResultsOutput {
+            output_dir: output_dir.display().to_string(),
+            files,
+        }))
     }
 
     /// List recent search runs with status and metrics.
