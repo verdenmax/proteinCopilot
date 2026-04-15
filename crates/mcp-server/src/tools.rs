@@ -462,6 +462,11 @@ struct PresetsResponse {
 
 // --- FASTA Database Management ---
 
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct ListDatabasesOutput {
+    databases: Vec<protein_copilot_fasta_db::DatabaseStatus>,
+}
+
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct ListDatabasesInput {
     /// Override cache directory. Default: .proteincopilot/databases/
@@ -2470,10 +2475,10 @@ impl ProteinCopilotServer {
     fn list_databases(
         &self,
         Parameters(input): Parameters<ListDatabasesInput>,
-    ) -> Result<Json<Vec<protein_copilot_fasta_db::DatabaseStatus>>, ErrorData> {
+    ) -> Result<Json<ListDatabasesOutput>, ErrorData> {
         let cache_dir = default_cache_dir(&input.cache_dir);
         protein_copilot_fasta_db::list_databases(&cache_dir)
-            .map(Json)
+            .map(|dbs| Json(ListDatabasesOutput { databases: dbs }))
             .map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, e))
     }
 
