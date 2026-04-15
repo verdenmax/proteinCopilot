@@ -51,6 +51,13 @@ pub async fn download_fasta(url: &str, dest_path: &Path) -> Result<DownloadResul
         detail: format!("failed to read response body: {e}"),
     })?;
 
+    if bytes.is_empty() {
+        return Err(FastaDbError::DownloadFailed {
+            id: url.to_string(),
+            detail: "server returned empty response".to_string(),
+        });
+    }
+
     // Write to .part file
     let mut file = tokio::fs::File::create(&part_path)
         .await

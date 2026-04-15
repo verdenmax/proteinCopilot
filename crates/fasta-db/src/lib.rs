@@ -115,15 +115,18 @@ pub async fn download_database(
     let cache = CacheManager::new(cache_dir.to_path_buf());
 
     // Return cached path if already downloaded and not forcing
-    if !force && cache.is_cached(database_id) {
-        let path = cache.fasta_path(database_id);
-        let cached = cache.get_cached(database_id)?.unwrap();
-        return Ok(DownloadDatabaseResult {
-            id: database_id.to_string(),
-            path: path.to_string_lossy().to_string(),
-            protein_count: cached.protein_count,
-            file_size_bytes: cached.file_size_bytes,
-        });
+    if !force {
+        if let Some(cached) = cache.get_cached(database_id)? {
+            let path = cache.fasta_path(database_id);
+            if path.exists() {
+                return Ok(DownloadDatabaseResult {
+                    id: database_id.to_string(),
+                    path: path.to_string_lossy().to_string(),
+                    protein_count: cached.protein_count,
+                    file_size_bytes: cached.file_size_bytes,
+                });
+            }
+        }
     }
 
     let dest_path = cache.fasta_path(database_id);
