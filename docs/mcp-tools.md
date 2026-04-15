@@ -1,6 +1,6 @@
 # MCP Tools 参考
 
-ProteinCopilot MCP Server 提供 16 个工具，通过 JSON-RPC over stdio 暴露给 LLM。
+ProteinCopilot MCP Server 提供 19 个工具，通过 JSON-RPC over stdio 暴露给 LLM。
 
 > **当前搜索引擎**：MVP 使用内置的 **SimpleSearchEngine**（基于 b/y 离子匹配的简化搜索），
 > 后续将接入 pFind 作为生产级搜索引擎。SimpleSearch 足以验证完整流程，但搜索质量和性能不如专业引擎。
@@ -406,6 +406,87 @@ status 值：`Running` / `Completed` / `Failed: <reason>` / `Cancelled`
 ```
 
 > 用于将 DIA-NN 或 pFind 的搜索结果导入 ProteinCopilot 进行可视化和进一步分析。
+
+---
+
+## list_databases
+
+列出所有内置 FASTA 蛋白数据库及缓存状态。
+
+**输入**：
+```json
+{
+  "cache_dir": "/custom/path"  // 可选，默认 .proteincopilot/databases/
+}
+```
+
+**输出**：`ListDatabasesOutput`
+```json
+{
+  "databases": [
+    { "id": "human_swissprot", "name": "Human Swiss-Prot", "species": "Homo sapiens", "status": {"state": "Available"} },
+    { "id": "ecoli_swissprot", "name": "E.coli Swiss-Prot", "species": "Escherichia coli (K12)", "status": {"state": "Downloaded", "path": "...", "protein_count": 4400} }
+  ]
+}
+```
+
+**内置数据库**：human_swissprot, mouse_swissprot, ecoli_swissprot, yeast_swissprot, arabidopsis_swissprot, crap
+
+---
+
+## download_database
+
+下载 FASTA 数据库（HTTPS + SHA256 校验 + 本地缓存）。
+
+**输入**：
+```json
+{
+  "database_id": "human_swissprot",
+  "cache_dir": "/custom/path",  // 可选
+  "force": false                // 可选，强制重新下载
+}
+```
+
+**输出**：`DownloadDatabaseResult`
+```json
+{
+  "database_id": "human_swissprot",
+  "fasta_path": ".proteincopilot/databases/human_swissprot.fasta",
+  "protein_count": 20434,
+  "sha256": "abc123...",
+  "was_cached": false
+}
+```
+
+**使用场景**：搜索前下载数据库，返回的 `fasta_path` 直接作为 `database_path` 传入 `run_search`。
+
+---
+
+## get_database_info
+
+查看已下载数据库的详细信息。
+
+**输入**：
+```json
+{
+  "database_id": "human_swissprot",
+  "cache_dir": "/custom/path"  // 可选
+}
+```
+
+**输出**：`DatabaseInfo`
+```json
+{
+  "id": "human_swissprot",
+  "name": "Human Swiss-Prot",
+  "fasta_path": ".proteincopilot/databases/human_swissprot.fasta",
+  "protein_count": 20434,
+  "file_size_bytes": 42000000,
+  "sha256": "abc123...",
+  "downloaded_at": "2026-04-15T10:00:00Z",
+  "first_accessions": ["sp|P31946|1433B_HUMAN", "sp|P62258|1433E_HUMAN", ...]
+}
+```
 
 ---
 
