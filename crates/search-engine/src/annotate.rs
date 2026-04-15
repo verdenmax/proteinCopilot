@@ -203,10 +203,14 @@ fn find_best_match(
 /// Calculates the total mass shift from fixed modifications for a peptide.
 /// Applies fixed modifications to compute total mass delta.
 ///
-/// `ProteinNTerm`/`ProteinCTerm` mods are **not** applied here because
-/// `annotate_spectrum` is called without protein-terminal context.
-/// Only `AnyNTerm`, `AnyCTerm`, `Anywhere`, and residue-specific mods apply.
-fn apply_fixed_mod_mass(sequence: &str, fixed_mods: &[Modification]) -> f64 {
+/// When `is_protein_nterm` / `is_protein_cterm` are `true`, the corresponding
+/// `ProteinNTerm` / `ProteinCTerm` mods are applied; otherwise they are skipped.
+fn apply_fixed_mod_mass(
+    sequence: &str,
+    fixed_mods: &[Modification],
+    is_protein_nterm: bool,
+    is_protein_cterm: bool,
+) -> f64 {
     use protein_copilot_core::search_params::ModPosition;
     let mut delta = 0.0;
     for m in fixed_mods {
@@ -215,8 +219,15 @@ fn apply_fixed_mod_mass(sequence: &str, fixed_mods: &[Modification]) -> f64 {
                 ModPosition::AnyNTerm | ModPosition::AnyCTerm | ModPosition::Anywhere => {
                     delta += m.mass_delta;
                 }
-                ModPosition::ProteinNTerm | ModPosition::ProteinCTerm => {
-                    // Skip: no terminal context available in annotation mode
+                ModPosition::ProteinNTerm => {
+                    if is_protein_nterm {
+                        delta += m.mass_delta;
+                    }
+                }
+                ModPosition::ProteinCTerm => {
+                    if is_protein_cterm {
+                        delta += m.mass_delta;
+                    }
                 }
             }
         } else {
@@ -322,6 +333,7 @@ fn generate_y_entries(
 /// Validates that the spectrum has peaks and precursor info, generates
 /// theoretical fragment ions, matches them against experimental peaks,
 /// and returns a complete [`SpectrumAnnotation`].
+#[allow(clippy::too_many_arguments)]
 pub fn annotate_spectrum(
     spectrum: &Spectrum,
     peptide_sequence: &str,
@@ -329,6 +341,8 @@ pub fn annotate_spectrum(
     fragment_tolerance: &MassTolerance,
     fixed_modifications: &[Modification],
     protein_accessions: Vec<String>,
+    is_protein_nterm: bool,
+    is_protein_cterm: bool,
 ) -> Result<SpectrumAnnotation, SearchEngineError> {
     // --- Validation ---
     if charge <= 0 {
@@ -358,7 +372,12 @@ pub fn annotate_spectrum(
                 peptide_sequence
             ),
         })?;
-    let mod_delta = apply_fixed_mod_mass(peptide_sequence, fixed_modifications);
+    let mod_delta = apply_fixed_mod_mass(
+        peptide_sequence,
+        fixed_modifications,
+        is_protein_nterm,
+        is_protein_cterm,
+    );
     let modified_mass = neutral_mass + mod_delta;
     let theoretical_precursor_mz = peptide_mz(modified_mass, charge);
     let observed_precursor_mz = precursor.mz;
@@ -508,6 +527,8 @@ pub fn annotate_heavy_spectrum(
     fragment_tolerance: &MassTolerance,
     fixed_modifications: &[Modification],
     label: &protein_copilot_core::label::LabelType,
+    is_protein_nterm: bool,
+    is_protein_cterm: bool,
 ) -> Result<HeavyAnnotation, SearchEngineError> {
     use protein_copilot_core::label::{compute_heavy_precursor_mz, residue_heavy_delta};
 
@@ -529,7 +550,12 @@ pub fn annotate_heavy_spectrum(
                 detail: format!("cannot compute mass for '{}'", peptide_sequence),
             }
         })?;
-        let mod_delta = apply_fixed_mod_mass(peptide_sequence, fixed_modifications);
+        let mod_delta = apply_fixed_mod_mass(
+            peptide_sequence,
+            fixed_modifications,
+            is_protein_nterm,
+            is_protein_cterm,
+        );
         peptide_mz(neutral + mod_delta, charge)
     };
     let heavy_precursor_mz =
@@ -731,6 +757,8 @@ mod tests {
             &fragment_tolerance_da(),
             &[],
             vec!["P001".to_string()],
+            false,
+            false,
         )
         .unwrap();
 
@@ -771,6 +799,8 @@ mod tests {
             &fragment_tolerance_da(),
             &[],
             vec![],
+            false,
+            false,
         )
         .unwrap();
 
@@ -796,8 +826,9 @@ mod tests {
             &fragment_tolerance_da(),
             &[],
             vec![],
+            false,
+            false,
         );
-        assert!(result.is_err(), "non-standard residue should produce error");
         let err_msg = result.unwrap_err().to_string();
         assert!(
             err_msg.contains("non-standard"),
@@ -831,6 +862,8 @@ mod tests {
             &fragment_tolerance_da(),
             &[],
             vec![],
+            false,
+            false,
         )
         .unwrap();
 
@@ -868,6 +901,8 @@ mod tests {
             &fragment_tolerance_da(),
             &[],
             vec!["PROT1".to_string()],
+            false,
+            false,
         )
         .unwrap();
 
@@ -910,7 +945,7 @@ mod tests {
             unit: ToleranceUnit::Da,
         };
         // Annotate with charge 3 — should pick precursor at 400.0, not 500.0
-        let result = annotate_spectrum(&spectrum, "GK", 3, &tol, &[], vec![]);
+        let result = annotate_spectrum(&spectrum, "GK", 3, &tol, &[], vec![], false, false);
         assert!(result.is_ok());
         let ann = result.unwrap();
         assert!(
@@ -946,7 +981,7 @@ mod tests {
         // or test with a spectrum that has no precursor.
         if let Ok(spec) = spectrum {
             let result =
-                annotate_spectrum(&spec, "PEPTIDER", 2, &fragment_tolerance_da(), &[], vec![]);
+                annotate_spectrum(&spec, "PEPTIDER", 2, &fragment_tolerance_da(), &[], vec![], false, false);
             assert!(result.is_err());
         }
         // Also test missing precursor
@@ -1044,7 +1079,7 @@ mod tests {
         };
 
         let result =
-            annotate_heavy_spectrum(&spectrum, "AKDEF", 2, &tolerance, &[], &label).unwrap();
+            annotate_heavy_spectrum(&spectrum, "AKDEF", 2, &tolerance, &[], &label, false, false).unwrap();
 
         assert_eq!(result.scan_number, 100);
         assert!(result.matched_ions >= 1, "should match at least heavy b2+");
@@ -1055,5 +1090,23 @@ mod tests {
             matched_b >= 1,
             "should have at least one matched heavy b-ion"
         );
+    }
+
+    #[test]
+    fn test_terminal_mod_applied_when_context_true() {
+        use protein_copilot_core::search_params::{ModPosition, Modification};
+        let nterm_mod = Modification {
+            name: "Acetyl".to_string(),
+            mass_delta: 42.010565,
+            residues: vec![],
+            position: ModPosition::ProteinNTerm,
+        };
+        // With is_protein_nterm=true, mod should be applied
+        let delta_applied = apply_fixed_mod_mass("PEPTIDE", &[nterm_mod.clone()], true, false);
+        assert!((delta_applied - 42.010565).abs() < 1e-6);
+
+        // With is_protein_nterm=false, mod should be skipped
+        let delta_skipped = apply_fixed_mod_mass("PEPTIDE", &[nterm_mod], false, false);
+        assert!(delta_skipped.abs() < 1e-6);
     }
 }

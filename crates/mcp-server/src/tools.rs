@@ -1607,6 +1607,8 @@ impl ProteinCopilotServer {
             &frag_tol,
             &modifications,
             protein_accs.clone(),
+            false,
+            false,
         )
         .map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, e))?;
 
@@ -1684,6 +1686,8 @@ impl ProteinCopilotServer {
                             &frag_tol,
                             &modifications,
                             core_label,
+                            false,
+                            false,
                         ) {
                             Ok(heavy_ann) => {
                                 tracing::info!(

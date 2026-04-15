@@ -84,6 +84,8 @@ async fn full_pipeline_read_search_annotate() {
         &tol,
         &best_psm.modifications,
         best_psm.protein_accessions.clone(),
+        false,
+        false,
     )
     .unwrap();
 

@@ -266,6 +266,8 @@ async fn scenario_annotate_psm() {
         &tol,
         &psm.modifications,
         psm.protein_accessions.clone(),
+        false,
+        false,
     )
     .unwrap();
 

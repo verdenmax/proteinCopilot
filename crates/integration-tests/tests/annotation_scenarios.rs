@@ -10,7 +10,7 @@ use test_helpers::*;
 fn assert_annotation_ok(spectrum: &Spectrum, peptide: &str, charge: i32) {
     let tol = default_frag_tolerance();
     let mods: Vec<Modification> = vec![];
-    let result = annotate_spectrum(spectrum, peptide, charge, &tol, &mods, vec![]);
+    let result = annotate_spectrum(spectrum, peptide, charge, &tol, &mods, vec![], false, false);
     assert!(result.is_ok(), "annotation should succeed: {:?}", result.err());
     let ann = result.unwrap();
     assert_eq!(ann.peptide_sequence, peptide);
@@ -29,7 +29,7 @@ fn scenario_1_dda_no_silac_annotates_light_only() {
 
     let tol = default_frag_tolerance();
     let mods: Vec<Modification> = vec![];
-    let ann = annotate_spectrum(&spectrum, peptide, 2, &tol, &mods, vec![]).unwrap();
+    let ann = annotate_spectrum(&spectrum, peptide, 2, &tol, &mods, vec![], false, false).unwrap();
 
     assert_eq!(ann.peptide_sequence, peptide);
     assert!(ann.matched_ions > 0, "should match some fragment ions");
@@ -82,7 +82,7 @@ fn scenario_2_dda_silac_heavy_annotation_succeeds() {
     let tol = default_frag_tolerance();
     let mods: Vec<Modification> = vec![];
     let heavy_ann =
-        annotate_heavy_spectrum(&heavy_spectrum, peptide, 2, &tol, &mods, &label).unwrap();
+        annotate_heavy_spectrum(&heavy_spectrum, peptide, 2, &tol, &mods, &label, false, false).unwrap();
 
     assert!(heavy_ann.total_ions > 0, "should have heavy theoretical ions");
     // heavy_ann.precursor_mz is computed from peptide mass, not from input spectrum
@@ -107,7 +107,7 @@ fn scenario_3_dia_no_silac_annotates_light_only() {
 
     let tol = default_frag_tolerance();
     let mods: Vec<Modification> = vec![];
-    let ann = annotate_spectrum(&spectrum, peptide, 2, &tol, &mods, vec![]).unwrap();
+    let ann = annotate_spectrum(&spectrum, peptide, 2, &tol, &mods, vec![], false, false).unwrap();
 
     assert_eq!(ann.peptide_sequence, peptide);
     assert!(ann.matched_ions > 0, "should match some fragment ions");
@@ -158,7 +158,7 @@ fn scenario_4_dia_silac_heavy_annotation_succeeds() {
     let tol = default_frag_tolerance();
     let mods: Vec<Modification> = vec![];
     let heavy_ann =
-        annotate_heavy_spectrum(&heavy_spectrum, peptide, 2, &tol, &mods, &label).unwrap();
+        annotate_heavy_spectrum(&heavy_spectrum, peptide, 2, &tol, &mods, &label, false, false).unwrap();
 
     assert!(heavy_ann.total_ions > 0);
 }
@@ -191,7 +191,7 @@ fn zero_offset_peptide_no_kr_skips_heavy() {
     let spectrum = make_ms2(1, 30.0, light_mz, 2, Some(dda_window(light_mz)), peaks);
     let tol = default_frag_tolerance();
     let mods: Vec<Modification> = vec![];
-    let result = annotate_heavy_spectrum(&spectrum, peptide, 2, &tol, &mods, &label);
+    let result = annotate_heavy_spectrum(&spectrum, peptide, 2, &tol, &mods, &label, false, false);
     assert!(
         result.is_ok(),
         "annotate_heavy_spectrum should not crash on zero-offset peptide"
