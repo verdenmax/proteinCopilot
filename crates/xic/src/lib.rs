@@ -107,7 +107,9 @@ pub struct ExtractionParams {
 }
 
 /// Intensity extraction strategy.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, schemars::JsonSchema,
+)]
 pub enum IntensityRule {
     /// Highest peak within tolerance window (default).
     #[default]
@@ -122,7 +124,9 @@ pub enum IntensityRule {
 pub use protein_copilot_core::label::LabelType;
 
 /// Plotly.js loading mode for HTML output.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, schemars::JsonSchema,
+)]
 pub enum PlotlyMode {
     /// Load from CDN (default, smaller file).
     #[default]

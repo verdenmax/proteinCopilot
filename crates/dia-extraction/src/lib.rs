@@ -14,7 +14,9 @@ pub mod error;
 pub mod extractor;
 pub mod isotope;
 
-pub use config::{DiaExtractionConfig, DiaExtractionResult, ExtractionStats, SingleSpectrumExtractionResult};
+pub use config::{
+    DiaExtractionConfig, DiaExtractionResult, ExtractionStats, SingleSpectrumExtractionResult,
+};
 pub use error::DiaExtractionError;
 pub use extractor::PrecursorExtractor;
 pub use isotope::IsotopePatternExtractor;
@@ -382,7 +384,8 @@ mod tests {
     fn test_single_spectrum_extraction_found() {
         // MS1 with an isotope cluster at ~500 Da (charge 2, spacing ~0.502)
         let ms1 = make_ms1(
-            1, 10.0,
+            1,
+            10.0,
             vec![500.0, 500.502, 501.003],
             vec![1000.0, 800.0, 400.0],
         );
@@ -409,7 +412,10 @@ mod tests {
         let extractor = IsotopePatternExtractor::default();
 
         let result = extract_single_spectrum_precursors(&spectra, 99, &extractor);
-        assert!(matches!(result, Err(DiaExtractionError::ScanNotFound { scan: 99 })));
+        assert!(matches!(
+            result,
+            Err(DiaExtractionError::ScanNotFound { scan: 99 })
+        ));
     }
 
     #[test]
@@ -427,7 +433,9 @@ mod tests {
         let ms1 = make_ms1(1, 10.0, vec![500.0], vec![1000.0]);
         // MS2 without isolation window
         let ms2 = Spectrum::new(
-            2, MsLevel::MS2, 10.1,
+            2,
+            MsLevel::MS2,
+            10.1,
             vec![PrecursorInfo {
                 mz: 500.0,
                 charge: Some(2),
@@ -435,14 +443,19 @@ mod tests {
                 isolation_window: None,
                 source_scan: None,
             }],
-            vec![200.0], vec![500.0],
-        ).unwrap();
+            vec![200.0],
+            vec![500.0],
+        )
+        .unwrap();
 
         let spectra = vec![ms1, ms2];
         let extractor = IsotopePatternExtractor::default();
 
         let result = extract_single_spectrum_precursors(&spectra, 2, &extractor);
-        assert!(matches!(result, Err(DiaExtractionError::NoIsolationWindow { scan: 2 })));
+        assert!(matches!(
+            result,
+            Err(DiaExtractionError::NoIsolationWindow { scan: 2 })
+        ));
     }
 
     #[test]

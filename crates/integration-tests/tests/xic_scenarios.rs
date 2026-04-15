@@ -3,11 +3,11 @@
 //! Tests heavy scan finding logic and zero-offset behavior.
 
 use protein_copilot_core::label::{compute_heavy_precursor_mz, total_heavy_delta};
+use protein_copilot_xic::extract::build_target_ions;
 use protein_copilot_xic::heavy::{
     compute_heavy_target_ions, find_dda_heavy_scan, find_heavy_dia_window_from_spectra,
     window_contains_mz,
 };
-use protein_copilot_xic::extract::build_target_ions;
 use test_helpers::*;
 
 // ─── DDA heavy scan finding ───────────────────────────────────────────────
@@ -21,9 +21,30 @@ fn dda_find_heavy_scan_by_precursor_mz() {
 
     // Create a set of nearby DDA MS2 spectra
     let spectra = vec![
-        make_ms2(10, 30.0, light_mz, 2, Some(dda_window(light_mz)), vec![(200.0, 100.0)]),
-        make_ms2(11, 30.05, heavy_mz, 2, Some(dda_window(heavy_mz)), vec![(200.0, 100.0)]),
-        make_ms2(12, 30.1, 600.0, 2, Some(dda_window(600.0)), vec![(200.0, 100.0)]),
+        make_ms2(
+            10,
+            30.0,
+            light_mz,
+            2,
+            Some(dda_window(light_mz)),
+            vec![(200.0, 100.0)],
+        ),
+        make_ms2(
+            11,
+            30.05,
+            heavy_mz,
+            2,
+            Some(dda_window(heavy_mz)),
+            vec![(200.0, 100.0)],
+        ),
+        make_ms2(
+            12,
+            30.1,
+            600.0,
+            2,
+            Some(dda_window(600.0)),
+            vec![(200.0, 100.0)],
+        ),
     ];
 
     let result = find_dda_heavy_scan(&spectra, 30.0, heavy_mz, 20.0);
@@ -33,8 +54,22 @@ fn dda_find_heavy_scan_by_precursor_mz() {
 #[test]
 fn dda_no_match_returns_none() {
     let spectra = vec![
-        make_ms2(10, 30.0, 500.0, 2, Some(dda_window(500.0)), vec![(200.0, 100.0)]),
-        make_ms2(11, 30.1, 501.0, 2, Some(dda_window(501.0)), vec![(200.0, 100.0)]),
+        make_ms2(
+            10,
+            30.0,
+            500.0,
+            2,
+            Some(dda_window(500.0)),
+            vec![(200.0, 100.0)],
+        ),
+        make_ms2(
+            11,
+            30.1,
+            501.0,
+            2,
+            Some(dda_window(501.0)),
+            vec![(200.0, 100.0)],
+        ),
     ];
 
     // Look for m/z far from any spectrum
@@ -56,13 +91,37 @@ fn dia_find_heavy_scan_by_window_containment() {
     // Window at 400 does NOT contain heavy (range 387.5-412.5)
     // Window at 552 DOES contain heavy (range 539.5-564.5)
     let spectra = vec![
-        make_ms2(20, 45.0, 400.0, 2, Some(dia_window(400.0)), vec![(200.0, 100.0)]),
-        make_ms2(21, 45.0, heavy_mz, 2, Some(dia_window(heavy_mz)), vec![(200.0, 100.0)]),
-        make_ms2(22, 45.0, 900.0, 2, Some(dia_window(900.0)), vec![(200.0, 100.0)]),
+        make_ms2(
+            20,
+            45.0,
+            400.0,
+            2,
+            Some(dia_window(400.0)),
+            vec![(200.0, 100.0)],
+        ),
+        make_ms2(
+            21,
+            45.0,
+            heavy_mz,
+            2,
+            Some(dia_window(heavy_mz)),
+            vec![(200.0, 100.0)],
+        ),
+        make_ms2(
+            22,
+            45.0,
+            900.0,
+            2,
+            Some(dia_window(900.0)),
+            vec![(200.0, 100.0)],
+        ),
     ];
 
     let result = find_heavy_dia_window_from_spectra(&spectra, 45.0, heavy_mz);
-    assert!(result.is_some(), "should find DIA window containing heavy m/z");
+    assert!(
+        result.is_some(),
+        "should find DIA window containing heavy m/z"
+    );
     let (scan, window) = result.unwrap();
     assert_eq!(scan, 21);
     assert!(window_contains_mz(&window, heavy_mz));
@@ -72,8 +131,22 @@ fn dia_find_heavy_scan_by_window_containment() {
 fn dia_no_window_contains_heavy_mz() {
     // Create windows that don't cover the target
     let spectra = vec![
-        make_ms2(20, 45.0, 400.0, 2, Some(dia_window(400.0)), vec![(200.0, 100.0)]),
-        make_ms2(21, 45.0, 500.0, 2, Some(dia_window(500.0)), vec![(200.0, 100.0)]),
+        make_ms2(
+            20,
+            45.0,
+            400.0,
+            2,
+            Some(dia_window(400.0)),
+            vec![(200.0, 100.0)],
+        ),
+        make_ms2(
+            21,
+            45.0,
+            500.0,
+            2,
+            Some(dia_window(500.0)),
+            vec![(200.0, 100.0)],
+        ),
     ];
 
     // Target heavy m/z is far outside both windows

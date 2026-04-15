@@ -214,8 +214,7 @@ pub fn find_best_match(
     }
 
     // Binary search for the start of the RT window
-    let insert_pos =
-        sorted_ms2.partition_point(|m| m.rt_min < psm_rt_min - rt_tolerance_min);
+    let insert_pos = sorted_ms2.partition_point(|m| m.rt_min < psm_rt_min - rt_tolerance_min);
 
     let mut best: Option<(u32, f64)> = None;
 

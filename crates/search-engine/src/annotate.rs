@@ -387,24 +387,20 @@ pub fn annotate_spectrum(
     // --- Generate theoretical fragment ions (with modifications, multi-charge) ---
     let max_frag_charge: u32 = if charge >= 3 { 2 } else { 1 };
 
-    let b_entries =
-        generate_b_entries(peptide_sequence, fixed_modifications, max_frag_charge).ok_or_else(
-            || SearchEngineError::ExecutionError {
-                detail: format!(
-                    "cannot generate b-ions for '{}': non-standard residue",
-                    peptide_sequence
-                ),
-            },
-        )?;
-    let y_entries =
-        generate_y_entries(peptide_sequence, fixed_modifications, max_frag_charge).ok_or_else(
-            || SearchEngineError::ExecutionError {
-                detail: format!(
-                    "cannot generate y-ions for '{}': non-standard residue",
-                    peptide_sequence
-                ),
-            },
-        )?;
+    let b_entries = generate_b_entries(peptide_sequence, fixed_modifications, max_frag_charge)
+        .ok_or_else(|| SearchEngineError::ExecutionError {
+            detail: format!(
+                "cannot generate b-ions for '{}': non-standard residue",
+                peptide_sequence
+            ),
+        })?;
+    let y_entries = generate_y_entries(peptide_sequence, fixed_modifications, max_frag_charge)
+        .ok_or_else(|| SearchEngineError::ExecutionError {
+            detail: format!(
+                "cannot generate y-ions for '{}': non-standard residue",
+                peptide_sequence
+            ),
+        })?;
 
     let exp_mz = &spectrum.mz_array;
     let exp_int = &spectrum.intensity_array;
@@ -413,55 +409,53 @@ pub fn annotate_spectrum(
     let mut peak_annotations: Vec<Option<IonAnnotation>> = vec![None; exp_mz.len()];
 
     // Helper closure: match entries and build TheoreticalIon list
-    let mut match_entries =
-        |entries: &[FragmentEntry]| -> Vec<TheoreticalIon> {
-            let mut ions_out = Vec::with_capacity(entries.len());
-            for entry in entries {
-                let (_, best_idx) = find_best_match(entry.mz, exp_mz, fragment_tolerance);
+    let mut match_entries = |entries: &[FragmentEntry]| -> Vec<TheoreticalIon> {
+        let mut ions_out = Vec::with_capacity(entries.len());
+        for entry in entries {
+            let (_, best_idx) = find_best_match(entry.mz, exp_mz, fragment_tolerance);
 
-                if let Some(idx) = best_idx {
-                    let obs_mz = exp_mz[idx];
-                    let dppm = (obs_mz - entry.mz) / entry.mz * 1e6;
+            if let Some(idx) = best_idx {
+                let obs_mz = exp_mz[idx];
+                let dppm = (obs_mz - entry.mz) / entry.mz * 1e6;
 
-                    let new_annotation = IonAnnotation {
-                        ion_type: entry.ion_type,
-                        ion_number: entry.ion_number,
-                        charge: entry.charge,
-                        theoretical_mz: entry.mz,
-                        delta_mz: obs_mz - entry.mz,
-                        delta_ppm: dppm,
-                    };
-                    match &peak_annotations[idx] {
-                        Some(existing)
-                            if existing.delta_mz.abs() <= new_annotation.delta_mz.abs() => {}
-                        _ => {
-                            peak_annotations[idx] = Some(new_annotation);
-                        }
+                let new_annotation = IonAnnotation {
+                    ion_type: entry.ion_type,
+                    ion_number: entry.ion_number,
+                    charge: entry.charge,
+                    theoretical_mz: entry.mz,
+                    delta_mz: obs_mz - entry.mz,
+                    delta_ppm: dppm,
+                };
+                match &peak_annotations[idx] {
+                    Some(existing) if existing.delta_mz.abs() <= new_annotation.delta_mz.abs() => {}
+                    _ => {
+                        peak_annotations[idx] = Some(new_annotation);
                     }
-
-                    ions_out.push(TheoreticalIon {
-                        ion_type: entry.ion_type,
-                        number: entry.ion_number,
-                        charge: entry.charge,
-                        theoretical_mz: entry.mz,
-                        matched: true,
-                        matched_mz: Some(obs_mz),
-                        delta_ppm: Some(dppm),
-                    });
-                } else {
-                    ions_out.push(TheoreticalIon {
-                        ion_type: entry.ion_type,
-                        number: entry.ion_number,
-                        charge: entry.charge,
-                        theoretical_mz: entry.mz,
-                        matched: false,
-                        matched_mz: None,
-                        delta_ppm: None,
-                    });
                 }
+
+                ions_out.push(TheoreticalIon {
+                    ion_type: entry.ion_type,
+                    number: entry.ion_number,
+                    charge: entry.charge,
+                    theoretical_mz: entry.mz,
+                    matched: true,
+                    matched_mz: Some(obs_mz),
+                    delta_ppm: Some(dppm),
+                });
+            } else {
+                ions_out.push(TheoreticalIon {
+                    ion_type: entry.ion_type,
+                    number: entry.ion_number,
+                    charge: entry.charge,
+                    theoretical_mz: entry.mz,
+                    matched: false,
+                    matched_mz: None,
+                    delta_ppm: None,
+                });
             }
-            ions_out
-        };
+        }
+        ions_out
+    };
 
     let b_ions_out = match_entries(&b_entries);
     let y_ions_out = match_entries(&y_entries);
@@ -545,11 +539,10 @@ pub fn annotate_heavy_spectrum(
 
     // Compute heavy precursor m/z
     let light_precursor_mz = {
-        let neutral = peptide_mass(peptide_sequence).ok_or_else(|| {
-            SearchEngineError::ExecutionError {
+        let neutral =
+            peptide_mass(peptide_sequence).ok_or_else(|| SearchEngineError::ExecutionError {
                 detail: format!("cannot compute mass for '{}'", peptide_sequence),
-            }
-        })?;
+            })?;
         let mod_delta = apply_fixed_mod_mass(
             peptide_sequence,
             fixed_modifications,
@@ -980,8 +973,16 @@ mod tests {
         // Spectrum::new may reject empty arrays; if so, build manually
         // or test with a spectrum that has no precursor.
         if let Ok(spec) = spectrum {
-            let result =
-                annotate_spectrum(&spec, "PEPTIDER", 2, &fragment_tolerance_da(), &[], vec![], false, false);
+            let result = annotate_spectrum(
+                &spec,
+                "PEPTIDER",
+                2,
+                &fragment_tolerance_da(),
+                &[],
+                vec![],
+                false,
+                false,
+            );
             assert!(result.is_err());
         }
         // Also test missing precursor
@@ -1006,12 +1007,11 @@ mod tests {
             .iter()
             .map(|e| e.mz)
             .collect();
-        let b_with_mod: Vec<f64> =
-            generate_b_entries(seq, std::slice::from_ref(&tmt_mod), 1)
-                .unwrap()
-                .iter()
-                .map(|e| e.mz)
-                .collect();
+        let b_with_mod: Vec<f64> = generate_b_entries(seq, std::slice::from_ref(&tmt_mod), 1)
+            .unwrap()
+            .iter()
+            .map(|e| e.mz)
+            .collect();
 
         // All b-ions should be shifted by the TMT mass
         assert_eq!(b_no_mod.len(), b_with_mod.len());
@@ -1079,7 +1079,8 @@ mod tests {
         };
 
         let result =
-            annotate_heavy_spectrum(&spectrum, "AKDEF", 2, &tolerance, &[], &label, false, false).unwrap();
+            annotate_heavy_spectrum(&spectrum, "AKDEF", 2, &tolerance, &[], &label, false, false)
+                .unwrap();
 
         assert_eq!(result.scan_number, 100);
         assert!(result.matched_ions >= 1, "should match at least heavy b2+");
@@ -1102,7 +1103,8 @@ mod tests {
             position: ModPosition::ProteinNTerm,
         };
         // With is_protein_nterm=true, mod should be applied
-        let delta_applied = apply_fixed_mod_mass("PEPTIDE", std::slice::from_ref(&nterm_mod), true, false);
+        let delta_applied =
+            apply_fixed_mod_mass("PEPTIDE", std::slice::from_ref(&nterm_mod), true, false);
         assert!((delta_applied - 42.010565).abs() < 1e-6);
 
         // With is_protein_nterm=false, mod should be skipped

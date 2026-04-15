@@ -110,11 +110,7 @@ fn resolve_modification(
 }
 
 impl ResultParser for DiannParser {
-    fn parse(
-        &self,
-        path: &Path,
-        unimod: &UnimodDb,
-    ) -> Result<Vec<ImportedPsm>, ResultImportError> {
+    fn parse(&self, path: &Path, unimod: &UnimodDb) -> Result<Vec<ImportedPsm>, ResultImportError> {
         if !path.exists() {
             return Err(ResultImportError::FileNotFound {
                 path: path.to_path_buf(),
@@ -145,7 +141,10 @@ impl ResultParser for DiannParser {
             for row in 0..batch.num_rows() {
                 let qvalue = match get_f64(&qvalue_col, row) {
                     Some(v) => v,
-                    None => { null_skip_count += 1; continue; }
+                    None => {
+                        null_skip_count += 1;
+                        continue;
+                    }
                 };
                 if let Some(max_q) = self.filter_qvalue {
                     if qvalue > max_q {
@@ -176,15 +175,24 @@ impl ResultParser for DiannParser {
 
                 let charge = match get_i32(&charge_col, row) {
                     Some(c) if c > 0 => c,
-                    _ => { null_skip_count += 1; continue; }
+                    _ => {
+                        null_skip_count += 1;
+                        continue;
+                    }
                 };
                 let precursor_mz = match get_f64(&mz_col, row) {
                     Some(v) if v > 0.0 => v,
-                    _ => { null_skip_count += 1; continue; }
+                    _ => {
+                        null_skip_count += 1;
+                        continue;
+                    }
                 };
                 let rt_min = match get_f64(&rt_col, row) {
                     Some(v) => v,
-                    None => { null_skip_count += 1; continue; }
+                    None => {
+                        null_skip_count += 1;
+                        continue;
+                    }
                 };
 
                 let mut modifications = Vec::new();
@@ -259,9 +267,7 @@ fn get_string_column(
             .column(idx)
             .as_any()
             .downcast_ref::<StringArray>()
-            .ok_or_else(|| {
-                ResultImportError::Other(format!("column '{name}' is not String type"))
-            })?
+            .ok_or_else(|| ResultImportError::Other(format!("column '{name}' is not String type")))?
             .clone(),
     ))
 }

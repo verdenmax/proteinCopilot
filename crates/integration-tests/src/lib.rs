@@ -138,24 +138,27 @@ pub fn theoretical_fragments(peptide: &str) -> (Vec<IonEntry>, Vec<IonEntry>) {
 ///
 /// Returns peaks that include ~50% of theoretical fragments with realistic intensities,
 /// plus some noise peaks. Useful for annotation tests.
-pub fn synthetic_peaks_for_peptide(
-    peptide: &str,
-    base_intensity: f64,
-) -> Vec<(f64, f64)> {
+pub fn synthetic_peaks_for_peptide(peptide: &str, base_intensity: f64) -> Vec<(f64, f64)> {
     let (b_ions, y_ions) = theoretical_fragments(peptide);
     let mut peaks = Vec::new();
 
     // Add ~half of b ions
     for (i, (_, mz)) in b_ions.iter().enumerate() {
         if i % 2 == 0 {
-            peaks.push((*mz, base_intensity * (0.3 + 0.7 * (i as f64 / b_ions.len() as f64))));
+            peaks.push((
+                *mz,
+                base_intensity * (0.3 + 0.7 * (i as f64 / b_ions.len() as f64)),
+            ));
         }
     }
 
     // Add ~half of y ions (y ions are typically stronger)
     for (i, (_, mz)) in y_ions.iter().enumerate() {
         if i % 2 == 0 {
-            peaks.push((*mz, base_intensity * (0.5 + 0.5 * (i as f64 / y_ions.len() as f64))));
+            peaks.push((
+                *mz,
+                base_intensity * (0.5 + 0.5 * (i as f64 / y_ions.len() as f64)),
+            ));
         }
     }
 

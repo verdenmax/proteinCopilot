@@ -38,6 +38,123 @@ impl SimpleSearchEngine {
         Self
     }
 
+    fn collect_psms_for_spectrum(
+        spectrum: &Spectrum,
+        params: &SearchParams,
+        all_peptides: &[DigestedPeptide],
+        psms: &mut Vec<Psm>,
+    ) {
+        if spectrum.precursors.len() > 1 {
+            // DIA mode: multiple precursors, collect all matches
+            let matches = match_spectrum_all(
+                spectrum,
+                all_peptides,
+                &params.precursor_tolerance,
+                &params.fragment_tolerance,
+                &params.fixed_modifications,
+                &params.variable_modifications,
+                params.max_variable_modifications,
+            );
+            for m in &matches {
+                psms.push(build_psm(spectrum, m, &params.fixed_modifications));
+            }
+        } else {
+            // DDA mode: single precursor, use original function
+            if let Some(m) = match_spectrum(
+                spectrum,
+                all_peptides,
+                &params.precursor_tolerance,
+                &params.fragment_tolerance,
+                &params.fixed_modifications,
+                &params.variable_modifications,
+                params.max_variable_modifications,
+            ) {
+                psms.push(build_psm(spectrum, &m, &params.fixed_modifications));
+            }
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn finalize_search_result(
+        &self,
+        params: &SearchParams,
+        proteins: &[crate::fasta::FastaEntry],
+        input_files: &[PathBuf],
+        run_id: Uuid,
+        start: Instant,
+        on_progress: &dyn Fn(SearchProgress),
+        total_spectra: u64,
+        mut psms: Vec<Psm>,
+    ) -> Result<SearchResult, SearchEngineError> {
+        let report = |stage: &str, pct: f64| {
+            on_progress(SearchProgress {
+                run_id,
+                status: "Running".to_string(),
+                stage: Some(stage.to_string()),
+                progress_pct: Some(pct),
+                elapsed_sec: start.elapsed().as_secs_f64(),
+                estimated_remaining_sec: None,
+            });
+        };
+
+        // Calculate FDR and assign q-values if decoy strategy is active
+        if params.decoy_strategy != DecoyStrategy::None {
+            report("Calculating FDR", 0.88);
+            let scored: Vec<protein_copilot_fdr::calculation::ScoredPsm> = psms
+                .iter()
+                .enumerate()
+                .map(|(i, p)| protein_copilot_fdr::calculation::ScoredPsm {
+                    index: i,
+                    score: p.score,
+                    is_decoy: p.is_decoy,
+                })
+                .collect();
+
+            if let Ok(qvalues) = protein_copilot_fdr::calculate_fdr(&scored) {
+                for (idx, q) in qvalues {
+                    if idx < psms.len() {
+                        psms[idx].q_value = Some(q);
+                    }
+                }
+            } else {
+                tracing::warn!(
+                    "FDR calculation failed (likely no decoy hits); q-values not assigned"
+                );
+            }
+
+            // Remove decoy PSMs from final results
+            psms.retain(|p| !p.is_decoy);
+        }
+
+        // Aggregate peptide and protein level results
+        report("Aggregating results", 0.92);
+        let peptides = aggregate_peptides(&psms);
+        let protein_results = aggregate_proteins(&psms, proteins);
+
+        // Build summary
+        let duration = start.elapsed().as_secs_f64();
+        let summary = build_summary(&psms, total_spectra, duration);
+
+        // Build metadata
+        let engine_info = self.engine_info();
+        let mut metadata =
+            RunMetadata::new(params.clone(), engine_info.clone(), input_files.to_vec());
+        metadata.run_id = run_id;
+        metadata.status = RunStatus::Completed;
+        metadata.duration_sec = Some(duration);
+
+        Ok(SearchResult {
+            run_id,
+            engine_info,
+            params_used: params.clone(),
+            psms,
+            peptides,
+            proteins: protein_results,
+            summary,
+            metadata,
+        })
+    }
+
     /// Core search logic (synchronous, called from async trait method).
     fn run_search(
         &self,
@@ -107,7 +224,13 @@ impl SimpleSearchEngine {
             report("Generating decoy database", 0.10);
             let target_tuples: Vec<(String, String, String)> = proteins
                 .iter()
-                .map(|p| (p.accession.clone(), p.description.clone(), p.sequence.clone()))
+                .map(|p| {
+                    (
+                        p.accession.clone(),
+                        p.description.clone(),
+                        p.sequence.clone(),
+                    )
+                })
                 .collect();
             let decoy_proteins =
                 protein_copilot_fdr::generate_decoys(&target_tuples, params.decoy_strategy);
@@ -124,9 +247,10 @@ impl SimpleSearchEngine {
             }
         }
 
-        // Step 3: Read all spectra from input files
-        report("Reading spectra", 0.15);
-        let mut all_spectra: Vec<Spectrum> = Vec::new();
+        // Step 3: Pre-scan file summaries so we can stream spectra during search
+        // while preserving progress reporting and final summary counts.
+        report("Scanning spectrum summaries", 0.12);
+        let mut total_ms2_spectra: u64 = 0;
         for file_path in input_files {
             let info = protein_copilot_spectrum_io::detect_format(file_path).map_err(|e| {
                 SearchEngineError::IoError {
@@ -134,27 +258,68 @@ impl SimpleSearchEngine {
                 }
             })?;
             let reader = protein_copilot_spectrum_io::create_reader(&info);
-            let spectra = reader
-                .read_all(file_path)
-                .map_err(|e| SearchEngineError::IoError {
-                    detail: e.to_string(),
-                })?;
-            all_spectra.extend(spectra);
+            let summary =
+                reader
+                    .read_summary(file_path)
+                    .map_err(|e| SearchEngineError::IoError {
+                        detail: e.to_string(),
+                    })?;
+            total_ms2_spectra += summary.ms2_count;
         }
 
-        if all_spectra.is_empty() {
+        if total_ms2_spectra == 0 {
             return Err(SearchEngineError::NoInputSpectra);
         }
 
-        self.run_search_on_spectra(
+        report("Reading spectra", 0.15);
+        let mut processed_ms2_spectra: u64 = 0;
+        let mut psms: Vec<Psm> = Vec::new();
+
+        for file_path in input_files {
+            let info = protein_copilot_spectrum_io::detect_format(file_path).map_err(|e| {
+                SearchEngineError::IoError {
+                    detail: e.to_string(),
+                }
+            })?;
+            let reader = protein_copilot_spectrum_io::create_reader(&info);
+            let mut handler = |spectrum: Spectrum| {
+                if spectrum.ms_level != MsLevel::MS2 {
+                    return Ok(true);
+                }
+
+                processed_ms2_spectra += 1;
+                if processed_ms2_spectra % 50 == 0 || processed_ms2_spectra == total_ms2_spectra {
+                    let pct =
+                        0.15 + 0.75 * (processed_ms2_spectra as f64 / total_ms2_spectra as f64);
+                    report(
+                        &format!(
+                            "Matching spectra ({}/{})",
+                            processed_ms2_spectra, total_ms2_spectra
+                        ),
+                        pct,
+                    );
+                }
+
+                Self::collect_psms_for_spectrum(&spectrum, params, &all_peptides, &mut psms);
+                Ok(true)
+            };
+
+            reader
+                .for_each_spectrum(file_path, &mut handler)
+                .map_err(|e| SearchEngineError::IoError {
+                    detail: e.to_string(),
+                })?;
+        }
+
+        self.finalize_search_result(
             params,
-            all_spectra,
-            all_peptides,
             &proteins,
             input_files,
             run_id,
             start,
             on_progress,
+            total_ms2_spectra,
+            psms,
         )
     }
 
@@ -204,92 +369,19 @@ impl SimpleSearchEngine {
                 );
             }
 
-            if spectrum.precursors.len() > 1 {
-                // DIA mode: multiple precursors, collect all matches
-                let matches = match_spectrum_all(
-                    spectrum,
-                    &all_peptides,
-                    &params.precursor_tolerance,
-                    &params.fragment_tolerance,
-                    &params.fixed_modifications,
-                    &params.variable_modifications,
-                    params.max_variable_modifications,
-                );
-                for m in &matches {
-                    psms.push(build_psm(spectrum, m, &params.fixed_modifications));
-                }
-            } else {
-                // DDA mode: single precursor, use original function
-                if let Some(m) = match_spectrum(
-                    spectrum,
-                    &all_peptides,
-                    &params.precursor_tolerance,
-                    &params.fragment_tolerance,
-                    &params.fixed_modifications,
-                    &params.variable_modifications,
-                    params.max_variable_modifications,
-                ) {
-                    psms.push(build_psm(spectrum, &m, &params.fixed_modifications));
-                }
-            }
+            Self::collect_psms_for_spectrum(spectrum, params, &all_peptides, &mut psms);
         }
 
-        // Calculate FDR and assign q-values if decoy strategy is active
-        if params.decoy_strategy != DecoyStrategy::None {
-            report("Calculating FDR", 0.88);
-            let scored: Vec<protein_copilot_fdr::calculation::ScoredPsm> = psms
-                .iter()
-                .enumerate()
-                .map(|(i, p)| protein_copilot_fdr::calculation::ScoredPsm {
-                    index: i,
-                    score: p.score,
-                    is_decoy: p.is_decoy,
-                })
-                .collect();
-
-            if let Ok(qvalues) = protein_copilot_fdr::calculate_fdr(&scored) {
-                for (idx, q) in qvalues {
-                    if idx < psms.len() {
-                        psms[idx].q_value = Some(q);
-                    }
-                }
-            } else {
-                tracing::warn!(
-                    "FDR calculation failed (likely no decoy hits); q-values not assigned"
-                );
-            }
-
-            // Remove decoy PSMs from final results
-            psms.retain(|p| !p.is_decoy);
-        }
-
-        // Aggregate peptide and protein level results
-        report("Aggregating results", 0.92);
-        let peptides = aggregate_peptides(&psms);
-        let protein_results = aggregate_proteins(&psms, proteins);
-
-        // Build summary
-        let duration = start.elapsed().as_secs_f64();
-        let summary = build_summary(&psms, ms2_spectra.len() as u64, duration);
-
-        // Build metadata
-        let engine_info = self.engine_info();
-        let mut metadata =
-            RunMetadata::new(params.clone(), engine_info.clone(), input_files.to_vec());
-        metadata.run_id = run_id;
-        metadata.status = RunStatus::Completed;
-        metadata.duration_sec = Some(duration);
-
-        Ok(SearchResult {
+        self.finalize_search_result(
+            params,
+            proteins,
+            input_files,
             run_id,
-            engine_info,
-            params_used: params.clone(),
+            start,
+            on_progress,
+            total_spectra as u64,
             psms,
-            peptides,
-            proteins: protein_results,
-            summary,
-            metadata,
-        })
+        )
     }
 }
 
@@ -394,7 +486,13 @@ impl SearchEngineAdapter for SimpleSearchEngine {
             report("Generating decoy database", 0.10);
             let target_tuples: Vec<(String, String, String)> = proteins
                 .iter()
-                .map(|p| (p.accession.clone(), p.description.clone(), p.sequence.clone()))
+                .map(|p| {
+                    (
+                        p.accession.clone(),
+                        p.description.clone(),
+                        p.sequence.clone(),
+                    )
+                })
                 .collect();
             let decoy_proteins =
                 protein_copilot_fdr::generate_decoys(&target_tuples, params.decoy_strategy);

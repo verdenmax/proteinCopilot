@@ -57,7 +57,8 @@ impl SpectrumReader for IndexedMgfReader {
 
     fn read_spectrum(&self, path: &Path, scan: u32) -> Result<Spectrum, SpectrumIoError> {
         if path != self.path {
-            let canonical_self = std::fs::canonicalize(&self.path).unwrap_or_else(|_| self.path.clone());
+            let canonical_self =
+                std::fs::canonicalize(&self.path).unwrap_or_else(|_| self.path.clone());
             let canonical_path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
             if canonical_self != canonical_path {
                 tracing::warn!(
@@ -66,12 +67,13 @@ impl SpectrumReader for IndexedMgfReader {
                 );
             }
         }
-        let offset = self.index.get_offset(scan).ok_or_else(|| {
-            SpectrumIoError::ScanNotFound {
+        let offset = self
+            .index
+            .get_offset(scan)
+            .ok_or_else(|| SpectrumIoError::ScanNotFound {
                 path: self.path.clone(),
                 scan,
-            }
-        })?;
+            })?;
         parse_single_mgf_block(&self.path, offset, scan)
     }
 
@@ -106,13 +108,12 @@ fn build_mgf_index(path: &Path) -> Result<ScanIndex, SpectrumIoError> {
     loop {
         let line_start = byte_pos;
         line.clear();
-        let bytes_read =
-            reader
-                .read_line(&mut line)
-                .map_err(|e| SpectrumIoError::IoError {
-                    path: path.to_path_buf(),
-                    source: e,
-                })?;
+        let bytes_read = reader
+            .read_line(&mut line)
+            .map_err(|e| SpectrumIoError::IoError {
+                path: path.to_path_buf(),
+                source: e,
+            })?;
         if bytes_read == 0 {
             break;
         }
@@ -408,8 +409,16 @@ mod tests {
         let mgf_path = dir.path().join("dup.mgf");
         let mut f = std::fs::File::create(&mgf_path).unwrap();
         // Two spectra with same SCANS=5
-        write!(f, "BEGIN IONS\nSCANS=5\nPEPMASS=500.0\n100.0 1000\nEND IONS\n").unwrap();
-        write!(f, "BEGIN IONS\nSCANS=5\nPEPMASS=600.0\n200.0 2000\nEND IONS\n").unwrap();
+        write!(
+            f,
+            "BEGIN IONS\nSCANS=5\nPEPMASS=500.0\n100.0 1000\nEND IONS\n"
+        )
+        .unwrap();
+        write!(
+            f,
+            "BEGIN IONS\nSCANS=5\nPEPMASS=600.0\n200.0 2000\nEND IONS\n"
+        )
+        .unwrap();
         drop(f);
 
         let index = build_mgf_index(&mgf_path).unwrap();

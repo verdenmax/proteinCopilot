@@ -715,8 +715,8 @@ mod tests {
             residues: vec!['C'],
             position: protein_copilot_core::search_params::ModPosition::Anywhere,
         };
-        let modified_mass =
-            peptide.neutral_mass + apply_fixed_mods("PEPTIDCK", std::slice::from_ref(&cam), false, false);
+        let modified_mass = peptide.neutral_mass
+            + apply_fixed_mods("PEPTIDCK", std::slice::from_ref(&cam), false, false);
         assert!((modified_mass - peptide.neutral_mass - 57.021464).abs() < 0.001);
     }
 
@@ -1069,7 +1069,11 @@ mod tests {
             m.total_ions, total_z1,
             "z=2 precursor should only generate z=1 fragments"
         );
-        assert!(m.score > 0.99, "should match all z=1 fragments: {}", m.score);
+        assert!(
+            m.score > 0.99,
+            "should match all z=1 fragments: {}",
+            m.score
+        );
     }
 
     #[test]

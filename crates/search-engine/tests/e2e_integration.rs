@@ -134,9 +134,9 @@ async fn scenario_b_direct_params() {
         },
         decoy_strategy: DecoyStrategy::Reverse,
         acquisition_mode: None,
-            max_variable_modifications: 3,
-            min_peptide_length: 7,
-            max_peptide_length: 50,
+        max_variable_modifications: 3,
+        min_peptide_length: 7,
+        max_peptide_length: 50,
     };
 
     assert!(params.validate().is_ok());
@@ -318,9 +318,9 @@ async fn error_invalid_params() {
         },
         decoy_strategy: DecoyStrategy::Reverse,
         acquisition_mode: None,
-            max_variable_modifications: 3,
-            min_peptide_length: 7,
-            max_peptide_length: 50,
+        max_variable_modifications: 3,
+        min_peptide_length: 7,
+        max_peptide_length: 50,
     };
 
     let engine = SimpleSearchEngine::new();

@@ -36,11 +36,7 @@ struct RawJsonPsm {
 pub struct CustomJsonParser;
 
 impl ResultParser for CustomJsonParser {
-    fn parse(
-        &self,
-        path: &Path,
-        unimod: &UnimodDb,
-    ) -> Result<Vec<ImportedPsm>, ResultImportError> {
+    fn parse(&self, path: &Path, unimod: &UnimodDb) -> Result<Vec<ImportedPsm>, ResultImportError> {
         if !path.exists() {
             return Err(ResultImportError::FileNotFound {
                 path: path.to_path_buf(),
@@ -67,10 +63,7 @@ impl ResultParser for CustomJsonParser {
                     Err(e) => {
                         mod_errors += 1;
                         if mod_errors <= 5 {
-                            tracing::warn!(
-                                "PSM #{i} ({}): modification error: {e}",
-                                raw.sequence
-                            );
+                            tracing::warn!("PSM #{i} ({}): modification error: {e}", raw.sequence);
                         }
                     }
                 }
@@ -92,7 +85,10 @@ impl ResultParser for CustomJsonParser {
         }
 
         if mod_errors > 5 {
-            tracing::warn!("... and {} more modification errors suppressed", mod_errors - 5);
+            tracing::warn!(
+                "... and {} more modification errors suppressed",
+                mod_errors - 5
+            );
         }
         tracing::info!(
             "parsed {} PSMs from custom JSON: {}",

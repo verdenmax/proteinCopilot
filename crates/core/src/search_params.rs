@@ -664,7 +664,10 @@ mod tests {
         p.max_variable_modifications = 11;
         assert!(matches!(
             p.validate(),
-            Err(SearchParamsError::TooManyVariableMods { actual: 11, max: 10 })
+            Err(SearchParamsError::TooManyVariableMods {
+                actual: 11,
+                max: 10
+            })
         ));
     }
 

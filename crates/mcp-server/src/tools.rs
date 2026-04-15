@@ -26,18 +26,20 @@ use protein_copilot_core::search_params::SearchParams;
 use protein_copilot_core::search_result::{SearchResult, SearchResultSummary};
 use protein_copilot_core::spectrum::{AcquisitionMode, Spectrum, SpectrumSummary};
 use protein_copilot_dia_extraction::{
-    extract_dia_precursors as run_dia_extraction,
-    extract_single_spectrum_precursors, DiaExtractionConfig, IsotopePatternExtractor,
-    SingleSpectrumExtractionResult,
+    extract_dia_precursors as run_dia_extraction, extract_single_spectrum_precursors,
+    DiaExtractionConfig, IsotopePatternExtractor, SingleSpectrumExtractionResult,
 };
 use protein_copilot_param_recommend::{ParamRecommender, SearchPreset, UserHints};
 use protein_copilot_report::ReportGenerator;
 use protein_copilot_search_engine::{SearchProgress, SimpleSearchEngine};
 
 use protein_copilot_result_import::{
-    custom_json::CustomJsonParser, converter::build_search_result,
-    diann::DiannParser, scan_matcher::{ScanMatcherConfig, match_scans},
-    unimod::UnimodDb, ImportFormat, ImportResult, ResultParser,
+    converter::build_search_result,
+    custom_json::CustomJsonParser,
+    diann::DiannParser,
+    scan_matcher::{match_scans, ScanMatcherConfig},
+    unimod::UnimodDb,
+    ImportFormat, ImportResult, ResultParser,
 };
 
 // ---------------------------------------------------------------------------
@@ -369,14 +371,18 @@ struct DiaExtractionOutput {
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct ExtractXicInput {
     /// Spectrum file path (mzML only).
-    #[schemars(description = "Path to the spectrum file (.mzML). XIC extraction requires mzML format for MS1+MS2 and isolation window data.")]
+    #[schemars(
+        description = "Path to the spectrum file (.mzML). XIC extraction requires mzML format for MS1+MS2 and isolation window data."
+    )]
     file_path: Option<String>,
     /// Target scan number (1-based).
     #[schemars(description = "Scan number (1-based) to center the XIC around.")]
     scan_number: u32,
     /// Retention time in minutes — alternative to scan_number.
     #[serde(default)]
-    #[schemars(description = "Retention time in minutes. When scan_number is 0, auto-finds the closest MS2 scan matching this RT and precursor_mz.")]
+    #[schemars(
+        description = "Retention time in minutes. When scan_number is 0, auto-finds the closest MS2 scan matching this RT and precursor_mz."
+    )]
     retention_time_min: Option<f64>,
     /// Peptide sequence.
     #[schemars(description = "Peptide amino acid sequence (one-letter codes).")]
@@ -385,35 +391,49 @@ struct ExtractXicInput {
     #[schemars(description = "Precursor charge state.")]
     charge: Option<i32>,
     /// Real precursor m/z (not DIA isolation window center).
-    #[schemars(description = "True precursor m/z. For DIA data, use the PSM-derived value, not the isolation window center.")]
+    #[schemars(
+        description = "True precursor m/z. For DIA data, use the PSM-derived value, not the isolation window center."
+    )]
     precursor_mz: Option<f64>,
     /// Complete modifications list (fixed + applied variable).
-    #[schemars(description = "Modifications applied to this peptide (fixed + variable). If omitted, uses unmodified sequence.")]
+    #[schemars(
+        description = "Modifications applied to this peptide (fixed + variable). If omitted, uses unmodified sequence."
+    )]
     modifications: Option<Vec<protein_copilot_core::search_params::Modification>>,
     /// Number of DIA cycles before/after target (default: 5).
     #[schemars(description = "Number of DIA cycles before and after target scan. Default: 5.")]
     n_cycles: Option<u32>,
     /// Number of top ions to display (default: 6).
-    #[schemars(description = "Number of top fragment ions to display. Default: all (zero-intensity excluded).")]
+    #[schemars(
+        description = "Number of top fragment ions to display. Default: all (zero-intensity excluded)."
+    )]
     top_n_ions: Option<usize>,
     /// Heavy-label type for SILAC comparison.
     #[serde(default, deserialize_with = "deserialize_label_type")]
-    #[schemars(description = "Heavy-label configuration. Use {\"Silac\": {\"heavy_k_delta\": 8.014199, \"heavy_r_delta\": 10.008269}} for standard SILAC.")]
+    #[schemars(
+        description = "Heavy-label configuration. Use {\"Silac\": {\"heavy_k_delta\": 8.014199, \"heavy_r_delta\": 10.008269}} for standard SILAC."
+    )]
     label_type: Option<protein_copilot_xic::LabelType>,
     /// m/z extraction tolerance (default: 20 ppm).
     #[schemars(description = "Mass tolerance for XIC peak extraction. Default: 20 ppm.")]
     extraction_tolerance: Option<protein_copilot_core::search_params::MassTolerance>,
     /// Intensity extraction rule (default: MaxInWindow).
-    #[schemars(description = "How to extract intensity from peaks within tolerance. Default: MaxInWindow.")]
+    #[schemars(
+        description = "How to extract intensity from peaks within tolerance. Default: MaxInWindow."
+    )]
     intensity_rule: Option<protein_copilot_xic::IntensityRule>,
     /// Plotly loading mode (default: Cdn).
-    #[schemars(description = "Plotly.js loading: 'Cdn' (default, smaller) or 'Embedded' (offline).")]
+    #[schemars(
+        description = "Plotly.js loading: 'Cdn' (default, smaller) or 'Embedded' (offline)."
+    )]
     plotly_mode: Option<protein_copilot_xic::PlotlyMode>,
     /// Output HTML file path.
     #[schemars(description = "Output HTML file path. Default: ./output/xic_scan{N}.html")]
     output_path: Option<String>,
     /// Run ID to resolve PSM context (single-file searches only).
-    #[schemars(description = "Run ID from a previous search. Auto-fills peptide, charge, mods, precursor_mz. MVP: single-file searches only.")]
+    #[schemars(
+        description = "Run ID from a previous search. Auto-fills peptide, charge, mods, precursor_mz. MVP: single-file searches only."
+    )]
     run_id: Option<String>,
 }
 
@@ -642,10 +662,7 @@ impl ProteinCopilotServer {
     }
 
     /// Get or create a cached indexed reader for the given file path.
-    fn get_or_create_reader(
-        &self,
-        path: &Path,
-    ) -> Result<Arc<dyn SpectrumReader>, ErrorData> {
+    fn get_or_create_reader(&self, path: &Path) -> Result<Arc<dyn SpectrumReader>, ErrorData> {
         let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
 
         // Check cache first
@@ -1449,9 +1466,9 @@ impl ProteinCopilotServer {
                             decoy_strategy:
                                 protein_copilot_core::search_params::DecoyStrategy::Reverse,
                             acquisition_mode: None,
-            max_variable_modifications: 3,
-            min_peptide_length: 7,
-            max_peptide_length: 50,
+                            max_variable_modifications: 3,
+                            min_peptide_length: 7,
+                            max_peptide_length: 50,
                         },
                         total_psms: None,
                         psms_at_1pct_fdr: None,
@@ -1566,10 +1583,14 @@ impl ProteinCopilotServer {
         let resolved_scan = if input.scan_number == 0 {
             if let Some(rt) = input.retention_time_min {
                 let reader = self.get_or_create_reader(&spectrum_file)?;
-                use protein_copilot_search_engine::chemistry::{residue_mass, PROTON_MASS, WATER_MASS};
-                let base_mass: f64 = peptide_seq.chars().filter_map(residue_mass).sum::<f64>() + WATER_MASS;
+                use protein_copilot_search_engine::chemistry::{
+                    residue_mass, PROTON_MASS, WATER_MASS,
+                };
+                let base_mass: f64 =
+                    peptide_seq.chars().filter_map(residue_mass).sum::<f64>() + WATER_MASS;
                 let mod_mass: f64 = modifications.iter().map(|m| m.mass_delta).sum();
-                let precursor_mz = (base_mass + mod_mass + charge as f64 * PROTON_MASS) / charge as f64;
+                let precursor_mz =
+                    (base_mass + mod_mass + charge as f64 * PROTON_MASS) / charge as f64;
                 protein_copilot_result_import::scan_matcher::find_scan_by_rt(
                     &spectrum_file,
                     rt,
@@ -1645,39 +1666,53 @@ impl ProteinCopilotServer {
                     core_label,
                 );
 
-                // Read nearby spectra to find the heavy scan
+                // Read nearby spectra to find the heavy scan without retaining
+                // full peak arrays for every neighboring MS2 in memory.
                 let scan_start = resolved_scan.saturating_sub(50);
                 let scan_end = resolved_scan + 50;
-                let mut nearby_spectra = Vec::new();
+                let mut best_heavy_scan: Option<(u32, f64)> = None;
                 for s in scan_start..=scan_end {
-                    if let Ok(spec) = reader.read_spectrum(&spectrum_file, s) {
-                        if spec.ms_level == protein_copilot_core::spectrum::MsLevel::MS2 {
-                            nearby_spectra.push(spec);
+                    let Ok(spec) = reader.read_spectrum(&spectrum_file, s) else {
+                        continue;
+                    };
+                    if spec.ms_level != protein_copilot_core::spectrum::MsLevel::MS2 {
+                        continue;
+                    }
+
+                    let rt_delta = (spec.retention_time_min - spectrum.retention_time_min).abs();
+                    let should_replace = best_heavy_scan
+                        .as_ref()
+                        .map(|(_, best_rt_delta)| rt_delta < *best_rt_delta)
+                        .unwrap_or(true);
+
+                    if is_dia {
+                        let matches_heavy = spec
+                            .precursors
+                            .first()
+                            .and_then(|p| p.isolation_window.as_ref())
+                            .is_some_and(|w| {
+                                protein_copilot_xic::heavy::window_contains_mz(w, heavy_prec_mz)
+                            });
+                        if matches_heavy && should_replace {
+                            best_heavy_scan = Some((spec.scan_number, rt_delta));
+                        }
+                    } else {
+                        let Some(prec_mz) = spec.precursors.first().map(|p| p.mz) else {
+                            continue;
+                        };
+                        let ppm_err = ((prec_mz - heavy_prec_mz) / heavy_prec_mz * 1e6).abs();
+                        if ppm_err < 20.0 && should_replace {
+                            best_heavy_scan = Some((spec.scan_number, rt_delta));
                         }
                     }
                 }
 
                 // DIA: find scan whose isolation window contains heavy m/z
                 // DDA: find scan whose selected precursor m/z matches heavy m/z
-                let heavy_scan_num = if is_dia {
-                    protein_copilot_xic::heavy::find_heavy_dia_window_from_spectra(
-                        &nearby_spectra,
-                        spectrum.retention_time_min,
-                        heavy_prec_mz,
-                    )
-                    .map(|(scan, _window)| scan)
-                } else {
-                    protein_copilot_xic::heavy::find_dda_heavy_scan(
-                        &nearby_spectra,
-                        spectrum.retention_time_min,
-                        heavy_prec_mz,
-                        20.0, // 20 ppm tolerance for precursor matching
-                    )
-                };
+                let heavy_scan_num = best_heavy_scan.map(|(scan, _)| scan);
 
                 if let Some(heavy_scan_num) = heavy_scan_num {
-                    if let Ok(heavy_spectrum) =
-                        reader.read_spectrum(&spectrum_file, heavy_scan_num)
+                    if let Ok(heavy_spectrum) = reader.read_spectrum(&spectrum_file, heavy_scan_num)
                     {
                         match protein_copilot_search_engine::annotate::annotate_heavy_spectrum(
                             &heavy_spectrum,
@@ -1706,7 +1741,11 @@ impl ProteinCopilotServer {
                         }
                     }
                 } else {
-                    let mode = if is_dia { "DIA window" } else { "DDA precursor" };
+                    let mode = if is_dia {
+                        "DIA window"
+                    } else {
+                        "DDA precursor"
+                    };
                     tracing::info!(
                         heavy_prec_mz = format!("{:.4}", heavy_prec_mz),
                         mode = mode,
@@ -1731,19 +1770,35 @@ impl ProteinCopilotServer {
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_else(|| spectrum_file.display().to_string());
 
-        let make_peptide_info = |seq: &str, ch: i32, mz: f64| {
-            protein_copilot_report::unified_types::PeptideInfo {
+        let make_peptide_info =
+            |seq: &str, ch: i32, mz: f64| protein_copilot_report::unified_types::PeptideInfo {
                 sequence: seq.to_string(),
                 charge: ch,
                 precursor_mz: mz,
                 total_k: seq.chars().filter(|&c| c == 'K').count() as u32,
                 total_r: seq.chars().filter(|&c| c == 'R').count() as u32,
-            }
+            };
+        let plotly_mode = input
+            .plotly_mode
+            .unwrap_or(protein_copilot_xic::PlotlyMode::Cdn);
+        let render_unified_without_xic = || -> Result<(), ErrorData> {
+            let unified_data = protein_copilot_report::unified_types::UnifiedViewData {
+                source_file: source_file.clone(),
+                annotation: annotation.clone(),
+                xic: None,
+                raw_scans: None,
+                ion_metadata: vec![],
+                peptide_info: make_peptide_info(&peptide_seq, charge, annotation.precursor_mz),
+            };
+            ReportGenerator::render_unified(&unified_data, &out_path, plotly_mode)
+                .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
+            Ok(())
         };
 
         let mut render_mode = "annotation";
         if is_mzml {
-            // mzML → always try XIC extraction; decide based on result quality
+            // mzML → first do a lightweight XIC probe. Only collect raw scan
+            // payloads when the XIC is actually worth rendering.
             let xic_params = protein_copilot_xic::ExtractionParams {
                 mz_tolerance: input.extraction_tolerance.unwrap_or(MassTolerance {
                     value: 20.0,
@@ -1755,7 +1810,7 @@ impl ProteinCopilotServer {
                 intensity_rule: protein_copilot_xic::IntensityRule::MaxInWindow,
             };
 
-            match protein_copilot_xic::extract::extract_xic_with_raw(
+            match protein_copilot_xic::extract::extract_xic(
                 &spectrum_file,
                 resolved_scan,
                 &peptide_seq,
@@ -1763,82 +1818,67 @@ impl ProteinCopilotServer {
                 annotation.precursor_mz,
                 &modifications,
                 &xic_params,
-                20.0,
             ) {
-                Ok((xic_data, raw_scans, ion_metadata)) => {
+                Ok(xic_preview) => {
                     // Check if fragment XIC is meaningful: DDA produces at most
                     // 1 matching MS2 scan per fragment (unique isolation window),
                     // while DIA cycles through shared windows → multiple points.
-                    let xic_meaningful = xic_data
+                    let xic_meaningful = xic_preview
                         .fragment_xic_traces
                         .first()
                         .map(|t| t.data_points.len() > 1)
                         .unwrap_or(false);
 
                     if xic_meaningful {
-                        let unified_data = protein_copilot_report::unified_types::UnifiedViewData {
-                            source_file: source_file.clone(),
-                            annotation: annotation.clone(),
-                            xic: Some(xic_data),
-                            raw_scans: Some(raw_scans),
-                            ion_metadata,
-                            peptide_info: make_peptide_info(
-                                &peptide_seq,
-                                charge,
-                                annotation.precursor_mz,
-                            ),
-                        };
+                        match protein_copilot_xic::extract::extract_xic_with_raw(
+                            &spectrum_file,
+                            resolved_scan,
+                            &peptide_seq,
+                            charge,
+                            annotation.precursor_mz,
+                            &modifications,
+                            &xic_params,
+                            20.0,
+                        ) {
+                            Ok((xic_data, raw_scans, ion_metadata)) => {
+                                let unified_data =
+                                    protein_copilot_report::unified_types::UnifiedViewData {
+                                        source_file: source_file.clone(),
+                                        annotation: annotation.clone(),
+                                        xic: Some(xic_data),
+                                        raw_scans: Some(raw_scans),
+                                        ion_metadata,
+                                        peptide_info: make_peptide_info(
+                                            &peptide_seq,
+                                            charge,
+                                            annotation.precursor_mz,
+                                        ),
+                                    };
 
-                        let plotly_mode =
-                            input.plotly_mode.unwrap_or(protein_copilot_xic::PlotlyMode::Cdn);
-                        ReportGenerator::render_unified(&unified_data, &out_path, plotly_mode)
-                            .map_err(|e| {
-                                mcp_core_err(protein_copilot_core::error::CoreError::from(e))
-                            })?;
-                        render_mode = "unified+xic";
+                                ReportGenerator::render_unified(
+                                    &unified_data,
+                                    &out_path,
+                                    plotly_mode,
+                                )
+                                .map_err(|e| {
+                                    mcp_core_err(protein_copilot_core::error::CoreError::from(e))
+                                })?;
+                                render_mode = "unified+xic";
+                            }
+                            Err(_) => {
+                                render_unified_without_xic()?;
+                                render_mode = "unified";
+                            }
+                        }
                     } else {
                         // XIC not meaningful (likely DDA) → unified without XIC
-                        let unified_data = protein_copilot_report::unified_types::UnifiedViewData {
-                            source_file: source_file.clone(),
-                            annotation: annotation.clone(),
-                            xic: None,
-                            raw_scans: None,
-                            ion_metadata: vec![],
-                            peptide_info: make_peptide_info(
-                                &peptide_seq,
-                                charge,
-                                annotation.precursor_mz,
-                            ),
-                        };
-                        let plotly_mode =
-                            input.plotly_mode.unwrap_or(protein_copilot_xic::PlotlyMode::Cdn);
-                        ReportGenerator::render_unified(&unified_data, &out_path, plotly_mode)
-                            .map_err(|e| {
-                                mcp_core_err(protein_copilot_core::error::CoreError::from(e))
-                            })?;
+                        render_unified_without_xic()?;
                         render_mode = "unified";
                     }
                 }
                 Err(_) => {
                     // XIC extraction failed → unified without XIC
-                    let unified_data = protein_copilot_report::unified_types::UnifiedViewData {
-                        source_file: source_file.clone(),
-                        annotation: annotation.clone(),
-                        xic: None,
-                        raw_scans: None,
-                        ion_metadata: vec![],
-                        peptide_info: make_peptide_info(
-                            &peptide_seq,
-                            charge,
-                            annotation.precursor_mz,
-                        ),
-                    };
-                    let plotly_mode =
-                        input.plotly_mode.unwrap_or(protein_copilot_xic::PlotlyMode::Cdn);
-                    ReportGenerator::render_unified(&unified_data, &out_path, plotly_mode)
-                        .map_err(|e| {
-                            mcp_core_err(protein_copilot_core::error::CoreError::from(e))
-                        })?;
+                    render_unified_without_xic()?;
                     render_mode = "unified";
                 }
             }
@@ -1925,11 +1965,13 @@ impl ProteinCopilotServer {
 
         let result = run_dia_extraction(&spectra, &extractor, &config)
             .map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, e.to_string()))?;
+        let detected_mode = result.detected_mode;
+        let stats = result.stats.clone();
 
         let output_spectra = if input.output_mode == "multi" {
-            result.enhanced_spectra.clone()
+            result.into_enhanced_spectra()
         } else {
-            result.expand_to_pseudo_spectra()
+            result.into_pseudo_spectra()
         };
 
         let output_count = output_spectra.len() as u32;
@@ -1943,18 +1985,18 @@ impl ProteinCopilotServer {
         cache.insert(run_id, output_spectra);
 
         let output = DiaExtractionOutput {
-            detected_mode: format!("{}", result.detected_mode),
-            ms1_count: result.stats.ms1_count,
-            ms2_count: result.stats.ms2_count,
-            total_precursors_extracted: result.stats.total_precursors_extracted,
-            avg_precursors_per_ms2: result.stats.avg_precursors_per_ms2,
-            charge_distribution: result.stats.charge_distribution,
+            detected_mode: format!("{}", detected_mode),
+            ms1_count: stats.ms1_count,
+            ms2_count: stats.ms2_count,
+            total_precursors_extracted: stats.total_precursors_extracted,
+            avg_precursors_per_ms2: stats.avg_precursors_per_ms2,
+            charge_distribution: stats.charge_distribution,
             output_spectra_count: output_count,
             run_id: run_id.to_string(),
             message: format!(
                 "DIA extraction complete. {} precursors extracted from {} MS2 spectra. \
                  Pass dia_run_id=\"{}\" to run_search to search these spectra.",
-                result.stats.total_precursors_extracted, result.stats.ms2_count, run_id
+                stats.total_precursors_extracted, stats.ms2_count, run_id
             ),
         };
 
@@ -2035,60 +2077,61 @@ impl ProteinCopilotServer {
         }
 
         // Resolve mode: run_id or manual
-        let (file_path, peptide, charge, precursor_mz, modifications) =
-            if let Some(ref rid) = input.run_id {
-                let result = self.get_result(&None, &Some(rid.clone()))?;
-                let psm = result
-                    .psms
-                    .iter()
-                    .find(|p| p.spectrum_scan == input.scan_number)
-                    .ok_or_else(|| {
-                        mcp_err(
-                            ErrorCode::INVALID_PARAMS,
-                            format!("no PSM for scan {} in run {}", input.scan_number, rid),
-                        )
-                    })?;
-                let file = result
-                    .metadata
-                    .input_files
-                    .first()
-                    .ok_or_else(|| {
-                        mcp_err(ErrorCode::INTERNAL_ERROR, "no input files in search result")
-                    })?
-                    .clone();
-                (
-                    file,
-                    psm.peptide_sequence.clone(),
-                    psm.charge,
-                    psm.precursor_mz,
-                    psm.modifications.clone(),
-                )
-            } else if let (Some(ref fp), Some(ref pep), Some(ch), Some(mz)) = (
-                &input.file_path,
-                &input.peptide_sequence,
-                input.charge,
-                input.precursor_mz,
-            ) {
-                validate_file_path(fp)?;
-                if pep.trim().is_empty() {
-                    return Err(mcp_err(
+        let (file_path, peptide, charge, precursor_mz, modifications) = if let Some(ref rid) =
+            input.run_id
+        {
+            let result = self.get_result(&None, &Some(rid.clone()))?;
+            let psm = result
+                .psms
+                .iter()
+                .find(|p| p.spectrum_scan == input.scan_number)
+                .ok_or_else(|| {
+                    mcp_err(
                         ErrorCode::INVALID_PARAMS,
-                        "peptide_sequence cannot be empty",
-                    ));
-                }
-                (
-                    PathBuf::from(fp),
-                    pep.clone(),
-                    ch,
-                    mz,
-                    input.modifications.clone().unwrap_or_default(),
-                )
-            } else {
+                        format!("no PSM for scan {} in run {}", input.scan_number, rid),
+                    )
+                })?;
+            let file = result
+                .metadata
+                .input_files
+                .first()
+                .ok_or_else(|| {
+                    mcp_err(ErrorCode::INTERNAL_ERROR, "no input files in search result")
+                })?
+                .clone();
+            (
+                file,
+                psm.peptide_sequence.clone(),
+                psm.charge,
+                psm.precursor_mz,
+                psm.modifications.clone(),
+            )
+        } else if let (Some(ref fp), Some(ref pep), Some(ch), Some(mz)) = (
+            &input.file_path,
+            &input.peptide_sequence,
+            input.charge,
+            input.precursor_mz,
+        ) {
+            validate_file_path(fp)?;
+            if pep.trim().is_empty() {
                 return Err(mcp_err(
+                    ErrorCode::INVALID_PARAMS,
+                    "peptide_sequence cannot be empty",
+                ));
+            }
+            (
+                PathBuf::from(fp),
+                pep.clone(),
+                ch,
+                mz,
+                input.modifications.clone().unwrap_or_default(),
+            )
+        } else {
+            return Err(mcp_err(
                     ErrorCode::INVALID_PARAMS,
                     "provide either 'run_id' + 'scan_number' or 'file_path' + 'scan_number' + 'peptide_sequence' + 'charge' + 'precursor_mz'",
                 ));
-            };
+        };
 
         // Resolve scan_number: if 0 and retention_time_min provided, auto-match via RT
         let resolved_scan = if input.scan_number == 0 {
@@ -2138,9 +2181,10 @@ impl ProteinCopilotServer {
         .map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, e.to_string()))?;
 
         // Render HTML
-        let out_path = input.output_path.map(PathBuf::from).unwrap_or_else(|| {
-            PathBuf::from(format!("output/xic_scan{}.html", resolved_scan))
-        });
+        let out_path = input
+            .output_path
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(format!("output/xic_scan{}.html", resolved_scan)));
 
         let plotly_mode = input
             .plotly_mode
@@ -2214,12 +2258,8 @@ impl ProteinCopilotServer {
 
         // Load Unimod database
         let unimod = if let Some(ref xml_path) = input.unimod_path {
-            UnimodDb::from_xml(Path::new(xml_path)).map_err(|e| {
-                mcp_err(
-                    ErrorCode::INVALID_PARAMS,
-                    format!("unimod.xml error: {e}"),
-                )
-            })?
+            UnimodDb::from_xml(Path::new(xml_path))
+                .map_err(|e| mcp_err(ErrorCode::INVALID_PARAMS, format!("unimod.xml error: {e}")))?
         } else {
             UnimodDb::builtin()
         };
@@ -2333,16 +2373,16 @@ impl ProteinCopilotServer {
 
         // Fix metadata: set status to Completed and record duration
         let duration = start.elapsed().as_secs_f64();
-        search_result.metadata.status =
-            protein_copilot_core::run_metadata::RunStatus::Completed;
+        search_result.metadata.status = protein_copilot_core::run_metadata::RunStatus::Completed;
         search_result.metadata.duration_sec = Some(duration);
 
         // Store in run_cache
         let run_id = search_result.run_id;
         {
-            let mut cache = self.run_cache.lock().map_err(|_| {
-                mcp_err(ErrorCode::INTERNAL_ERROR, "run cache lock poisoned")
-            })?;
+            let mut cache = self
+                .run_cache
+                .lock()
+                .map_err(|_| mcp_err(ErrorCode::INTERNAL_ERROR, "run cache lock poisoned"))?;
             cache.evict_if_full();
             cache.insert(
                 run_id,

@@ -54,11 +54,7 @@ impl IndexedMzMLReader {
 
     /// Seeks to `offset` in the file and parses the single `<spectrum>` node
     /// found there.
-    fn read_spectrum_at_offset(
-        &self,
-        scan: u32,
-        offset: u64,
-    ) -> Result<Spectrum, SpectrumIoError> {
+    fn read_spectrum_at_offset(&self, scan: u32, offset: u64) -> Result<Spectrum, SpectrumIoError> {
         let file = std::fs::File::open(&self.path).map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
                 SpectrumIoError::FileNotFound {
@@ -98,7 +94,8 @@ impl SpectrumReader for IndexedMzMLReader {
 
     fn read_spectrum(&self, path: &Path, scan: u32) -> Result<Spectrum, SpectrumIoError> {
         if path != self.path {
-            let canonical_self = std::fs::canonicalize(&self.path).unwrap_or_else(|_| self.path.clone());
+            let canonical_self =
+                std::fs::canonicalize(&self.path).unwrap_or_else(|_| self.path.clone());
             let canonical_path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
             if canonical_self != canonical_path {
                 tracing::warn!(
@@ -107,12 +104,13 @@ impl SpectrumReader for IndexedMzMLReader {
                 );
             }
         }
-        let offset = self.index.get_offset(scan).ok_or_else(|| {
-            SpectrumIoError::ScanNotFound {
+        let offset = self
+            .index
+            .get_offset(scan)
+            .ok_or_else(|| SpectrumIoError::ScanNotFound {
                 path: self.path.clone(),
                 scan,
-            }
-        })?;
+            })?;
         self.read_spectrum_at_offset(scan, offset)
     }
 
@@ -198,8 +196,7 @@ fn parse_single_spectrum<R: std::io::BufRead>(
                     b"precursor" if in_spectrum => {
                         in_precursor = true;
                         if let Some(spectrum_ref) = get_attr(e, b"spectrumRef") {
-                            cur_precursor_source_scan =
-                                parse_scan_from_spectrum_ref(&spectrum_ref);
+                            cur_precursor_source_scan = parse_scan_from_spectrum_ref(&spectrum_ref);
                         }
                     }
                     b"isolationWindow" if in_precursor => {
@@ -234,8 +231,7 @@ fn parse_single_spectrum<R: std::io::BufRead>(
                         }
                         "MS:1000016" if in_scan => {
                             if let Ok(rt_val) = value.parse::<f64>() {
-                                let unit_acc =
-                                    get_attr(e, b"unitAccession").unwrap_or_default();
+                                let unit_acc = get_attr(e, b"unitAccession").unwrap_or_default();
                                 rt_min = Some(if unit_acc == "UO:0000031" {
                                     rt_val // already minutes
                                 } else if unit_acc == "UO:0000010" {
@@ -360,8 +356,7 @@ fn parse_single_spectrum<R: std::io::BufRead>(
                     }
                     b"binaryDataArray" => {
                         if !binary_text.is_empty() {
-                            let decoded =
-                                decode_binary_array(&binary_text, &array_meta, path)?;
+                            let decoded = decode_binary_array(&binary_text, &array_meta, path)?;
                             if array_meta.is_mz {
                                 mz_array = decoded;
                             } else if array_meta.is_intensity {
@@ -464,9 +459,7 @@ mod tests {
                 idx_spec.intensity_array.len(),
                 std_spec.intensity_array.len()
             );
-            assert!(
-                (idx_spec.retention_time_min - std_spec.retention_time_min).abs() < 0.001
-            );
+            assert!((idx_spec.retention_time_min - std_spec.retention_time_min).abs() < 0.001);
         }
     }
 }

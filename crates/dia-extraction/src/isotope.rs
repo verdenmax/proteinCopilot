@@ -176,7 +176,10 @@ impl PrecursorExtractor for IsotopePatternExtractor {
                 let monoisotopic_mz = indices
                     .iter()
                     .filter_map(|&idx| {
-                        peaks.iter().find(|(i, _, _)| *i == idx).map(|&(_, mz, _)| mz)
+                        peaks
+                            .iter()
+                            .find(|(i, _, _)| *i == idx)
+                            .map(|&(_, mz, _)| mz)
                     })
                     .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
                     .unwrap_or(seed_mz);

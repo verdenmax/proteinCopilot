@@ -97,7 +97,10 @@ mod tests {
     fn escape_script_close_tag() {
         let input = r#"{"val":"</script><b>"}"#;
         let escaped = escape_json_for_html(input);
-        assert!(!escaped.contains("</script>"), "must not contain literal </script>");
+        assert!(
+            !escaped.contains("</script>"),
+            "must not contain literal </script>"
+        );
         assert!(!escaped.contains('<'), "must not contain literal <");
         assert!(!escaped.contains('>'), "must not contain literal >");
     }

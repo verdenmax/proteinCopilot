@@ -326,7 +326,10 @@ mod tests {
         );
         assert_eq!(peptides.len(), 3);
         // First peptide should be protein N-terminal
-        assert!(peptides[0].is_protein_nterm, "first peptide should be N-term");
+        assert!(
+            peptides[0].is_protein_nterm,
+            "first peptide should be N-term"
+        );
         assert!(!peptides[0].is_protein_cterm);
         // Last peptide should be protein C-terminal
         let last = peptides.last().unwrap();

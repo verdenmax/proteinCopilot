@@ -311,11 +311,7 @@ async fn fdr_reverse_decoy_strategy_fw6() {
         assert!(has_qval, "at least some PSMs should have q-values");
 
         // q-values must be monotonically non-decreasing when sorted by score descending
-        let mut scored: Vec<_> = result
-            .psms
-            .iter()
-            .filter(|p| p.q_value.is_some())
-            .collect();
+        let mut scored: Vec<_> = result.psms.iter().filter(|p| p.q_value.is_some()).collect();
         scored.sort_by(|a, b| {
             b.score
                 .partial_cmp(&a.score)

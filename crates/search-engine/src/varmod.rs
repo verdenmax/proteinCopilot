@@ -61,9 +61,7 @@ pub fn find_applicable_sites(
                 }
             }
             ModPosition::AnyNTerm => {
-                if m.residues.is_empty()
-                    || (!chars.is_empty() && m.residues.contains(&chars[0]))
-                {
+                if m.residues.is_empty() || (!chars.is_empty() && m.residues.contains(&chars[0])) {
                     positions.push(usize::MAX);
                 }
             }

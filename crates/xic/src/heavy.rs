@@ -18,7 +18,12 @@ pub fn compute_heavy_precursor_mz(
     peptide_sequence: &str,
     label: &LabelType,
 ) -> f64 {
-    protein_copilot_core::label::compute_heavy_precursor_mz(light_mz, charge, peptide_sequence, label)
+    protein_copilot_core::label::compute_heavy_precursor_mz(
+        light_mz,
+        charge,
+        peptide_sequence,
+        label,
+    )
 }
 
 /// Compute heavy-label target ions from light target ions.
@@ -148,7 +153,10 @@ mod tests {
         // "PEPTIDEK" has 1 K, 0 R
         let heavy = compute_heavy_precursor_mz(500.0, 2, "PEPTIDEK", &silac());
         let expected = 500.0 + 8.014199 / 2.0;
-        assert!((heavy - expected).abs() < 1e-4, "got {heavy}, expected {expected}");
+        assert!(
+            (heavy - expected).abs() < 1e-4,
+            "got {heavy}, expected {expected}"
+        );
     }
 
     #[test]
@@ -290,8 +298,8 @@ mod tests {
         // DDA scans with narrow windows, different precursor m/z values
         let spectra = vec![
             make_dda_spec(100, 10.0, 500.0),   // light
-            make_dda_spec(101, 10.01, 504.01),  // heavy (K+8 at charge 2 ≈ +4.007)
-            make_dda_spec(102, 10.02, 600.0),   // unrelated
+            make_dda_spec(101, 10.01, 504.01), // heavy (K+8 at charge 2 ≈ +4.007)
+            make_dda_spec(102, 10.02, 600.0),  // unrelated
         ];
         // heavy target m/z = 504.007 (light 500 + 8.014/2)
         let result = find_dda_heavy_scan(&spectra, 10.0, 504.007, 20.0);
@@ -302,9 +310,9 @@ mod tests {
     #[test]
     fn find_dda_heavy_scan_picks_closest_rt() {
         let spectra = vec![
-            make_dda_spec(100, 10.0, 504.01),  // matches but far in RT
-            make_dda_spec(200, 15.0, 504.01),  // matches and closer to ref RT=14.0
-            make_dda_spec(300, 20.0, 504.01),  // matches but farther
+            make_dda_spec(100, 10.0, 504.01), // matches but far in RT
+            make_dda_spec(200, 15.0, 504.01), // matches and closer to ref RT=14.0
+            make_dda_spec(300, 20.0, 504.01), // matches but farther
         ];
         let result = find_dda_heavy_scan(&spectra, 14.0, 504.007, 20.0);
         assert_eq!(result.unwrap(), 200);

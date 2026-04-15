@@ -86,11 +86,31 @@ mod tests {
     #[test]
     fn fdr_basic_target_decoy() {
         let psms = vec![
-            ScoredPsm { index: 0, score: 0.9, is_decoy: false },
-            ScoredPsm { index: 1, score: 0.8, is_decoy: false },
-            ScoredPsm { index: 2, score: 0.7, is_decoy: false },
-            ScoredPsm { index: 3, score: 0.3, is_decoy: true },
-            ScoredPsm { index: 4, score: 0.2, is_decoy: true },
+            ScoredPsm {
+                index: 0,
+                score: 0.9,
+                is_decoy: false,
+            },
+            ScoredPsm {
+                index: 1,
+                score: 0.8,
+                is_decoy: false,
+            },
+            ScoredPsm {
+                index: 2,
+                score: 0.7,
+                is_decoy: false,
+            },
+            ScoredPsm {
+                index: 3,
+                score: 0.3,
+                is_decoy: true,
+            },
+            ScoredPsm {
+                index: 4,
+                score: 0.2,
+                is_decoy: true,
+            },
         ];
         let result = calculate_fdr(&psms).unwrap();
 
@@ -104,10 +124,26 @@ mod tests {
     #[test]
     fn fdr_monotonicity_enforced() {
         let psms = vec![
-            ScoredPsm { index: 0, score: 0.9, is_decoy: false },
-            ScoredPsm { index: 1, score: 0.8, is_decoy: true },
-            ScoredPsm { index: 2, score: 0.7, is_decoy: false },
-            ScoredPsm { index: 3, score: 0.6, is_decoy: false },
+            ScoredPsm {
+                index: 0,
+                score: 0.9,
+                is_decoy: false,
+            },
+            ScoredPsm {
+                index: 1,
+                score: 0.8,
+                is_decoy: true,
+            },
+            ScoredPsm {
+                index: 2,
+                score: 0.7,
+                is_decoy: false,
+            },
+            ScoredPsm {
+                index: 3,
+                score: 0.6,
+                is_decoy: false,
+            },
         ];
         let result = calculate_fdr(&psms).unwrap();
 
@@ -148,8 +184,16 @@ mod tests {
     #[test]
     fn fdr_all_targets_zero_fdr() {
         let psms = vec![
-            ScoredPsm { index: 0, score: 0.9, is_decoy: false },
-            ScoredPsm { index: 1, score: 0.8, is_decoy: false },
+            ScoredPsm {
+                index: 0,
+                score: 0.9,
+                is_decoy: false,
+            },
+            ScoredPsm {
+                index: 1,
+                score: 0.8,
+                is_decoy: false,
+            },
         ];
         let result = calculate_fdr(&psms);
         assert!(
@@ -161,9 +205,21 @@ mod tests {
     #[test]
     fn fdr_q_values_bounded() {
         let psms = vec![
-            ScoredPsm { index: 0, score: 0.1, is_decoy: true },
-            ScoredPsm { index: 1, score: 0.2, is_decoy: true },
-            ScoredPsm { index: 2, score: 0.3, is_decoy: false },
+            ScoredPsm {
+                index: 0,
+                score: 0.1,
+                is_decoy: true,
+            },
+            ScoredPsm {
+                index: 1,
+                score: 0.2,
+                is_decoy: true,
+            },
+            ScoredPsm {
+                index: 2,
+                score: 0.3,
+                is_decoy: false,
+            },
         ];
         let result = calculate_fdr(&psms).unwrap();
         for (_, q) in &result {

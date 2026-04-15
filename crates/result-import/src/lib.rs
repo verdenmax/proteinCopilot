@@ -5,13 +5,13 @@
 //! - DIA-NN report.parquet
 //! - pFind .spectra (skeleton)
 
-pub mod error;
-pub mod unimod;
+pub mod converter;
 pub mod custom_json;
 pub mod diann;
+pub mod error;
 pub mod pfind;
 pub mod scan_matcher;
-pub mod converter;
+pub mod unimod;
 
 use std::collections::HashMap;
 use std::path::Path;

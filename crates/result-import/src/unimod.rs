@@ -105,8 +105,7 @@ impl UnimodDb {
                         current_residues.clear();
 
                         for attr in e.attributes().flatten() {
-                            let key =
-                                std::str::from_utf8(attr.key.as_ref()).unwrap_or("");
+                            let key = std::str::from_utf8(attr.key.as_ref()).unwrap_or("");
                             let val = std::str::from_utf8(&attr.value).unwrap_or("");
                             match key {
                                 "record_id" => current_id = val.parse().ok(),
@@ -116,8 +115,7 @@ impl UnimodDb {
                         }
                     } else if local_str == "delta" {
                         for attr in e.attributes().flatten() {
-                            let key =
-                                std::str::from_utf8(attr.key.as_ref()).unwrap_or("");
+                            let key = std::str::from_utf8(attr.key.as_ref()).unwrap_or("");
                             let val = std::str::from_utf8(&attr.value).unwrap_or("");
                             if key == "mono_mass" {
                                 current_mass = val.parse().ok();
@@ -125,14 +123,11 @@ impl UnimodDb {
                         }
                     } else if local_str == "specificity" {
                         for attr in e.attributes().flatten() {
-                            let key =
-                                std::str::from_utf8(attr.key.as_ref()).unwrap_or("");
+                            let key = std::str::from_utf8(attr.key.as_ref()).unwrap_or("");
                             let val = std::str::from_utf8(&attr.value).unwrap_or("");
                             if key == "site" && val.len() == 1 {
                                 let ch = val.chars().next().unwrap();
-                                if ch.is_ascii_uppercase()
-                                    && !current_residues.contains(&ch)
-                                {
+                                if ch.is_ascii_uppercase() && !current_residues.contains(&ch) {
                                     current_residues.push(ch);
                                 }
                             }
@@ -141,8 +136,7 @@ impl UnimodDb {
                 }
                 Ok(Event::End(ref e)) => {
                     let local_name = e.local_name();
-                    let local =
-                        std::str::from_utf8(local_name.as_ref()).unwrap_or("");
+                    let local = std::str::from_utf8(local_name.as_ref()).unwrap_or("");
                     if local == "mod" {
                         if let (Some(id), Some(title), Some(mass)) =
                             (current_id, current_title.take(), current_mass)
@@ -272,8 +266,7 @@ mod tests {
 
     #[test]
     fn from_xml_loads_real_unimod() {
-        let xml_path =
-            Path::new("/home/verden/pfind/2025-fall/code/ms2-met/unimod.xml");
+        let xml_path = Path::new("/home/verden/pfind/2025-fall/code/ms2-met/unimod.xml");
         if !xml_path.exists() {
             eprintln!("skipping XML test: unimod.xml not found");
             return;

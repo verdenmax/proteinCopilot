@@ -129,12 +129,14 @@ pub fn build_index_from_native_mzml(path: &Path) -> Result<Option<ScanIndex>, Sp
         None => return Ok(None), // Not an indexedmzML file
     };
 
-    let index_list_offset: u64 = offset_str.trim().parse().map_err(|_| {
-        SpectrumIoError::IndexParseError {
-            path: path.to_path_buf(),
-            detail: format!("invalid indexListOffset value: '{offset_str}'"),
-        }
-    })?;
+    let index_list_offset: u64 =
+        offset_str
+            .trim()
+            .parse()
+            .map_err(|_| SpectrumIoError::IndexParseError {
+                path: path.to_path_buf(),
+                detail: format!("invalid indexListOffset value: '{offset_str}'"),
+            })?;
 
     // Sanity-check: offset must be within the file and the remaining
     // region must be reasonably small (prevents OOM on corrupted values).
@@ -240,7 +242,9 @@ fn parse_index_list(xml: &str, path: &Path) -> Result<HashMap<u32, u64>, Spectru
                     if let Some(prev_offset) = offsets.insert(scan, byte_offset) {
                         tracing::warn!(
                             "duplicate scan {} in index: offset {} replaced by {}",
-                            scan, prev_offset, byte_offset
+                            scan,
+                            prev_offset,
+                            byte_offset
                         );
                     }
                 }
@@ -327,7 +331,9 @@ pub fn build_index_by_scanning(path: &Path) -> Result<ScanIndex, SpectrumIoError
             if let Some(prev_offset) = offsets.insert(scan, line_start) {
                 tracing::warn!(
                     "duplicate scan {} found while scanning: offset {} replaced by {}",
-                    scan, prev_offset, line_start
+                    scan,
+                    prev_offset,
+                    line_start
                 );
             }
         }
@@ -468,8 +474,8 @@ mod tests {
     fn generate_indexed_fixture(output_path: &std::path::Path) {
         use std::io::Write;
 
-        let source_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/fixtures/small.mzml");
+        let source_path =
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/small.mzml");
         let source = std::fs::read_to_string(&source_path).unwrap();
 
         let mzml_content = source

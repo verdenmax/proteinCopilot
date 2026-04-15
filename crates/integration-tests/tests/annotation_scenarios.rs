@@ -11,7 +11,11 @@ fn assert_annotation_ok(spectrum: &Spectrum, peptide: &str, charge: i32) {
     let tol = default_frag_tolerance();
     let mods: Vec<Modification> = vec![];
     let result = annotate_spectrum(spectrum, peptide, charge, &tol, &mods, vec![], false, false);
-    assert!(result.is_ok(), "annotation should succeed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "annotation should succeed: {:?}",
+        result.err()
+    );
     let ann = result.unwrap();
     assert_eq!(ann.peptide_sequence, peptide);
     assert_eq!(ann.charge, charge);
@@ -25,7 +29,14 @@ fn scenario_1_dda_no_silac_annotates_light_only() {
     let peptide = "PEPTIDEK";
     let precursor_mz = 458.24; // approximate [M+2H]²⁺
     let peaks = synthetic_peaks_for_peptide(peptide, 1000.0);
-    let spectrum = make_ms2(1, 30.0, precursor_mz, 2, Some(dda_window(precursor_mz)), peaks);
+    let spectrum = make_ms2(
+        1,
+        30.0,
+        precursor_mz,
+        2,
+        Some(dda_window(precursor_mz)),
+        peaks,
+    );
 
     let tol = default_frag_tolerance();
     let mods: Vec<Modification> = vec![];
@@ -64,12 +75,8 @@ fn scenario_2_dda_silac_heavy_annotation_succeeds() {
 
     // Heavy annotation should work on a spectrum with shifted peaks
     let heavy_peaks = heavy_shifted_peaks(peptide, &light_peaks, &label);
-    let heavy_prec_mz = protein_copilot_core::label::compute_heavy_precursor_mz(
-        precursor_mz,
-        2,
-        peptide,
-        &label,
-    );
+    let heavy_prec_mz =
+        protein_copilot_core::label::compute_heavy_precursor_mz(precursor_mz, 2, peptide, &label);
     let heavy_spectrum = make_ms2(
         11,
         30.1,
@@ -81,12 +88,27 @@ fn scenario_2_dda_silac_heavy_annotation_succeeds() {
 
     let tol = default_frag_tolerance();
     let mods: Vec<Modification> = vec![];
-    let heavy_ann =
-        annotate_heavy_spectrum(&heavy_spectrum, peptide, 2, &tol, &mods, &label, false, false).unwrap();
+    let heavy_ann = annotate_heavy_spectrum(
+        &heavy_spectrum,
+        peptide,
+        2,
+        &tol,
+        &mods,
+        &label,
+        false,
+        false,
+    )
+    .unwrap();
 
-    assert!(heavy_ann.total_ions > 0, "should have heavy theoretical ions");
+    assert!(
+        heavy_ann.total_ions > 0,
+        "should have heavy theoretical ions"
+    );
     // heavy_ann.precursor_mz is computed from peptide mass, not from input spectrum
-    assert!(heavy_ann.precursor_mz > 0.0, "should have valid heavy precursor m/z");
+    assert!(
+        heavy_ann.precursor_mz > 0.0,
+        "should have valid heavy precursor m/z"
+    );
     // The delta should be positive (K adds mass)
     assert!(
         heavy_ann.precursor_mz > precursor_mz,
@@ -103,7 +125,14 @@ fn scenario_3_dia_no_silac_annotates_light_only() {
     let peptide = "DGFLLDGFPR"; // has R
     let precursor_mz = 547.28;
     let peaks = synthetic_peaks_for_peptide(peptide, 1000.0);
-    let spectrum = make_ms2(1, 45.0, precursor_mz, 2, Some(dia_window(precursor_mz)), peaks);
+    let spectrum = make_ms2(
+        1,
+        45.0,
+        precursor_mz,
+        2,
+        Some(dia_window(precursor_mz)),
+        peaks,
+    );
 
     let tol = default_frag_tolerance();
     let mods: Vec<Modification> = vec![];
@@ -140,12 +169,8 @@ fn scenario_4_dia_silac_heavy_annotation_succeeds() {
 
     // Heavy annotation
     let heavy_peaks = heavy_shifted_peaks(peptide, &light_peaks, &label);
-    let heavy_prec_mz = protein_copilot_core::label::compute_heavy_precursor_mz(
-        precursor_mz,
-        2,
-        peptide,
-        &label,
-    );
+    let heavy_prec_mz =
+        protein_copilot_core::label::compute_heavy_precursor_mz(precursor_mz, 2, peptide, &label);
     let heavy_spectrum = make_ms2(
         21,
         45.1,
@@ -157,8 +182,17 @@ fn scenario_4_dia_silac_heavy_annotation_succeeds() {
 
     let tol = default_frag_tolerance();
     let mods: Vec<Modification> = vec![];
-    let heavy_ann =
-        annotate_heavy_spectrum(&heavy_spectrum, peptide, 2, &tol, &mods, &label, false, false).unwrap();
+    let heavy_ann = annotate_heavy_spectrum(
+        &heavy_spectrum,
+        peptide,
+        2,
+        &tol,
+        &mods,
+        &label,
+        false,
+        false,
+    )
+    .unwrap();
 
     assert!(heavy_ann.total_ions > 0);
 }

@@ -22,8 +22,8 @@ pub fn render_unified_html(
     output_path: &Path,
     plotly_mode: PlotlyMode,
 ) -> Result<(), ReportError> {
-    let json = serde_json::to_string(data)
-        .map_err(|e| ReportError::SerializationError(e.to_string()))?;
+    let json =
+        serde_json::to_string(data).map_err(|e| ReportError::SerializationError(e.to_string()))?;
     let json = crate::escape_json_for_html(&json);
 
     let plotly_src = match plotly_mode {

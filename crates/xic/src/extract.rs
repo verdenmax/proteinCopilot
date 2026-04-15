@@ -12,12 +12,23 @@ use protein_copilot_search_engine::matching::{
     generate_b_ions_with_charge, generate_y_ions_with_charge, within_tolerance,
 };
 
-use crate::{ExtractionParams, IntensityRule, XicData, XicDataPoint, XicError, XicTrace};
 use crate::IonType;
+use crate::{ExtractionParams, IntensityRule, XicData, XicDataPoint, XicError, XicTrace};
 
 /// An MS2 data point: (scan_number, RT_min, extracted_intensities).
 /// Each intensity entry is (intensity, Option<observed_mz>).
 type Ms2Point = (u32, f64, Vec<(f64, Option<f64>)>);
+
+/// Capture raw peak arrays only in a local RT neighborhood around the target scan.
+///
+/// `retention_time_min` is stored in minutes, so this padding must also be in minutes.
+/// Using a large "seconds-shaped" constant here effectively disables the filter and
+/// causes raw peak capture to retain nearly the entire run in memory.
+const RAW_CAPTURE_RT_PADDING_MIN: f64 = 5.0;
+
+fn within_raw_capture_rt_window(rt_min: f64, target_rt_min: f64) -> bool {
+    (rt_min - target_rt_min).abs() <= RAW_CAPTURE_RT_PADDING_MIN
+}
 
 /// A target ion for XIC extraction.
 #[derive(Debug, Clone)]
@@ -57,11 +68,17 @@ pub fn extract_intensity(
         ToleranceUnit::Ppm => target_mz * tolerance.value * 1e-6,
         ToleranceUnit::Da => tolerance.value,
     };
-    let scan_start = match exp_mz[..pos].iter().rposition(|&m| target_mz - m > max_da * 1.5) {
+    let scan_start = match exp_mz[..pos]
+        .iter()
+        .rposition(|&m| target_mz - m > max_da * 1.5)
+    {
         Some(i) => i + 1,
         None => 0,
     };
-    let scan_end = match exp_mz[pos..].iter().position(|&m| m - target_mz > max_da * 1.5) {
+    let scan_end = match exp_mz[pos..]
+        .iter()
+        .position(|&m| m - target_mz > max_da * 1.5)
+    {
         Some(i) => pos + i,
         None => exp_mz.len(),
     };
@@ -199,8 +216,14 @@ pub fn compute_ion_metadata(ions: &[TargetIon], peptide: &str) -> Vec<crate::Ion
                 ion_number: ion.ion_number,
                 charge: ion.charge,
                 light_mz: ion.mz,
-                k_count: fragment_chars.iter().filter(|&&c| c == 'K' || c == 'k').count() as u32,
-                r_count: fragment_chars.iter().filter(|&&c| c == 'R' || c == 'r').count() as u32,
+                k_count: fragment_chars
+                    .iter()
+                    .filter(|&&c| c == 'K' || c == 'k')
+                    .count() as u32,
+                r_count: fragment_chars
+                    .iter()
+                    .filter(|&&c| c == 'R' || c == 'r')
+                    .count() as u32,
             }
         })
         .collect()
@@ -289,7 +312,9 @@ pub fn extract_xic(
         protein_copilot_core::label::total_heavy_delta(peptide_sequence, label).abs() > 1e-6
     });
     let heavy_ions = match &effective_label {
-        Some(label) => crate::heavy::compute_heavy_target_ions(&light_ions, peptide_sequence, label),
+        Some(label) => {
+            crate::heavy::compute_heavy_target_ions(&light_ions, peptide_sequence, label)
+        }
         None => Vec::new(),
     };
 
@@ -510,7 +535,10 @@ pub fn extract_xic(
     let heavy_traces: Vec<XicTrace> = if heavy_ions.is_empty() || heavy_windowed.is_empty() {
         Vec::new()
     } else {
-        let top_labels: Vec<String> = fragment_traces.iter().map(|t| t.ion_label.clone()).collect();
+        let top_labels: Vec<String> = fragment_traces
+            .iter()
+            .map(|t| t.ion_label.clone())
+            .collect();
         heavy_ions
             .iter()
             .enumerate()
@@ -536,16 +564,18 @@ pub fn extract_xic(
     };
 
     // RT range: union of light and heavy MS2 windows
-    let light_rt_range = if let (Some(first), Some(last)) = (light_windowed.first(), light_windowed.last()) {
-        Some((first.1, last.1))
-    } else {
-        None
-    };
-    let heavy_rt_range = if let (Some(first), Some(last)) = (heavy_windowed.first(), heavy_windowed.last()) {
-        Some((first.1, last.1))
-    } else {
-        None
-    };
+    let light_rt_range =
+        if let (Some(first), Some(last)) = (light_windowed.first(), light_windowed.last()) {
+            Some((first.1, last.1))
+        } else {
+            None
+        };
+    let heavy_rt_range =
+        if let (Some(first), Some(last)) = (heavy_windowed.first(), heavy_windowed.last()) {
+            Some((first.1, last.1))
+        } else {
+            None
+        };
     let rt_range = match (light_rt_range, heavy_rt_range) {
         (Some((l_lo, l_hi)), Some((h_lo, h_hi))) => Some((l_lo.min(h_lo), l_hi.max(h_hi))),
         (Some(r), None) | (None, Some(r)) => Some(r),
@@ -689,8 +719,14 @@ pub fn extract_xic_with_raw(
     // Compute dynamic MS1 trim window: must accommodate heavy precursor shift.
     // Heavy shift = (K_count * K_delta + R_count * R_delta) / |charge|
     // Use maximum plausible shift (standard SILAC K+8.015, R+10.009) + 5 Da margin.
-    let k_count = peptide_sequence.chars().filter(|&c| c == 'K' || c == 'k').count() as f64;
-    let r_count = peptide_sequence.chars().filter(|&c| c == 'R' || c == 'r').count() as f64;
+    let k_count = peptide_sequence
+        .chars()
+        .filter(|&c| c == 'K' || c == 'k')
+        .count() as f64;
+    let r_count = peptide_sequence
+        .chars()
+        .filter(|&c| c == 'R' || c == 'r')
+        .count() as f64;
     let max_heavy_shift =
         (k_count * 8.015 + r_count * 10.009) / (charge.unsigned_abs() as f64).max(1.0);
     let effective_ms1_window = ms1_mz_window_da.max(max_heavy_shift + 5.0);
@@ -763,20 +799,22 @@ pub fn extract_xic_with_raw(
                     });
                 }
 
-                // Capture raw MS1 peaks (trimmed to dynamic window around precursor)
-                let (trimmed_mz, trimmed_int) = trim_peaks_to_window(
-                    &spec.mz_array,
-                    &spec.intensity_array,
-                    precursor_mz,
-                    effective_ms1_window,
-                );
-                if !trimmed_mz.is_empty() {
-                    raw_ms1_scans.push(crate::RawScan {
-                        scan_number: spec.scan_number,
-                        retention_time_min: rt,
-                        mz_array: trimmed_mz,
-                        intensity_array: trimmed_int,
-                    });
+                if within_raw_capture_rt_window(rt, target_rt) {
+                    // Capture raw MS1 peaks (trimmed to dynamic window around precursor)
+                    let (trimmed_mz, trimmed_int) = trim_peaks_to_window(
+                        &spec.mz_array,
+                        &spec.intensity_array,
+                        precursor_mz,
+                        effective_ms1_window,
+                    );
+                    if !trimmed_mz.is_empty() {
+                        raw_ms1_scans.push(crate::RawScan {
+                            scan_number: spec.scan_number,
+                            retention_time_min: rt,
+                            mz_array: trimmed_mz,
+                            intensity_array: trimmed_int,
+                        });
+                    }
                 }
             }
             MsLevel::MS2 => {
@@ -822,9 +860,8 @@ pub fn extract_xic_with_raw(
                         ms2_heavy_points.push((spec.scan_number, rt, heavy_intensities));
                     }
 
-                    // Capture raw light MS2 peaks
-                    let rt_close = (rt - target_rt).abs() < 300.0;
-                    if target_window.is_some() || rt_close {
+                    // Capture raw light MS2 peaks only near the target scan.
+                    if within_raw_capture_rt_window(rt, target_rt) {
                         raw_ms2_light_scans.push(crate::RawScan {
                             scan_number: spec.scan_number,
                             retention_time_min: rt,
@@ -858,8 +895,7 @@ pub fn extract_xic_with_raw(
                                 .collect();
                             ms2_heavy_points.push((spec.scan_number, rt, heavy_intensities));
 
-                            let rt_close = (rt - target_rt).abs() < 300.0;
-                            if rt_close {
+                            if within_raw_capture_rt_window(rt, target_rt) {
                                 raw_ms2_heavy_scans.push(crate::RawScan {
                                     scan_number: spec.scan_number,
                                     retention_time_min: rt,
@@ -958,8 +994,10 @@ pub fn extract_xic_with_raw(
     let heavy_traces: Vec<XicTrace> = if heavy_ions.is_empty() || heavy_windowed.is_empty() {
         Vec::new()
     } else {
-        let top_labels: Vec<String> =
-            fragment_traces.iter().map(|t| t.ion_label.clone()).collect();
+        let top_labels: Vec<String> = fragment_traces
+            .iter()
+            .map(|t| t.ion_label.clone())
+            .collect();
         heavy_ions
             .iter()
             .enumerate()
@@ -985,16 +1023,18 @@ pub fn extract_xic_with_raw(
     };
 
     // RT range: union of light and heavy MS2 windows
-    let light_rt_range = if let (Some(first), Some(last)) = (light_windowed.first(), light_windowed.last()) {
-        Some((first.1, last.1))
-    } else {
-        None
-    };
-    let heavy_rt_range = if let (Some(first), Some(last)) = (heavy_windowed.first(), heavy_windowed.last()) {
-        Some((first.1, last.1))
-    } else {
-        None
-    };
+    let light_rt_range =
+        if let (Some(first), Some(last)) = (light_windowed.first(), light_windowed.last()) {
+            Some((first.1, last.1))
+        } else {
+            None
+        };
+    let heavy_rt_range =
+        if let (Some(first), Some(last)) = (heavy_windowed.first(), heavy_windowed.last()) {
+            Some((first.1, last.1))
+        } else {
+            None
+        };
     let rt_range = match (light_rt_range, heavy_rt_range) {
         (Some((l_lo, l_hi)), Some((h_lo, h_hi))) => Some((l_lo.min(h_lo), l_hi.max(h_hi))),
         (Some(r), None) | (None, Some(r)) => Some(r),
@@ -1134,8 +1174,12 @@ mod tests {
             value: 0.05,
             unit: ToleranceUnit::Da,
         };
-        let (intensity, obs_mz) = extract_intensity(200.01, &mz, &int, &tol, IntensityRule::MaxInWindow);
-        assert!((intensity - 200.0).abs() < 0.01, "expected 200.0, got {intensity}");
+        let (intensity, obs_mz) =
+            extract_intensity(200.01, &mz, &int, &tol, IntensityRule::MaxInWindow);
+        assert!(
+            (intensity - 200.0).abs() < 0.01,
+            "expected 200.0, got {intensity}"
+        );
         assert_eq!(obs_mz, Some(200.01), "max peak is at 200.01");
     }
 
@@ -1147,8 +1191,12 @@ mod tests {
             value: 0.05,
             unit: ToleranceUnit::Da,
         };
-        let (intensity, obs_mz) = extract_intensity(200.01, &mz, &int, &tol, IntensityRule::SumInWindow);
-        assert!((intensity - 450.0).abs() < 0.01, "expected 450.0, got {intensity}");
+        let (intensity, obs_mz) =
+            extract_intensity(200.01, &mz, &int, &tol, IntensityRule::SumInWindow);
+        assert!(
+            (intensity - 450.0).abs() < 0.01,
+            "expected 450.0, got {intensity}"
+        );
         assert_eq!(obs_mz, Some(200.01), "nearest peak to target is at 200.01");
     }
 
@@ -1160,8 +1208,12 @@ mod tests {
             value: 0.05,
             unit: ToleranceUnit::Da,
         };
-        let (intensity, obs_mz) = extract_intensity(200.01, &mz, &int, &tol, IntensityRule::NearestPeak);
-        assert!((intensity - 200.0).abs() < 0.01, "expected 200.0, got {intensity}");
+        let (intensity, obs_mz) =
+            extract_intensity(200.01, &mz, &int, &tol, IntensityRule::NearestPeak);
+        assert!(
+            (intensity - 200.0).abs() < 0.01,
+            "expected 200.0, got {intensity}"
+        );
         assert_eq!(obs_mz, Some(200.01), "nearest peak is at 200.01");
     }
 
@@ -1173,7 +1225,8 @@ mod tests {
             value: 0.01,
             unit: ToleranceUnit::Da,
         };
-        let (intensity, obs_mz) = extract_intensity(250.0, &mz, &int, &tol, IntensityRule::MaxInWindow);
+        let (intensity, obs_mz) =
+            extract_intensity(250.0, &mz, &int, &tol, IntensityRule::MaxInWindow);
         assert!((intensity - 0.0).abs() < f64::EPSILON);
         assert_eq!(obs_mz, None, "no match means no observed m/z");
     }
@@ -1184,7 +1237,8 @@ mod tests {
             value: 0.05,
             unit: ToleranceUnit::Da,
         };
-        let (intensity, obs_mz) = extract_intensity(200.0, &[], &[], &tol, IntensityRule::MaxInWindow);
+        let (intensity, obs_mz) =
+            extract_intensity(200.0, &[], &[], &tol, IntensityRule::MaxInWindow);
         assert_eq!(intensity, 0.0);
         assert_eq!(obs_mz, None);
     }
@@ -1197,7 +1251,8 @@ mod tests {
             value: 20.0,
             unit: ToleranceUnit::Ppm,
         };
-        let (intensity, obs_mz) = extract_intensity(500.005, &mz, &int, &tol, IntensityRule::MaxInWindow);
+        let (intensity, obs_mz) =
+            extract_intensity(500.005, &mz, &int, &tol, IntensityRule::MaxInWindow);
         assert!(intensity > 0.0, "should find a peak within 20 ppm");
         assert!(obs_mz.is_some(), "should have observed m/z");
     }
@@ -1255,7 +1310,10 @@ mod tests {
         let ions = build_target_ions("PEPTIDE", &[], 3);
         assert_eq!(ions.len(), 24); // 6 b × 2 charges + 6 y × 2 charges
         let has_double = ions.iter().any(|i| i.charge == 2);
-        assert!(has_double, "charge 3 precursor should produce doubly-charged fragments");
+        assert!(
+            has_double,
+            "charge 3 precursor should produce doubly-charged fragments"
+        );
     }
 
     #[test]
@@ -1306,7 +1364,9 @@ mod tests {
             assert!(
                 (ion.mz - m.light_mz).abs() < 1e-6,
                 "mismatch for {}: ion.mz={}, meta.light_mz={}",
-                m.label, ion.mz, m.light_mz
+                m.label,
+                ion.mz,
+                m.light_mz
             );
         }
     }
@@ -1321,6 +1381,14 @@ mod tests {
         assert!((trimmed_mz[0] - 449.0).abs() < 0.01);
         assert!((trimmed_mz[2] - 451.0).abs() < 0.01);
         assert_eq!(trimmed_int.len(), 3);
+    }
+
+    #[test]
+    fn raw_capture_window_stays_local_to_target_rt() {
+        assert!(within_raw_capture_rt_window(10.0, 14.9));
+        assert!(within_raw_capture_rt_window(10.0, 5.1));
+        assert!(!within_raw_capture_rt_window(10.0, 15.1));
+        assert!(!within_raw_capture_rt_window(10.0, 4.9));
     }
 
     #[test]
@@ -1345,21 +1413,28 @@ mod tests {
             heavy_r_delta: 10.008269,
         };
         let delta = protein_copilot_core::label::total_heavy_delta(peptide, &label);
-        assert!(delta.abs() < 1e-6, "peptide without K/R should have zero delta");
+        assert!(
+            delta.abs() < 1e-6,
+            "peptide without K/R should have zero delta"
+        );
 
         // effective_label filter should exclude this
-        let effective = Some(&label).filter(|l| {
-            protein_copilot_core::label::total_heavy_delta(peptide, l).abs() > 1e-6
-        });
-        assert!(effective.is_none(), "zero-offset label should be filtered out");
+        let effective = Some(&label)
+            .filter(|l| protein_copilot_core::label::total_heavy_delta(peptide, l).abs() > 1e-6);
+        assert!(
+            effective.is_none(),
+            "zero-offset label should be filtered out"
+        );
 
         // With K/R, delta should be non-zero
         let peptide_kr = "PEPTIDEK";
         let delta_kr = protein_copilot_core::label::total_heavy_delta(peptide_kr, &label);
-        assert!(delta_kr.abs() > 1.0, "peptide with K should have non-zero delta");
-        let effective_kr = Some(&label).filter(|l| {
-            protein_copilot_core::label::total_heavy_delta(peptide_kr, l).abs() > 1e-6
-        });
+        assert!(
+            delta_kr.abs() > 1.0,
+            "peptide with K should have non-zero delta"
+        );
+        let effective_kr = Some(&label)
+            .filter(|l| protein_copilot_core::label::total_heavy_delta(peptide_kr, l).abs() > 1e-6);
         assert!(effective_kr.is_some(), "non-zero offset should keep label");
     }
 }

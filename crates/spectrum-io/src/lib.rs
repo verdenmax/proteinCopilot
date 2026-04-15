@@ -21,13 +21,13 @@
 //! ```
 
 pub mod error;
+pub mod index;
+pub mod indexed_mgf;
+pub mod indexed_mzml;
 pub mod mgf;
 pub mod mzml;
 pub mod reader;
 mod util;
-pub mod index;
-pub mod indexed_mgf;
-pub mod indexed_mzml;
 
 pub use error::SpectrumIoError;
 pub use indexed_mgf::IndexedMgfReader;
@@ -178,8 +178,8 @@ mod tests {
 
     #[test]
     fn create_indexed_reader_mzml() {
-        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/fixtures/small.mzml");
+        let path =
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/small.mzml");
         let reader = create_indexed_reader(&path).unwrap();
         let spec = reader.read_spectrum(&path, 5).unwrap();
         assert_eq!(spec.scan_number, 5);
@@ -187,8 +187,8 @@ mod tests {
 
     #[test]
     fn create_indexed_reader_mgf() {
-        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/fixtures/small.mgf");
+        let path =
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/small.mgf");
         let reader = create_indexed_reader(&path).unwrap();
         let spec = reader.read_spectrum(&path, 3).unwrap();
         assert_eq!(spec.scan_number, 3);

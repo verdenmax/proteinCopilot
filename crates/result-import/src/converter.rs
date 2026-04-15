@@ -100,7 +100,11 @@ pub fn build_search_result(
         .values()
         .map(|f| f.ms2_count as u64)
         .sum();
-    let total_spectra = if total_ms2 > 0 { total_ms2 } else { core_psms.len() as u64 };
+    let total_spectra = if total_ms2 > 0 {
+        total_ms2
+    } else {
+        core_psms.len() as u64
+    };
 
     let summary = SearchResultSummary {
         total_spectra_searched: total_spectra,
@@ -252,7 +256,11 @@ fn aggregate_peptides(psms: &[Psm]) -> Vec<PeptideResult> {
         .map(|(seq, agg)| PeptideResult {
             sequence: seq.to_string(),
             protein_accessions: agg.proteins.into_iter().map(|s| s.to_string()).collect(),
-            best_score: if agg.best_score == f64::MIN { 0.0 } else { agg.best_score },
+            best_score: if agg.best_score == f64::MIN {
+                0.0
+            } else {
+                agg.best_score
+            },
             q_value: agg.best_q,
             psm_count: agg.psm_count,
         })

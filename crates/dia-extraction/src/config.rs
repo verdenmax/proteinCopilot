@@ -65,6 +65,11 @@ pub struct DiaExtractionResult {
 }
 
 impl DiaExtractionResult {
+    /// Consume the result and return the enhanced spectra without cloning.
+    pub fn into_enhanced_spectra(self) -> Vec<protein_copilot_core::spectrum::Spectrum> {
+        self.enhanced_spectra
+    }
+
     /// Expand each multi-precursor spectrum into multiple single-precursor pseudo-spectra.
     /// Useful for compatibility with search engines that expect one precursor per spectrum.
     pub fn expand_to_pseudo_spectra(&self) -> Vec<protein_copilot_core::spectrum::Spectrum> {
@@ -76,6 +81,25 @@ impl DiaExtractionResult {
                 for precursor in &spectrum.precursors {
                     let mut ps = spectrum.clone();
                     ps.precursors = vec![precursor.clone()];
+                    pseudo.push(ps);
+                }
+            }
+        }
+        pseudo
+    }
+
+    /// Consume the result and expand multi-precursor spectra into pseudo-spectra.
+    ///
+    /// Spectra that already have zero or one precursor are moved without cloning.
+    pub fn into_pseudo_spectra(self) -> Vec<protein_copilot_core::spectrum::Spectrum> {
+        let mut pseudo = Vec::new();
+        for spectrum in self.enhanced_spectra {
+            if spectrum.precursors.len() <= 1 {
+                pseudo.push(spectrum);
+            } else {
+                for precursor in spectrum.precursors.iter().cloned() {
+                    let mut ps = spectrum.clone();
+                    ps.precursors = vec![precursor];
                     pseudo.push(ps);
                 }
             }

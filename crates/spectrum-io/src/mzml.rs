@@ -211,7 +211,10 @@ pub(crate) fn decode_binary_array(
 // XML attribute helpers
 // ---------------------------------------------------------------------------
 
-pub(crate) fn get_attr<'a>(e: &'a quick_xml::events::BytesStart<'a>, name: &[u8]) -> Option<String> {
+pub(crate) fn get_attr<'a>(
+    e: &'a quick_xml::events::BytesStart<'a>,
+    name: &[u8],
+) -> Option<String> {
     e.attributes()
         .filter_map(|a| a.ok())
         .find(|a| a.key.as_ref() == name)

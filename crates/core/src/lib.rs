@@ -13,10 +13,10 @@
 pub mod ai_decision;
 pub mod engine;
 pub mod error;
+pub mod label;
 pub mod progress;
 pub mod run_metadata;
 pub mod search_params;
 pub mod search_result;
 pub mod spectrum;
-pub mod label;
 pub mod util;

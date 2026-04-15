@@ -293,7 +293,11 @@ fn build_explanation(
     text
 }
 
-fn build_evidence(summary: &SpectrumSummary, instrument: &InstrumentClass, dia_detected: bool) -> Vec<String> {
+fn build_evidence(
+    summary: &SpectrumSummary,
+    instrument: &InstrumentClass,
+    dia_detected: bool,
+) -> Vec<String> {
     let mut evidence = vec![
         format!(
             "m/z range: {:.0}-{:.0}",
