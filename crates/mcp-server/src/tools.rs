@@ -460,6 +460,36 @@ struct PresetsResponse {
     presets: Vec<SearchPreset>,
 }
 
+// --- FASTA Database Management ---
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct ListDatabasesInput {
+    /// Override cache directory. Default: .proteincopilot/databases/
+    #[serde(default)]
+    cache_dir: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct DownloadDatabaseInput {
+    /// Database ID (e.g. "human_swissprot", "mouse_swissprot", "crap")
+    database_id: String,
+    /// Override cache directory. Default: .proteincopilot/databases/
+    #[serde(default)]
+    cache_dir: Option<String>,
+    /// Force re-download even if already cached
+    #[serde(default)]
+    force: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct GetDatabaseInfoInput {
+    /// Database ID to get info for
+    database_id: String,
+    /// Override cache directory. Default: .proteincopilot/databases/
+    #[serde(default)]
+    cache_dir: Option<String>,
+}
+
 /// Input for the import_search_results tool.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct ImportSearchResultsInput {
@@ -499,6 +529,14 @@ fn mcp_core_err(err: protein_copilot_core::error::CoreError) -> ErrorData {
     let suggestion = err.suggestion().to_string();
     let message = format!("{err}\n\nSuggestion: {suggestion}");
     ErrorData::new(ErrorCode::INTERNAL_ERROR, message, None)
+}
+
+fn default_cache_dir(override_dir: &Option<String>) -> std::path::PathBuf {
+    if let Some(ref dir) = override_dir {
+        std::path::PathBuf::from(dir)
+    } else {
+        std::path::PathBuf::from(".proteincopilot/databases")
+    }
 }
 
 /// Helper to create MCP error from any Display error
@@ -2418,5 +2456,56 @@ impl ProteinCopilotServer {
         crate::history::save_entry(&history_entry);
 
         Ok(Json(import_result))
+    }
+
+    // -----------------------------------------------------------------------
+    // FASTA Database Management
+    // -----------------------------------------------------------------------
+
+    /// List all available FASTA databases and their cache status.
+    #[rmcp::tool(
+        name = "list_databases",
+        description = "List all built-in FASTA protein databases (Human, Mouse, E.coli, Yeast, Arabidopsis, cRAP contaminants) with download status. Shows which databases are cached locally and which are available for download."
+    )]
+    fn list_databases(
+        &self,
+        Parameters(input): Parameters<ListDatabasesInput>,
+    ) -> Result<Json<Vec<protein_copilot_fasta_db::DatabaseStatus>>, ErrorData> {
+        let cache_dir = default_cache_dir(&input.cache_dir);
+        protein_copilot_fasta_db::list_databases(&cache_dir)
+            .map(Json)
+            .map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, e))
+    }
+
+    /// Download a FASTA database by ID.
+    #[rmcp::tool(
+        name = "download_database",
+        description = "Download a FASTA protein database by ID (e.g. 'human_swissprot', 'mouse_swissprot', 'ecoli_swissprot', 'yeast_swissprot', 'arabidopsis_swissprot', 'crap'). Downloads from UniProt via HTTPS and caches locally. Returns the local file path for use as database_path in search parameters. Use list_databases first to see available options."
+    )]
+    async fn download_database(
+        &self,
+        Parameters(input): Parameters<DownloadDatabaseInput>,
+    ) -> Result<Json<protein_copilot_fasta_db::DownloadDatabaseResult>, ErrorData> {
+        let cache_dir = default_cache_dir(&input.cache_dir);
+        let force = input.force.unwrap_or(false);
+        protein_copilot_fasta_db::download_database(&input.database_id, &cache_dir, force)
+            .await
+            .map(Json)
+            .map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, e))
+    }
+
+    /// Get detailed info about a cached FASTA database.
+    #[rmcp::tool(
+        name = "get_database_info",
+        description = "Get detailed information about a downloaded FASTA database: protein count, file size, SHA256 hash, download date, and first 5 protein accessions. The database must be downloaded first using download_database."
+    )]
+    fn get_database_info(
+        &self,
+        Parameters(input): Parameters<GetDatabaseInfoInput>,
+    ) -> Result<Json<protein_copilot_fasta_db::DatabaseInfo>, ErrorData> {
+        let cache_dir = default_cache_dir(&input.cache_dir);
+        protein_copilot_fasta_db::get_database_info(&input.database_id, &cache_dir)
+            .map(Json)
+            .map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, e))
     }
 }

@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 /// Status of a database in the combined view.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct DatabaseStatus {
     pub id: String,
     pub species: String,
@@ -27,7 +27,7 @@ pub struct DatabaseStatus {
 }
 
 /// Whether a database is available for download or already cached.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "state")]
 pub enum DownloadStatus {
     Available,
@@ -40,7 +40,7 @@ pub enum DownloadStatus {
 }
 
 /// Information about a cached database.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct DatabaseInfo {
     pub id: String,
     pub species: String,
@@ -54,7 +54,7 @@ pub struct DatabaseInfo {
 }
 
 /// Result returned after downloading a database.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct DownloadDatabaseResult {
     pub id: String,
     pub path: String,
