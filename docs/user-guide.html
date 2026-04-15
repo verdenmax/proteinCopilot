@@ -1,0 +1,627 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ProteinCopilot — 用户使用指南</title>
+<style>
+  :root {
+    --bg: #0d1117; --surface: #161b22; --surface2: #21262d;
+    --border: #30363d; --text: #e6edf3; --text2: #8b949e;
+    --accent: #58a6ff; --green: #3fb950; --orange: #d29922;
+    --red: #f85149; --purple: #bc8cff; --pink: #f778ba;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; }
+
+  /* Navigation */
+  nav { position: fixed; top: 0; left: 0; width: 260px; height: 100vh; background: var(--surface); border-right: 1px solid var(--border); padding: 20px 0; overflow-y: auto; z-index: 10; }
+  nav .logo { padding: 0 20px 20px; border-bottom: 1px solid var(--border); margin-bottom: 10px; }
+  nav .logo h2 { font-size: 18px; color: var(--accent); }
+  nav .logo span { font-size: 12px; color: var(--text2); }
+  nav a { display: block; padding: 8px 20px; color: var(--text2); text-decoration: none; font-size: 14px; transition: all 0.2s; }
+  nav a:hover, nav a.active { color: var(--accent); background: var(--surface2); }
+  nav .section-title { padding: 12px 20px 4px; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--text2); }
+
+  /* Main content */
+  main { margin-left: 260px; padding: 40px 60px; max-width: 1100px; }
+  h1 { font-size: 32px; margin-bottom: 8px; color: var(--text); }
+  h2 { font-size: 24px; margin: 40px 0 16px; padding-bottom: 8px; border-bottom: 1px solid var(--border); color: var(--text); }
+  h3 { font-size: 18px; margin: 24px 0 12px; color: var(--accent); }
+  p { margin-bottom: 12px; color: var(--text); }
+  .subtitle { color: var(--text2); font-size: 16px; margin-bottom: 32px; }
+
+  /* Cards */
+  .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; margin: 16px 0; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 20px; transition: border-color 0.2s; }
+  .card:hover { border-color: var(--accent); }
+  .card h4 { font-size: 16px; margin-bottom: 8px; color: var(--text); }
+  .card p { font-size: 14px; color: var(--text2); margin-bottom: 0; }
+  .card .tag { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px; margin-right: 4px; }
+  .tag-blue { background: #1f3a5f; color: var(--accent); }
+  .tag-green { background: #1a3a2a; color: var(--green); }
+  .tag-orange { background: #3a2a1a; color: var(--orange); }
+  .tag-purple { background: #2a1a3a; color: var(--purple); }
+
+  /* Tool table */
+  table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+  th, td { padding: 10px 14px; text-align: left; border-bottom: 1px solid var(--border); font-size: 14px; }
+  th { background: var(--surface); color: var(--text2); font-weight: 600; position: sticky; top: 0; }
+  td { color: var(--text); }
+  tr:hover td { background: var(--surface); }
+  code { background: var(--surface2); padding: 2px 6px; border-radius: 4px; font-size: 13px; color: var(--accent); font-family: 'JetBrains Mono', 'Fira Code', monospace; }
+
+  /* Flow diagram */
+  .flow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 16px 0; }
+  .flow-step { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 12px 16px; min-width: 120px; text-align: center; }
+  .flow-step .num { display: block; font-size: 20px; font-weight: 700; color: var(--accent); }
+  .flow-step .label { font-size: 12px; color: var(--text2); }
+  .flow-step .tool { font-size: 11px; color: var(--green); font-family: monospace; }
+  .flow-arrow { color: var(--text2); font-size: 20px; }
+
+  /* Code block */
+  pre { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; overflow-x: auto; margin: 12px 0; }
+  pre code { background: none; padding: 0; color: var(--text); font-size: 13px; }
+
+  /* Badge */
+  .badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 16px; font-size: 13px; font-weight: 500; }
+  .badge-ok { background: #1a3a2a; color: var(--green); }
+  .badge-warn { background: #3a2a1a; color: var(--orange); }
+
+  /* Architecture SVG */
+  .arch-diagram { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 24px; margin: 16px 0; overflow-x: auto; }
+  .arch-diagram svg text { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+
+  /* Scenario matrix */
+  .scenario-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 16px 0; }
+  .scenario { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
+  .scenario h5 { font-size: 14px; margin-bottom: 8px; }
+  .scenario p { font-size: 13px; margin-bottom: 4px; }
+
+  /* Responsive */
+  @media (max-width: 900px) {
+    nav { display: none; }
+    main { margin-left: 0; padding: 20px; }
+    .card-grid { grid-template-columns: 1fr; }
+    .scenario-grid { grid-template-columns: 1fr; }
+  }
+
+  /* Section highlight */
+  section { scroll-margin-top: 20px; }
+  .highlight-box { background: linear-gradient(135deg, #1a2332, #161b22); border: 1px solid var(--accent); border-radius: 8px; padding: 20px; margin: 16px 0; }
+  .highlight-box h4 { color: var(--accent); margin-bottom: 8px; }
+
+  /* Stats row */
+  .stats { display: flex; gap: 24px; flex-wrap: wrap; margin: 16px 0; }
+  .stat { text-align: center; }
+  .stat .num { font-size: 28px; font-weight: 700; color: var(--accent); display: block; }
+  .stat .label { font-size: 12px; color: var(--text2); }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="logo">
+    <h2>🧬 ProteinCopilot</h2>
+    <span>v0.1.0 User Guide</span>
+  </div>
+  <div class="section-title">概览</div>
+  <a href="#overview">项目简介</a>
+  <a href="#quickstart">快速开始</a>
+  <a href="#architecture">系统架构</a>
+  <div class="section-title">核心功能</div>
+  <a href="#workflow">搜索工作流</a>
+  <a href="#tools">MCP 工具参考</a>
+  <a href="#databases">FASTA 数据库</a>
+  <a href="#presets">搜索预设</a>
+  <div class="section-title">高级功能</div>
+  <a href="#annotation">谱图注释</a>
+  <a href="#xic">XIC 色谱提取</a>
+  <a href="#dia">DIA 数据支持</a>
+  <a href="#silac">SILAC 分析</a>
+  <a href="#import">外部结果导入</a>
+  <div class="section-title">参考</div>
+  <a href="#crates">Crate 一览</a>
+  <a href="#agents">Agent & Skill</a>
+  <a href="#config">配置说明</a>
+</nav>
+
+<main>
+
+<!-- ==================== Overview ==================== -->
+<section id="overview">
+  <h1>🧬 ProteinCopilot</h1>
+  <p class="subtitle">AI 驱动的蛋白质组学质谱智能搜索平台</p>
+
+  <p>ProteinCopilot 是一个基于 <strong>Rust + MCP 协议</strong> 的蛋白质组学分析平台。用户通过自然语言与 AI 对话，AI 自动编排 19 个 MCP 工具完成从谱图读取到结果解读的全流程。</p>
+
+  <div class="stats">
+    <div class="stat"><span class="num">19</span><span class="label">MCP 工具</span></div>
+    <div class="stat"><span class="num">11</span><span class="label">Rust Crates</span></div>
+    <div class="stat"><span class="num">6</span><span class="label">内置数据库</span></div>
+    <div class="stat"><span class="num">5</span><span class="label">搜索预设</span></div>
+    <div class="stat"><span class="num">250+</span><span class="label">单元测试</span></div>
+    <div class="stat"><span class="num">0</span><span class="label">Clippy 警告</span></div>
+  </div>
+
+  <div class="highlight-box">
+    <h4>🎯 核心设计理念</h4>
+    <p><strong>Rust 负责确定性计算</strong>（谱图解析、搜索执行、FDR 计算），<strong>LLM 负责智能编排</strong>（意图理解、参数推荐、结果解释）。两者通过 MCP 协议严格分层，绝不混淆。</p>
+  </div>
+
+  <h3>支持的数据格式</h3>
+  <div class="card-grid">
+    <div class="card">
+      <h4>📄 MGF</h4>
+      <p>Mascot Generic Format — 文本格式，广泛支持</p>
+      <span class="tag tag-green">DDA</span>
+    </div>
+    <div class="card">
+      <h4>📄 mzML</h4>
+      <p>PSI 标准 XML 格式 — 支持 MS1+MS2、隔离窗口</p>
+      <span class="tag tag-green">DDA</span>
+      <span class="tag tag-blue">DIA</span>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== Quick Start ==================== -->
+<section id="quickstart">
+  <h2>🚀 快速开始</h2>
+
+  <h3>1. 启动 MCP Server</h3>
+  <p>在项目根目录放置 <code>.mcp.json</code> 配置：</p>
+  <pre><code>{
+  "mcpServers": {
+    "protein-copilot": {
+      "command": "cargo",
+      "args": ["run", "--release", "-p", "protein-copilot-mcp-server"],
+      "env": { "RUST_LOG": "info" }
+    }
+  }
+}</code></pre>
+  <p>Copilot CLI 或 Claude Desktop 会自动发现并启动 MCP Server。</p>
+
+  <h3>2. 用自然语言开始分析</h3>
+  <p>直接告诉 AI 你要做什么：</p>
+  <pre><code>"帮我搜索 /data/sample.mzML，使用人的 Swiss-Prot 数据库"
+
+"读取这个 mgf 文件，看看数据质量怎么样"
+
+"有哪些可用的蛋白质数据库？下载小鼠的"
+
+"对 scan 1234 做谱图注释"</code></pre>
+
+  <h3>3. AI 自动编排</h3>
+  <p>AI 会自动调用对应工具，你只需确认关键参数：</p>
+
+  <div class="flow">
+    <div class="flow-step"><span class="num">1</span><span class="label">读取谱图</span><span class="tool">read_spectra</span></div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-step"><span class="num">2</span><span class="label">推荐参数</span><span class="tool">recommend_params</span></div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-step"><span class="num">3</span><span class="label">确认参数</span><span class="tool">👤 用户确认</span></div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-step"><span class="num">4</span><span class="label">执行搜索</span><span class="tool">run_search</span></div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-step"><span class="num">5</span><span class="label">监控进度</span><span class="tool">get_search_status</span></div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-step"><span class="num">6</span><span class="label">解读结果</span><span class="tool">generate_summary</span></div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-step"><span class="num">7</span><span class="label">导出文件</span><span class="tool">export_results</span></div>
+  </div>
+</section>
+
+<!-- ==================== Architecture ==================== -->
+<section id="architecture">
+  <h2>🏗️ 系统架构</h2>
+
+  <div class="arch-diagram">
+    <svg width="800" height="420" viewBox="0 0 800 420">
+      <!-- User layer -->
+      <rect x="250" y="10" width="300" height="50" rx="8" fill="#1f3a5f" stroke="#58a6ff"/>
+      <text x="400" y="40" text-anchor="middle" fill="#58a6ff" font-size="14" font-weight="600">👤 用户 (自然语言)</text>
+
+      <line x1="400" y1="60" x2="400" y2="85" stroke="#30363d" stroke-width="2" marker-end="url(#arrow)"/>
+
+      <!-- MCP Client -->
+      <rect x="200" y="85" width="400" height="50" rx="8" fill="#1a3a2a" stroke="#3fb950"/>
+      <text x="400" y="115" text-anchor="middle" fill="#3fb950" font-size="14" font-weight="600">🤖 MCP Client (Copilot CLI / Claude Desktop)</text>
+
+      <line x1="400" y1="135" x2="400" y2="160" stroke="#30363d" stroke-width="2" marker-end="url(#arrow)"/>
+
+      <!-- Agent layer -->
+      <rect x="150" y="160" width="500" height="50" rx="8" fill="#2a1a3a" stroke="#bc8cff"/>
+      <text x="400" y="190" text-anchor="middle" fill="#bc8cff" font-size="14" font-weight="600">🧠 AI 编排层 (Agent.md + Skill Prompt + LLM)</text>
+
+      <line x1="400" y1="210" x2="400" y2="235" stroke="#30363d" stroke-width="2" marker-end="url(#arrow)"/>
+      <text x="410" y="228" fill="#8b949e" font-size="11">MCP Protocol (JSON-RPC / stdio)</text>
+
+      <!-- MCP Server -->
+      <rect x="100" y="235" width="600" height="55" rx="8" fill="#3a2a1a" stroke="#d29922"/>
+      <text x="400" y="258" text-anchor="middle" fill="#d29922" font-size="14" font-weight="600">⚙️ MCP Server — 19 Tools (Rust)</text>
+      <text x="400" y="278" text-anchor="middle" fill="#8b949e" font-size="11">read_spectra · run_search · annotate_spectrum · extract_xic · list_databases ...</text>
+
+      <!-- Crate boxes -->
+      <g transform="translate(0, 305)">
+        <rect x="20" y="0" width="110" height="40" rx="6" fill="#161b22" stroke="#30363d"/>
+        <text x="75" y="24" text-anchor="middle" fill="#e6edf3" font-size="11">spectrum-io</text>
+
+        <rect x="140" y="0" width="110" height="40" rx="6" fill="#161b22" stroke="#30363d"/>
+        <text x="195" y="24" text-anchor="middle" fill="#e6edf3" font-size="11">search-engine</text>
+
+        <rect x="260" y="0" width="110" height="40" rx="6" fill="#161b22" stroke="#30363d"/>
+        <text x="315" y="24" text-anchor="middle" fill="#e6edf3" font-size="11">param-recommend</text>
+
+        <rect x="380" y="0" width="90" height="40" rx="6" fill="#161b22" stroke="#30363d"/>
+        <text x="425" y="24" text-anchor="middle" fill="#e6edf3" font-size="11">report</text>
+
+        <rect x="480" y="0" width="90" height="40" rx="6" fill="#161b22" stroke="#30363d"/>
+        <text x="525" y="24" text-anchor="middle" fill="#e6edf3" font-size="11">fdr</text>
+
+        <rect x="580" y="0" width="90" height="40" rx="6" fill="#161b22" stroke="#30363d"/>
+        <text x="625" y="24" text-anchor="middle" fill="#e6edf3" font-size="11">xic</text>
+
+        <rect x="680" y="0" width="90" height="40" rx="6" fill="#161b22" stroke="#30363d"/>
+        <text x="725" y="24" text-anchor="middle" fill="#e6edf3" font-size="11">fasta-db</text>
+      </g>
+
+      <!-- Core -->
+      <rect x="200" y="365" width="400" height="40" rx="6" fill="#1f3a5f" stroke="#58a6ff"/>
+      <text x="400" y="390" text-anchor="middle" fill="#58a6ff" font-size="13" font-weight="600">core — 共享领域模型 (Spectrum, SearchParams, PSM, ...)</text>
+
+      <defs><marker id="arrow" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#30363d"/></marker></defs>
+    </svg>
+  </div>
+</section>
+
+<!-- ==================== Workflow ==================== -->
+<section id="workflow">
+  <h2>🔄 搜索工作流</h2>
+
+  <h3>标准 DDA 搜索流程</h3>
+  <pre><code>用户: "帮我搜索 sample.mzML，人类样本"
+
+AI 执行:
+  1. read_spectra("sample.mzML")        → 获取谱图统计
+  2. list_databases()                    → 检查 human_swissprot 缓存
+  3. download_database("human_swissprot") → 下载(如未缓存)
+  4. recommend_params(summary, hints)    → 推荐搜索参数
+  5. [请用户确认参数]
+  6. run_search(params, files, db_path)  → 启动异步搜索
+  7. get_search_status(run_id)           → 轮询进度(每5-10秒)
+  8. generate_summary(run_id)            → 生成 FDR 过滤后摘要
+  9. [向用户解释结果]
+  10. export_results(run_id, "./output") → 导出 TSV/JSON</code></pre>
+
+  <h3>DIA 数据流程</h3>
+  <pre><code>AI 执行:
+  1. read_spectra("dia_sample.mzML")             → 检测 DIA 模式
+  2. extract_dia_precursors("dia_sample.mzML")   → MS1 前体提取
+  3. run_search(params, files, dia_run_id=...)    → 使用提取结果搜索
+  4. generate_summary(run_id)                     → 结果摘要</code></pre>
+
+  <h3>外部结果导入 + 注释</h3>
+  <pre><code>用户: "导入 DIA-NN 的搜索结果，然后注释 scan 1234"
+
+AI 执行:
+  1. import_search_results(result.parquet, mzml_dir) → 导入 + 匹配 scan
+  2. annotate_spectrum(run_id, scan=1234)             → 生成注释 HTML
+  3. extract_xic(run_id, scan=1234)                   → 生成 XIC HTML</code></pre>
+</section>
+
+<!-- ==================== Tools Reference ==================== -->
+<section id="tools">
+  <h2>🔧 MCP 工具参考 (19 个)</h2>
+
+  <h3>📊 谱图分析</h3>
+  <table>
+    <tr><th>工具</th><th>功能</th><th>关键参数</th></tr>
+    <tr><td><code>read_spectra</code></td><td>读取质谱文件统计摘要</td><td>file_path</td></tr>
+    <tr><td><code>get_spectrum</code></td><td>读取单张谱图(scan号)</td><td>file_path, scan_number</td></tr>
+    <tr><td><code>annotate_spectrum</code></td><td>谱图碎片离子注释(HTML)</td><td>run_id+scan 或 file+peptide+charge; 可选 label_type</td></tr>
+    <tr><td><code>extract_xic</code></td><td>XIC 色谱提取(HTML)</td><td>run_id+scan 或 file+peptide+charge+precursor_mz</td></tr>
+  </table>
+
+  <h3>🔍 搜索执行</h3>
+  <table>
+    <tr><th>工具</th><th>功能</th><th>关键参数</th></tr>
+    <tr><td><code>recommend_params</code></td><td>基于数据特征推荐搜索参数</td><td>summary/file_path, hints, database_path</td></tr>
+    <tr><td><code>list_presets</code></td><td>列出 5 种搜索预设</td><td>—</td></tr>
+    <tr><td><code>run_search</code></td><td>启动异步数据库搜索</td><td>input_files, params, database_path</td></tr>
+    <tr><td><code>get_search_status</code></td><td>查询搜索进度</td><td>run_id</td></tr>
+    <tr><td><code>cancel_search</code></td><td>取消搜索</td><td>run_id</td></tr>
+    <tr><td><code>check_engine</code></td><td>检查搜索引擎状态</td><td>—</td></tr>
+  </table>
+
+  <h3>📈 结果处理</h3>
+  <table>
+    <tr><th>工具</th><th>功能</th><th>关键参数</th></tr>
+    <tr><td><code>generate_summary</code></td><td>生成 1% FDR 统计摘要</td><td>run_id</td></tr>
+    <tr><td><code>export_results</code></td><td>导出 PSM/肽段/蛋白 TSV+JSON</td><td>run_id, output_dir</td></tr>
+    <tr><td><code>list_searches</code></td><td>列出历史搜索记录</td><td>limit, status_filter</td></tr>
+  </table>
+
+  <h3>🧬 DIA 支持</h3>
+  <table>
+    <tr><th>工具</th><th>功能</th><th>关键参数</th></tr>
+    <tr><td><code>extract_dia_precursors</code></td><td>DIA MS1 前体离子提取</td><td>file_path, min/max_charge</td></tr>
+    <tr><td><code>extract_spectrum_precursors</code></td><td>单张 MS2 前体提取</td><td>file_path, scan_number</td></tr>
+  </table>
+
+  <h3>📚 数据库管理</h3>
+  <table>
+    <tr><th>工具</th><th>功能</th><th>关键参数</th></tr>
+    <tr><td><code>list_databases</code></td><td>列出 6 个内置数据库及缓存状态</td><td>cache_dir (可选)</td></tr>
+    <tr><td><code>download_database</code></td><td>下载 FASTA 数据库(SHA256 校验)</td><td>database_id, force</td></tr>
+    <tr><td><code>get_database_info</code></td><td>查看已下载数据库详情</td><td>database_id</td></tr>
+  </table>
+
+  <h3>📥 外部导入</h3>
+  <table>
+    <tr><th>工具</th><th>功能</th><th>关键参数</th></tr>
+    <tr><td><code>import_search_results</code></td><td>导入 DIA-NN / pFind / JSON 结果</td><td>result_file, mzml_dir, format</td></tr>
+  </table>
+</section>
+
+<!-- ==================== Databases ==================== -->
+<section id="databases">
+  <h2>📚 内置 FASTA 数据库</h2>
+  <p>从 UniProt 自动下载 Swiss-Prot (Reviewed) 数据库，带 SHA256 校验和本地缓存。</p>
+
+  <table>
+    <tr><th>ID</th><th>物种</th><th>描述</th><th>来源</th></tr>
+    <tr><td><code>human_swissprot</code></td><td>🧑 Human</td><td>人类 reviewed 蛋白质组 (~20,400 条)</td><td>UniProt</td></tr>
+    <tr><td><code>mouse_swissprot</code></td><td>🐭 Mouse</td><td>小鼠 reviewed 蛋白质组 (~17,100 条)</td><td>UniProt</td></tr>
+    <tr><td><code>ecoli_swissprot</code></td><td>🦠 E. coli</td><td>大肠杆菌 K12 reviewed (~4,400 条)</td><td>UniProt</td></tr>
+    <tr><td><code>yeast_swissprot</code></td><td>🍞 Yeast</td><td>酵母 reviewed 蛋白质组 (~6,700 条)</td><td>UniProt</td></tr>
+    <tr><td><code>arabidopsis_swissprot</code></td><td>🌱 Arabidopsis</td><td>拟南芥 reviewed 蛋白质组 (~15,800 条)</td><td>UniProt</td></tr>
+    <tr><td><code>crap</code></td><td>⚠️ Contaminants</td><td>常见污染蛋白 (cRAP)</td><td>GPM</td></tr>
+  </table>
+
+  <h3>使用方式</h3>
+  <pre><code>用户: "有哪些可用的数据库？"        → list_databases
+用户: "下载人类数据库"              → download_database("human_swissprot")
+用户: "看看这个数据库的信息"         → get_database_info("human_swissprot")
+用户: "搜索人类样本"                → 自动检测物种 → 下载 → 搜索</code></pre>
+  <p>缓存目录：<code>.proteincopilot/databases/</code>（项目相对路径）</p>
+</section>
+
+<!-- ==================== Presets ==================== -->
+<section id="presets">
+  <h2>⚡ 搜索参数预设</h2>
+
+  <div class="card-grid">
+    <div class="card">
+      <h4>Standard</h4>
+      <span class="tag tag-green">通用</span>
+      <p>Trypsin · Carbamidomethyl(C) · Oxidation(M) · 10ppm/20ppm</p>
+      <p style="color:var(--text2);font-size:12px">适用：常规蛋白鉴定、HeLa、Shotgun</p>
+    </div>
+    <div class="card">
+      <h4>Phospho</h4>
+      <span class="tag tag-orange">磷酸化</span>
+      <p>Standard + Phospho(STY) 可变修饰</p>
+      <p style="color:var(--text2);font-size:12px">适用：磷酸化富集、信号通路</p>
+    </div>
+    <div class="card">
+      <h4>TMT</h4>
+      <span class="tag tag-blue">标记定量</span>
+      <p>TMT6plex(K, N-term) 固定修饰</p>
+      <p style="color:var(--text2);font-size:12px">适用：TMT 多路复用定量</p>
+    </div>
+    <div class="card">
+      <h4>SILAC</h4>
+      <span class="tag tag-purple">代谢标记</span>
+      <p>Heavy K(+8.014) R(+10.008) 可变修饰</p>
+      <p style="color:var(--text2);font-size:12px">适用：SILAC 定量、蛋白周转</p>
+    </div>
+    <div class="card">
+      <h4>Open Search</h4>
+      <span class="tag tag-orange">开放搜索</span>
+      <p>500 Da 前体偏差 · 发现未知修饰</p>
+      <p style="color:var(--text2);font-size:12px">适用：PTM 发现、质量偏移分析</p>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== Annotation ==================== -->
+<section id="annotation">
+  <h2>🔬 谱图注释</h2>
+  <p><code>annotate_spectrum</code> 生成交互式 HTML，显示 b/y 离子匹配。支持两种模式：</p>
+
+  <div class="card-grid">
+    <div class="card">
+      <h4>模式 1：基于搜索结果</h4>
+      <pre><code>annotate_spectrum(
+  run_id="xxx",
+  scan_number=1234
+)</code></pre>
+      <p>自动从搜索结果获取肽序列、电荷、修饰</p>
+    </div>
+    <div class="card">
+      <h4>模式 2：手动指定</h4>
+      <pre><code>annotate_spectrum(
+  file_path="data.mzML",
+  scan_number=1234,
+  peptide_sequence="PEPTIDE",
+  charge=2
+)</code></pre>
+      <p>无需搜索结果，直接注释</p>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== XIC ==================== -->
+<section id="xic">
+  <h2>📊 XIC 色谱提取</h2>
+  <p><code>extract_xic</code> 提取 MS1 前体和 MS2 碎片离子的色谱图，生成 Plotly.js 交互式 HTML。</p>
+  <p>支持 DIA 多 cycle 提取和 SILAC 轻/重标比较。</p>
+</section>
+
+<!-- ==================== DIA ==================== -->
+<section id="dia">
+  <h2>🔄 DIA 数据支持</h2>
+  <p>ProteinCopilot 自动检测 DIA 数据（隔离窗口宽度 > 5 Da），提供完整的 DIA 分析流程：</p>
+  <ol style="margin:12px 0;padding-left:20px;">
+    <li><code>read_spectra</code> — 自动检测 DIA 模式</li>
+    <li><code>extract_dia_precursors</code> — MS1 同位素模式提取前体候选</li>
+    <li><code>run_search(dia_run_id=...)</code> — 使用提取的伪谱搜索</li>
+    <li>或 <code>import_search_results</code> — 导入 DIA-NN Parquet 结果</li>
+  </ol>
+</section>
+
+<!-- ==================== SILAC ==================== -->
+<section id="silac">
+  <h2>🏷️ SILAC 分析</h2>
+
+  <div class="highlight-box">
+    <h4>⚠️ 关键规则</h4>
+    <p>SILAC 实验中，<code>annotate_spectrum</code> 和 <code>extract_xic</code> <strong>必须传入 <code>label_type</code> 参数</strong>。遗漏会导致 DIA 窗口匹配错误。</p>
+  </div>
+
+  <h3>四种场景矩阵</h3>
+  <div class="scenario-grid">
+    <div class="scenario">
+      <h5>① DDA + 无 SILAC</h5>
+      <p>标准注释谱图 + 标准 XIC</p>
+    </div>
+    <div class="scenario">
+      <h5>② DDA + SILAC</h5>
+      <p>🪞 <strong>Mirror Plot</strong> — 轻/重标镜像对比</p>
+      <p>必须传 <code>label_type: {"Silac": {...}}</code></p>
+    </div>
+    <div class="scenario">
+      <h5>③ DIA + 无 SILAC</h5>
+      <p>标准注释 + DIA cycle XIC</p>
+    </div>
+    <div class="scenario">
+      <h5>④ DIA + SILAC</h5>
+      <p>🪞 Mirror Plot + 双窗口 XIC</p>
+      <p>必须传 <code>label_type: {"Silac": {...}}</code></p>
+    </div>
+  </div>
+
+  <h3>SILAC label_type 示例</h3>
+  <pre><code>{
+  "Silac": {
+    "heavy_k_delta": 8.014199,   // ¹³C₆¹⁵N₂-Lys
+    "heavy_r_delta": 10.008269   // ¹³C₆¹⁵N₄-Arg
+  }
+}</code></pre>
+</section>
+
+<!-- ==================== Import ==================== -->
+<section id="import">
+  <h2>📥 外部结果导入</h2>
+  <p><code>import_search_results</code> 支持三种格式的外部搜索结果导入：</p>
+
+  <table>
+    <tr><th>格式</th><th>文件类型</th><th>说明</th></tr>
+    <tr><td><code>diann_parquet</code></td><td>.parquet</td><td>DIA-NN 输出的 Parquet 文件</td></tr>
+    <tr><td><code>custom_json</code></td><td>.json</td><td>自定义 JSON PSM 列表</td></tr>
+    <tr><td><code>pfind_spectra</code></td><td>.spectra</td><td>pFind 搜索引擎 spectra 文件</td></tr>
+  </table>
+  <p>导入后获得 <code>run_id</code>，可用于 <code>annotate_spectrum</code>、<code>extract_xic</code>、<code>generate_summary</code>。</p>
+</section>
+
+<!-- ==================== Crates ==================== -->
+<section id="crates">
+  <h2>📦 Crate 一览</h2>
+  <table>
+    <tr><th>Crate</th><th>类型</th><th>职责</th></tr>
+    <tr><td><code>core</code></td><td>lib</td><td>共享领域模型：Spectrum, SearchParams, PSM, SearchResult, Modification...</td></tr>
+    <tr><td><code>spectrum-io</code></td><td>lib</td><td>谱图解析：MGF/mzML 流式读取 + 索引随机访问</td></tr>
+    <tr><td><code>param-recommend</code></td><td>lib</td><td>参数推荐规则引擎（确定性，无 LLM）</td></tr>
+    <tr><td><code>search-engine</code></td><td>lib</td><td>搜索引擎：内置 SimpleSearch + pFind adapter 预留</td></tr>
+    <tr><td><code>fdr</code></td><td>lib</td><td>FDR 计算：decoy 生成 + target-decoy 分析 + q-value</td></tr>
+    <tr><td><code>report</code></td><td>lib</td><td>报告生成：统计摘要 + TSV/JSON 导出</td></tr>
+    <tr><td><code>xic</code></td><td>lib</td><td>XIC 色谱提取 + Plotly.js HTML 可视化</td></tr>
+    <tr><td><code>dia-extraction</code></td><td>lib</td><td>DIA 前体提取：MS1 同位素模式检测</td></tr>
+    <tr><td><code>result-import</code></td><td>lib</td><td>外部结果导入：DIA-NN / pFind / JSON</td></tr>
+    <tr><td><code>fasta-db</code></td><td>lib</td><td>FASTA 数据库注册 + 缓存 + 下载</td></tr>
+    <tr><td><code>mcp-server</code></td><td>bin</td><td>MCP Server 组装：19 个工具，stdio 传输</td></tr>
+  </table>
+</section>
+
+<!-- ==================== Agents ==================== -->
+<section id="agents">
+  <h2>🤖 Agent & Skill</h2>
+
+  <h3>领域 Agent</h3>
+  <div class="card-grid">
+    <div class="card">
+      <h4>🧬 proteomics-search</h4>
+      <span class="tag tag-green">主要</span>
+      <p>蛋白质搜索助手 — 完整的从谱图读取到结果解释的全流程编排</p>
+    </div>
+  </div>
+
+  <h3>Skill / Prompt</h3>
+  <div class="card-grid">
+    <div class="card">
+      <h4>basic-search</h4>
+      <span class="tag tag-blue">搜索</span>
+      <p>基础搜索流程：谱图 → 参数推荐 → 数据库选择 → 搜索 → 结果</p>
+    </div>
+    <div class="card">
+      <h4>result-interpretation</h4>
+      <span class="tag tag-blue">解释</span>
+      <p>结果解读：鉴定率评估、质量偏差、修饰分布、诊断指南</p>
+    </div>
+    <div class="card">
+      <h4>spectrum-annotation</h4>
+      <span class="tag tag-purple">注释</span>
+      <p>谱图注释 + SILAC Mirror Plot（4 种场景矩阵）</p>
+    </div>
+    <div class="card">
+      <h4>dia-precursor-extraction</h4>
+      <span class="tag tag-orange">DIA</span>
+      <p>DIA MS1 前体提取流程引导</p>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== Config ==================== -->
+<section id="config">
+  <h2>⚙️ 配置说明</h2>
+
+  <h3>MCP Server 配置 (.mcp.json)</h3>
+  <pre><code>{
+  "mcpServers": {
+    "protein-copilot": {
+      "command": "cargo",
+      "args": ["run", "--release", "-p", "protein-copilot-mcp-server"],
+      "env": {
+        "RUST_LOG": "info"      // 日志级别: trace/debug/info/warn/error
+      }
+    }
+  }
+}</code></pre>
+
+  <h3>搜索引擎</h3>
+  <p>MVP 阶段使用内置 <strong>SimpleSearchEngine</strong>（b/y 离子匹配），后续将接入 pFind 作为生产级搜索引擎。</p>
+
+  <h3>缓存目录</h3>
+  <table>
+    <tr><th>内容</th><th>路径</th></tr>
+    <tr><td>FASTA 数据库缓存</td><td><code>.proteincopilot/databases/</code></td></tr>
+    <tr><td>搜索历史</td><td><code>.proteincopilot/search_history.json</code></td></tr>
+    <tr><td>谱图索引缓存</td><td>与 mzML 同目录的 <code>.idx</code> 文件</td></tr>
+  </table>
+
+  <h3>编译与运行</h3>
+  <pre><code># 编译 (release 模式)
+cargo build --release -p protein-copilot-mcp-server
+
+# 运行测试
+cargo test --workspace              # 全部单元测试
+cargo test -p protein-copilot-fasta-db -- --ignored  # 集成测试(需网络)
+
+# Clippy 检查
+cargo clippy --workspace</code></pre>
+</section>
+
+</main>
+</body>
+</html>
