@@ -15,3 +15,4 @@ tracing = { workspace = true }
 
 [dev-dependencies]
 protein-copilot-core = { workspace = true }
+protein-copilot-fdr = { workspace = true }
