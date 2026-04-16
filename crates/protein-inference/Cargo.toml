@@ -1,0 +1,17 @@
+[package]
+name = "protein-copilot-protein-inference"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Protein inference (parsimony) and protein-level FDR for ProteinCopilot"
+
+[dependencies]
+protein-copilot-core = { workspace = true }
+protein-copilot-fdr = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+protein-copilot-core = { workspace = true }

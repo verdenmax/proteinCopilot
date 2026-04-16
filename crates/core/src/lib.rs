@@ -19,4 +19,5 @@ pub mod run_metadata;
 pub mod search_params;
 pub mod search_result;
 pub mod spectrum;
+pub mod protein_group;
 pub mod util;
