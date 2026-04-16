@@ -165,19 +165,18 @@ mod tests {
 
     #[test]
     fn test_il_equivalence() {
+        // "PEPTIDE" has I at position 5; "PEPTLDE" has L at position 5.
+        // After I→L normalization, both become "PEPTLDE".
         let psms = vec![
             make_psm("PEPTIDE", &["P001"], 10.0, None, false),
-            make_psm("PEPILDE", &["P002"], 8.0, None, false),
+            make_psm("PEPTLDE", &["P002"], 8.0, None, false),
         ];
 
-        // "PEPTIDER": ...I... → normalize → ...L... = "PEPTLDER"
-        // "PEPTLDER": already has L → normalize → "PEPTLDER"
-        // Both should collapse to the same normalized key.
         let map = build_peptide_protein_map(&psms, None).unwrap();
 
-        // Both should normalize to the same key
-        let norm = normalize_il("PEPTIDER");
-        assert_eq!(norm, normalize_il("PEPTLDER"));
+        let norm = normalize_il("PEPTIDE");
+        assert_eq!(norm, "PEPTLDE");
+        assert_eq!(norm, normalize_il("PEPTLDE"));
         assert_eq!(
             map.peptide_to_proteins[&norm].len(),
             2,
