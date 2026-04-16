@@ -21,6 +21,7 @@ use uuid::Uuid;
 use protein_copilot_spectrum_io::reader::SpectrumReader;
 
 use protein_copilot_core::ai_decision::AiDecision;
+use protein_copilot_core::protein_group::InferenceResult;
 use protein_copilot_core::engine::{HealthStatus, SearchEngineAdapter};
 use protein_copilot_core::search_params::SearchParams;
 use protein_copilot_core::search_result::{SearchResult, SearchResultSummary};
@@ -216,6 +217,31 @@ struct ExportResultsInput {
     run_id: Option<String>,
     /// Output directory path
     output_dir: String,
+}
+
+/// Input for the `infer_proteins` MCP tool.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct InferProteinsInput {
+    /// Run ID from a previous search. Uses cached PSMs for inference.
+    #[serde(default)]
+    run_id: Option<String>,
+
+    /// Direct SearchResult (alternative to run_id).
+    #[serde(default)]
+    result: Option<SearchResult>,
+
+    /// Q-value threshold for filtering PSMs before inference (default: 0.01).
+    #[serde(default = "default_qvalue_threshold")]
+    q_value_threshold: Option<f64>,
+
+    /// Path to FASTA database for sequence coverage calculation.
+    /// If not provided, coverage is not calculated.
+    #[serde(default)]
+    fasta_path: Option<String>,
+}
+
+fn default_qvalue_threshold() -> Option<f64> {
+    Some(0.01)
 }
 
 /// Engine status response
@@ -555,6 +581,37 @@ fn default_cache_dir(override_dir: &Option<String>) -> std::path::PathBuf {
 /// Helper to create MCP error from any Display error
 fn mcp_err(code: ErrorCode, err: impl std::fmt::Display) -> ErrorData {
     ErrorData::new(code, err.to_string(), None)
+}
+
+/// Load FASTA sequences into a HashMap<accession, sequence>.
+fn load_fasta_sequences(fasta_path: &str) -> Result<HashMap<String, String>, String> {
+    let content = std::fs::read_to_string(fasta_path)
+        .map_err(|e| format!("Failed to read FASTA file {fasta_path}: {e}"))?;
+
+    let mut sequences = HashMap::new();
+    let mut current_accession = String::new();
+    let mut current_sequence = String::new();
+
+    for line in content.lines() {
+        if let Some(header) = line.strip_prefix('>') {
+            if !current_accession.is_empty() {
+                sequences.insert(current_accession.clone(), current_sequence.clone());
+                current_sequence.clear();
+            }
+            current_accession = header
+                .split_whitespace()
+                .next()
+                .unwrap_or("")
+                .to_string();
+        } else {
+            current_sequence.push_str(line.trim());
+        }
+    }
+    if !current_accession.is_empty() {
+        sequences.insert(current_accession, current_sequence);
+    }
+
+    Ok(sequences)
 }
 
 /// State for a single search run.
@@ -2477,6 +2534,77 @@ impl ProteinCopilotServer {
         crate::history::save_entry(&history_entry);
 
         Ok(Json(import_result))
+    }
+
+    // -----------------------------------------------------------------------
+    // Protein Inference
+    // -----------------------------------------------------------------------
+
+    /// Run protein inference on search results.
+    #[rmcp::tool(
+        name = "infer_proteins",
+        description = "Run protein inference on search results. Performs parsimony analysis, razor peptide assignment, protein-level FDR, and optional sequence coverage. Input: run_id from a previous search or direct SearchResult. Returns protein groups with scores, q-values, and peptide assignments."
+    )]
+    fn infer_proteins(
+        &self,
+        Parameters(input): Parameters<InferProteinsInput>,
+    ) -> Result<Json<InferenceResult>, ErrorData> {
+        let result = self.get_result(&input.result, &input.run_id)?;
+
+        // Build peptide-protein map
+        let map = protein_copilot_protein_inference::mapper::build_peptide_protein_map(
+            &result.psms,
+            input.q_value_threshold,
+        )
+        .map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, e))?;
+
+        // Run parsimony
+        let mut groups = protein_copilot_protein_inference::parsimony::run_parsimony(&map)
+            .map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, e))?;
+
+        // Assign razor peptides
+        let razor_map =
+            protein_copilot_protein_inference::razor::assign_razor_peptides(&mut groups, &map);
+
+        // Calculate protein-level FDR (picked-protein)
+        let fdr_result = protein_copilot_fdr::protein_fdr::calculate_protein_fdr(&groups);
+
+        let mut final_groups = match fdr_result {
+            Ok(fdr) => fdr.groups,
+            Err(e) => {
+                tracing::warn!(
+                    "Protein FDR calculation failed: {e}. Returning groups without q-values."
+                );
+                groups
+            }
+        };
+
+        // Optional: sequence coverage
+        if let Some(fasta_path) = &input.fasta_path {
+            let fasta_sequences =
+                load_fasta_sequences(fasta_path).map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, e))?;
+            protein_copilot_protein_inference::coverage::calculate_coverage(
+                &mut final_groups,
+                &fasta_sequences,
+            );
+        }
+
+        let total_target = final_groups.iter().filter(|g| !g.is_decoy).count() as u64;
+        let total_decoy = final_groups.iter().filter(|g| g.is_decoy).count() as u64;
+        let groups_at_1pct = final_groups
+            .iter()
+            .filter(|g| !g.is_decoy && g.q_value.is_some_and(|q| q <= 0.01))
+            .count() as u64;
+        let unique_peptides_used = map.peptide_to_proteins.len() as u64;
+
+        Ok(Json(InferenceResult {
+            groups: final_groups,
+            razor_map,
+            total_target_groups: total_target,
+            total_decoy_groups: total_decoy,
+            groups_at_1pct_fdr: groups_at_1pct,
+            unique_peptides_used,
+        }))
     }
 
     // -----------------------------------------------------------------------

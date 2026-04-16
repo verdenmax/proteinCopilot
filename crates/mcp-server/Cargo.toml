@@ -20,6 +20,8 @@ protein-copilot-dia-extraction = { workspace = true }
 protein-copilot-xic = { workspace = true }
 protein-copilot-result-import = { workspace = true }
 protein-copilot-fasta-db = { workspace = true }
+protein-copilot-protein-inference = { workspace = true }
+protein-copilot-fdr = { workspace = true }
 
 rmcp = { version = "1.3", features = ["server", "transport-io"] }
 tokio = { workspace = true }
