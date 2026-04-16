@@ -20,7 +20,7 @@ use crate::mapper::PeptideProteinMap;
 /// Also mutates groups in-place to populate their `razor_peptides` field.
 pub fn assign_razor_peptides(
     groups: &mut [ProteinGroup],
-    _map: &PeptideProteinMap,
+    #[allow(unused)] map: &PeptideProteinMap,
 ) -> HashMap<String, String> {
     let mut razor_map: HashMap<String, String> = HashMap::new();
 

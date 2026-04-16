@@ -598,12 +598,18 @@ fn load_fasta_sequences(fasta_path: &str) -> Result<HashMap<String, String>, Str
                 sequences.insert(current_accession.clone(), current_sequence.clone());
                 current_sequence.clear();
             }
-            current_accession = header
+            let acc = header
                 .split_whitespace()
                 .next()
                 .unwrap_or("")
                 .to_string();
-        } else {
+            if acc.is_empty() {
+                tracing::warn!("Skipping FASTA entry with empty accession");
+                current_accession.clear();
+                continue;
+            }
+            current_accession = acc;
+        } else if !line.starts_with('#') && !line.starts_with(';') {
             current_sequence.push_str(line.trim());
         }
     }
