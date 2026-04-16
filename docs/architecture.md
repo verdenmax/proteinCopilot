@@ -133,9 +133,12 @@ proteinCopilot/
 │   ├── search-engine/                 ← [lib] 搜索引擎 adapter 层
 │   ├── report/                        ← [lib] 结果摘要与导出
 │   ├── dia-extraction/                ← [lib] DIA 前体离子提取
-│   ├── fdr/                           ← [lib] FDR 计算（decoy 生成 + TDA + q-value）
+│   ├── fdr/                           ← [lib] FDR 计算（PSM/肽段/蛋白 三级）
+│   ├── protein-inference/             ← [lib] 蛋白推断（parsimony + razor + 覆盖率）
 │   ├── xic/                           ← [lib] XIC 提取与可视化（Plotly.js HTML）
 │   ├── result-import/                 ← [lib] 外部搜索结果导入（DIA-NN / custom JSON）
+│   ├── fasta-db/                      ← [lib] FASTA 数据库管理（注册表 + 下载 + 缓存）
+│   ├── integration-tests/             ← [lib] 集成测试
 │   └── mcp-server/                    ← [bin] MCP Server（组装所有 tool）
 ```
 
@@ -579,7 +582,58 @@ result-import::
 - **下游兼容**：转换后的 SearchResult 与 run_search 产生的结果结构完全一致，可直接用于所有下游 tool
 - 返回类型统一使用 `Result<Json<T>, ErrorData>`
 
-**依赖**：`core`, `spectrum-io`, `param-recommend`, `search-engine`, `dia-extraction`, `report`, `rmcp` v1.3, `tokio`, `tracing`
+**依赖**：`core`, `spectrum-io`, `param-recommend`, `search-engine`, `dia-extraction`, `report`, `protein-inference`, `fdr`, `fasta-db`, `rmcp` v1.3, `tokio`, `tracing`
+
+### 3.11 `protein-inference`（lib crate）
+
+**职责**：从 PSM 列表执行蛋白推断，产出最小蛋白组列表。
+
+**子模块**：
+
+| 模块 | 功能 |
+|------|------|
+| `mapper` | 构建肽段↔蛋白质双向映射图（I/L 等价、q-value 过滤、decoy 分类） |
+| `parsimony` | 贪心集合覆盖：合并不可区分蛋白 → 移除子集 → 最小蛋白集 |
+| `razor` | 共享肽段分配给证据最强蛋白组（按 unique 肽段数 > 分数 > 字母序） |
+| `coverage` | 序列覆盖率计算（肽段定位到 FASTA 序列，I/L 归一化） |
+
+**核心数据结构**（定义在 `core`）：
+- `ProteinGroup`：leader + members + peptides (unique/shared/razor) + score + q_value + coverage
+- `InferenceResult`：groups + razor_map + 统计信息
+
+**设计决策**：
+- 肽段的 I/L 等价处理：所有肽段序列 I→L 归一化后再比较
+- Decoy 前缀固定为 `REV_`，与整个项目一致
+- 蛋白组 leader 选择：字母序最先的 accession（确定性输出）
+- 蛋白打分：组内最佳肽段分数
+
+**依赖**：`core`, `thiserror`, `tracing`
+
+### 3.12 `fasta-db`（lib crate）
+
+**职责**：FASTA 蛋白数据库管理——内置物种库注册表、HTTPS 下载、本地文件缓存。
+
+**功能**：
+- 内置 UniProt 常用物种数据库注册表（Human, Mouse, E. coli, Yeast 等）
+- HTTPS 下载 + 自动缓存到 `~/.proteincopilot/databases/`
+- 缓存查询（已下载、大小、路径）
+
+**依赖**：`reqwest`, `serde`, `tracing`
+
+### 3.13 `fdr` 扩展（三级 FDR）
+
+在 MVP 的 PSM 级 FDR 基础上，新增：
+
+| 模块 | 功能 |
+|------|------|
+| `peptide_fdr` | 肽段级 FDR：提取最优肽段分数 → TDC 竞争 → q-value |
+| `protein_fdr` | 蛋白级 FDR：picked-protein 方法（target/decoy 配对竞争 → FDR） |
+
+**Picked-protein 算法**：
+1. Target 蛋白组与 `REV_` 前缀的 decoy 配对
+2. 每对中高分者胜出（同分 → target 胜）
+3. 对胜出者执行标准 TDC FDR 计算
+4. 无配对 target 自动胜出（q=0）
 
 ---
 
