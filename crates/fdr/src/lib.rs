@@ -10,7 +10,9 @@
 pub mod calculation;
 pub mod decoy;
 pub mod error;
+pub mod peptide_fdr;
 
 pub use calculation::calculate_fdr;
 pub use decoy::{generate_decoys, DecoyProtein};
 pub use error::FdrError;
+pub use peptide_fdr::{calculate_peptide_fdr, extract_unique_peptides, PeptideFdrResult, PeptideScore};
