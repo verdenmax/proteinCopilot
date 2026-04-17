@@ -276,7 +276,8 @@ pub struct SearchParams {
     #[serde(default = "default_max_peptide_length")]
     pub max_peptide_length: u32,
 
-    /// Search engine to use. `None` means default engine (SimpleSearch).
+    /// Search engine to use. Valid values: `"Sage"` (production, sage-core library),
+    /// `"SimpleSearch"` (built-in MVP engine). Case-insensitive. Default: `"SimpleSearch"`.
     #[serde(default)]
     pub engine: Option<String>,
 }

@@ -24,8 +24,8 @@ pub fn spectrum_to_raw(spec: &Spectrum, file_id: usize) -> RawSpectrum {
         .map(|p| {
             let charge = p.charge.map(|c| c.unsigned_abs() as u8);
             let isolation_window = p.isolation_window.as_ref().map(|iw| {
-                let half_width = ((iw.lower_offset + iw.upper_offset) / 2.0) as f32;
-                SageTolerance::Da(-half_width, half_width)
+                // Use the actual offsets directly for sage's asymmetric tolerance
+                SageTolerance::Da(-(iw.lower_offset as f32), iw.upper_offset as f32)
             });
             SagePrecursor {
                 mz: p.mz as f32,
