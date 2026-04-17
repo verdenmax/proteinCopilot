@@ -347,10 +347,13 @@ SearchParams + FASTA path
 
 **关键特性**：
 - **并行计算**：sage-core 使用 rayon 进行谱图级并行打分，通过 `tokio::task::spawn_blocking` 桥接异步运行时
+- **FDR pipeline**：LDA rescoring（带 NaN 保护，poisson 值 clamp 到 -0.999）→ spectrum q-value → picked peptide FDR → picked protein FDR
 - **支持特性**：b/y 离子打分、LDA rescoring、open search、LFQ、TMT、chimera scoring
 - **酶支持**：全部 7 种标准酶（Trypsin, LysC, GluC, AspN, Chymotrypsin, NonSpecific, Custom）
-- **修饰映射**：固定/可变修饰自动映射到 sage `ModificationSpecificity`
-- **结果扩展字段**：hyperscore, matched_peaks, matched_intensity_pct, discriminant_score, matched_fragment_ions 等 sage 特有指标通过 `extra_fields` 传递
+- **修饰映射**：固定/可变修饰自动映射到 sage `ModificationSpecificity`（5 种位置：Residue, PeptideN/C, ProteinN/C）
+- **结果扩展字段**：hyperscore, matched_peaks, delta_next, delta_best, discriminant_score, posterior_error, peptide_q, protein_q 等 sage 特有指标通过 `Psm.extra` 传递
+- **蛋白 FDR**：使用 sage picked_protein 算法，protein_groups_at_1pct_fdr 基于 protein_q <= 0.01 过滤
+- **引擎选择**：`run_search` 通过 `engine` 参数指定（大小写不敏感），默认 SimpleSearch
 
 **SimpleSearchEngine 搜索算法详情**：
 
