@@ -19,7 +19,7 @@ AI 驱动的蛋白质组学质谱搜索与结果解释平台。
 ```
 
 **支持格式**：mgf、mzML（DDA + DIA，自动检测采集模式）
-**搜索引擎**：内置 SimpleSearch（MVP）、pFind adapter 预留
+**搜索引擎**：内置 SimpleSearch（MVP）、Sage（生产级，sage-core 库集成）、pFind adapter 预留
 **输出文件**：psm.tsv、peptide.tsv、protein.tsv、result.json、run_metadata.json
 
 **蛋白推断**：`infer_proteins(run_id)` → parsimony 最小蛋白集 + razor 肽段分配 + 蛋白级 FDR + 序列覆盖率
@@ -27,6 +27,7 @@ AI 驱动的蛋白质组学质谱搜索与结果解释平台。
 **单谱图检查**：`extract_spectrum_precursors(file, scan)` → 查看单张 MS2 的母离子提取详情
 **外部结果导入**：`import_search_results(parquet/json, mzML)` → RT 匹配扫描号 → 可直接注释/XIC
 **XIC 可视化**：`extract_xic(run_id, scan)` → 碎片离子色谱图 HTML（支持 SILAC 轻重标记）
+**Sage 搜索引擎**：在 `run_search` 中指定 `engine: "Sage"` 即可使用 sage-core 进行生产级蛋白组学搜索（rayon 并行打分 + LDA rescoring）
 **FASTA 管理**：`list_databases` / `download_database` → 内置 UniProt 数据库注册表 + 自动缓存
 
 ## 快速测试
@@ -47,7 +48,7 @@ crates/
 ├── core/                共享领域模型（Spectrum, SearchParams, SearchResult, ProteinGroup 等）
 ├── spectrum-io/         谱图文件解析（mgf/mzML streaming + indexed 随机访问）
 ├── param-recommend/     参数推荐规则引擎（确定性，不调 LLM）
-├── search-engine/       搜索引擎（SimpleSearch + pFind adapter 预留）
+├── search-engine/       搜索引擎（SimpleSearch + Sage adapter + pFind 预留）
 ├── dia-extraction/      DIA 前体离子提取（同位素模式检测 + MS1↔MS2 关联）
 ├── fdr/                 FDR 计算（PSM/肽段/蛋白 三级 + decoy 生成 + picked-protein）
 ├── protein-inference/   蛋白推断（mapper + parsimony + razor + 序列覆盖率）
@@ -118,6 +119,7 @@ crates/
 | Biology Audit | ✅ 全部审计，单位统一，score 方向规范化 |
 | FASTA 管理 | ✅ 内置 UniProt 注册表 + HTTPS 下载 + 本地缓存 |
 | **蛋白推断** | ✅ **parsimony + razor + 三级 FDR + 序列覆盖率 + MCP tool** |
+| **Sage 集成** | ✅ **sage-core v0.15.0 库集成 + rayon 并行 + LDA rescoring** |
 
 详细计划：`tasks/001-mvp-proteomics-search-platform.md`
 架构设计：`docs/architecture.md`

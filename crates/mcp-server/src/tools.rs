@@ -764,6 +764,9 @@ impl ProteinCopilotServer {
     pub fn new() -> Self {
         let mut registry = protein_copilot_search_engine::EngineRegistry::new();
         registry.register(Box::new(SimpleSearchEngine::new()));
+        registry.register(Box::new(
+            protein_copilot_search_engine::adapters::sage::SageAdapter::default(),
+        ));
         Self {
             tool_router: Self::tool_router(),
             registry,
@@ -1066,7 +1069,13 @@ impl ProteinCopilotServer {
             }
 
             let run_cache_clone = Arc::clone(&self.run_cache);
-            let engine = SimpleSearchEngine::new();
+            let engine_name = params.engine.as_deref().unwrap_or("SimpleSearch");
+            let engine: Box<dyn SearchEngineAdapter> = match engine_name {
+                "Sage" | "sage" => Box::new(
+                    protein_copilot_search_engine::adapters::sage::SageAdapter::default(),
+                ),
+                _ => Box::new(SimpleSearchEngine::new()),
+            };
             let dia_source = vec![PathBuf::from(format!("dia:{}", run_id_str))];
 
             let progress_cache = Arc::clone(&self.run_cache);
@@ -1277,7 +1286,13 @@ impl ProteinCopilotServer {
         }
 
         let run_cache_clone = Arc::clone(&self.run_cache);
-        let engine = SimpleSearchEngine::new();
+        let engine_name = params.engine.as_deref().unwrap_or("SimpleSearch");
+        let engine: Box<dyn SearchEngineAdapter> = match engine_name {
+            "Sage" | "sage" => Box::new(
+                protein_copilot_search_engine::adapters::sage::SageAdapter::default(),
+            ),
+            _ => Box::new(SimpleSearchEngine::new()),
+        };
 
         // Construct progress callback that writes stage updates to the cache
         let progress_cache = Arc::clone(&self.run_cache);

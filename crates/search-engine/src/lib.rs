@@ -2,7 +2,8 @@
 //!
 //! Library crate for search engine orchestration and execution.
 //! Contains a simplified built-in search engine for MVP validation,
-//! with architecture ready for pFind/MSFragger/Comet adapters.
+//! a Sage adapter for production-grade proteomics search via sage-core,
+//! and architecture ready for pFind/MSFragger/Comet adapters.
 //!
 //! # Architecture
 //!
@@ -10,15 +11,13 @@
 //! SearchParams + input_files
 //!        │
 //!        ▼
-//!  EngineRegistry.get("SimpleSearch")
+//!  EngineRegistry.get("SimpleSearch" | "Sage")
 //!        │
 //!        ▼
 //!  SearchEngineAdapter::search()
 //!        │
-//!        ├── Read FASTA → digest proteins → theoretical peptides
-//!        ├── Match spectra precursors → candidate peptides
-//!        ├── Score matches (b/y ion counting)
-//!        └── Build SearchResult
+//!        ├── SimpleSearch: Read FASTA → digest → b/y ion scoring
+//!        └── Sage: sage-core library → rayon parallel scoring → LDA rescoring
 //! ```
 
 pub mod adapters;
@@ -37,6 +36,7 @@ pub use error::SearchEngineError;
 pub use progress::SearchProgress;
 pub use registry::EngineRegistry;
 pub use simple_engine::SimpleSearchEngine;
+pub use adapters::sage::SageAdapter;
 
 #[cfg(test)]
 mod tests {

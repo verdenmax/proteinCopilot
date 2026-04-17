@@ -241,7 +241,7 @@ pub struct SearchPreset {
 
 ### 3.4 `search-engine`（lib crate）
 
-**职责**：搜索引擎的调度、调用和结果解析。包含一个简化的内置搜索引擎（MVP 验证用）和 pFind adapter 预留结构。
+**职责**：搜索引擎的调度、调用和结果解析。包含一个简化的内置搜索引擎（MVP 验证用）、一个 Sage adapter（生产级搜索）和 pFind adapter 预留结构。
 
 **对外暴露**：
 ```rust
@@ -262,6 +262,12 @@ pub struct SimpleSearchEngine;
 impl SearchEngineAdapter for SimpleSearchEngine { ... }
 // 完整流程: FASTA→酶切→precursor匹配→b/y离子打分→SearchResult
 // 内部重构: run_search_on_spectra() 提取核心搜索逻辑，供 search() 和 search_with_spectra() 复用
+
+// Sage adapter（生产级，集成 sage-core v0.15.0）
+pub struct SageAdapter { thread_count: usize }
+impl SearchEngineAdapter for SageAdapter { ... }
+// 完整流程: FASTA→sage IndexedDatabase→rayon 并行打分→LDA rescoring→SearchResult
+// 用户指定 engine: "Sage" 即可使用
 
 // pFind adapter（预留桩，待对接真实 pFind）
 pub struct PFindAdapter { ssh_config: SshConfig }
@@ -292,18 +298,59 @@ search-engine/src/
 ├── simple_engine.rs         ← SimpleSearchEngine 实现（含 decoy 生成 + FDR 集成）
 └── adapters/
     ├── mod.rs
-    └── pfind.rs             ← PFindAdapter + SshConfig（预留桩）
+    ├── pfind.rs             ← PFindAdapter + SshConfig（预留桩）
+    └── sage/                ← SageAdapter（sage-core 集成）
+        ├── mod.rs           ← SageAdapter struct + SearchEngineAdapter impl
+        ├── config.rs        ← SearchParams → sage_core::SageParameters 转换
+        └── convert.rs       ← Spectrum/MassTolerance 类型转换
 ```
 
-**依赖**：`core`, `spectrum-io`, `fdr`, `tokio`, `async-trait`
+**依赖**：`core`, `spectrum-io`, `fdr`, `tokio`, `async-trait`, `sage-core`, `rayon`
 
 **设计原则**：
 - SimpleSearchEngine 是 MVP 验证引擎，用于测试端到端数据流正确性
+- **SageAdapter** 集成 sage-core v0.15.0 作为库依赖（非 CLI 子进程），提供生产级搜索能力
 - pFind adapter 预留完整结构（SshConfig、cfg 生成、结果解析），待提供 pFind 样例后对接
 - Adapter 内部逻辑完全隔离：各引擎的配置格式、输出格式解析不泄露到外部
 - `SearchResult` 是标准化输出——不管哪个引擎，返回相同结构
 - 搜索执行是 async，通过 `#[async_trait]` 支持 `Box<dyn SearchEngineAdapter>`
 - 氨基酸质量表集中在 `chemistry.rs`，避免重复
+
+**SageAdapter 架构详情**：
+
+Sage adapter 将 sage-core 作为 Rust 库依赖直接调用，避免 CLI 子进程的开销和复杂性。
+
+```text
+SearchParams + FASTA path
+       │
+       ▼
+  config::build_sage_parameters()    ← 转换酶/修饰/tolerance 到 sage 类型
+       │
+       ▼
+  Fasta::digest(&sage_params)        ← 酶切 + 构建 IndexedDatabase
+       │
+       ▼
+  convert::spectrum_to_raw()         ← Spectrum → sage RawSpectrum（批量转换）
+       │
+       ▼
+  SpectrumProcessor::process()       ← 谱图预处理（去噪/归一化）
+       │
+       ▼
+  Scorer::score() [rayon parallel]   ← b/y 离子打分（spawn_blocking 桥接 tokio）
+       │
+       ▼
+  LDA rescoring (discriminant_score) ← 线性判别分析重打分
+       │
+       ▼
+  convert → Psm / SearchResult      ← 标准化输出
+```
+
+**关键特性**：
+- **并行计算**：sage-core 使用 rayon 进行谱图级并行打分，通过 `tokio::task::spawn_blocking` 桥接异步运行时
+- **支持特性**：b/y 离子打分、LDA rescoring、open search、LFQ、TMT、chimera scoring
+- **酶支持**：全部 7 种标准酶（Trypsin, LysC, GluC, AspN, Chymotrypsin, NonSpecific, Custom）
+- **修饰映射**：固定/可变修饰自动映射到 sage `ModificationSpecificity`
+- **结果扩展字段**：hyperscore, matched_peaks, matched_intensity_pct, discriminant_score, matched_fragment_ions 等 sage 特有指标通过 `extra_fields` 传递
 
 **SimpleSearchEngine 搜索算法详情**：
 
