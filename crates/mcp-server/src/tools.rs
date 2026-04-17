@@ -799,11 +799,22 @@ impl OrderedDiaCache {
     }
 
     fn insert(&mut self, id: Uuid, spectra: Vec<Spectrum>) {
+        // Deduplicate: if this UUID already exists, remove old position
+        if self.entries.contains_key(&id) {
+            self.order.retain(|x| x != &id);
+        }
+
         while self.order.len() >= MAX_DIA_CACHE_SIZE {
             if let Some(oldest) = self.order.first().copied() {
                 self.order.remove(0);
                 if let Some(old_spectra) = self.entries.remove(&oldest) {
-                    self.spill_to_disk(oldest, &old_spectra);
+                    if !self.spill_to_disk(oldest, &old_spectra) {
+                        // Spill failed — keep entry in memory to avoid data loss
+                        tracing::warn!("Keeping DIA cache {} in memory (spill failed)", oldest);
+                        self.entries.insert(oldest, old_spectra);
+                        self.order.insert(0, oldest);
+                        break;
+                    }
                 }
             }
         }
@@ -812,20 +823,24 @@ impl OrderedDiaCache {
         self.order.push(id);
     }
 
-    fn spill_to_disk(&self, id: Uuid, spectra: &[Spectrum]) {
+    /// Spill spectra to disk. Returns true on success, false on failure.
+    fn spill_to_disk(&self, id: Uuid, spectra: &[Spectrum]) -> bool {
         if let Err(e) = std::fs::create_dir_all(&self.spill_dir) {
             tracing::warn!("Failed to create DIA spill dir: {}", e);
-            return;
+            return false;
         }
         let path = self.spill_dir.join(format!("{}.bin", id));
         match bincode::serialize(spectra) {
-            Ok(data) => {
-                if let Err(e) = std::fs::write(&path, &data) {
+            Ok(data) => match std::fs::write(&path, &data) {
+                Ok(()) => true,
+                Err(e) => {
                     tracing::warn!("Failed to write DIA cache to disk {}: {}", id, e);
+                    false
                 }
-            }
+            },
             Err(e) => {
                 tracing::warn!("Failed to serialize DIA cache {}: {}", id, e);
+                false
             }
         }
     }
