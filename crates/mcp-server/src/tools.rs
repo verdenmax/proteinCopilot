@@ -550,6 +550,55 @@ struct GetDatabaseInfoInput {
     cache_dir: Option<String>,
 }
 
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct PrepareSearchInput {
+    /// Paths to spectrum files (.mgf or .mzML)
+    input_files: Vec<String>,
+    /// Optional user hints (experiment_type, instrument_type, enzyme)
+    #[serde(default, deserialize_with = "deserialize_hints")]
+    #[schemars(with = "Option<UserHints>")]
+    hints: Option<UserHints>,
+    /// Target organism for auto database resolution (e.g. "human", "mouse", "E.coli", "小鼠").
+    organism: Option<String>,
+    /// Direct FASTA database path. Takes priority over organism auto-resolution.
+    database_path: Option<String>,
+    /// Search engine: "Sage" or "SimpleSearch". Default: "SimpleSearch".
+    engine: Option<String>,
+    /// Override cache directory for database downloads.
+    #[serde(default)]
+    cache_dir: Option<String>,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct PrepareSearchOutput {
+    /// Recommended search parameters with real database_path filled in.
+    params: SearchParams,
+    /// Explanation of why these parameters were recommended.
+    reasoning: String,
+    /// Confidence score (0.0 to 1.0).
+    confidence: f64,
+    /// Alternative approaches the user might consider.
+    alternatives: Vec<String>,
+    /// Evidence supporting the recommendation.
+    evidence: Vec<String>,
+    /// Summary of the input spectra.
+    spectra_summary: SpectrumSummary,
+    /// Database info if auto-resolved.
+    database_info: Option<PreparedDatabaseInfo>,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct PreparedDatabaseInfo {
+    /// Database ID (e.g. "human_swissprot")
+    id: String,
+    /// Local file path
+    path: String,
+    /// Number of protein sequences
+    protein_count: u64,
+    /// Whether this was freshly downloaded
+    freshly_downloaded: bool,
+}
+
 /// Input for the import_search_results tool.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct ImportSearchResultsInput {
@@ -596,6 +645,55 @@ fn default_cache_dir(override_dir: &Option<String>) -> std::path::PathBuf {
         std::path::PathBuf::from(dir)
     } else {
         std::path::PathBuf::from(".proteincopilot/databases")
+    }
+}
+
+/// Maps common organism names/keywords to database IDs.
+fn organism_to_database_id(organism: &str) -> Option<&'static str> {
+    let lower = organism.to_lowercase();
+    // Check exact IDs first
+    match lower.as_str() {
+        "human_swissprot" => return Some("human_swissprot"),
+        "mouse_swissprot" => return Some("mouse_swissprot"),
+        "ecoli_swissprot" => return Some("ecoli_swissprot"),
+        "yeast_swissprot" => return Some("yeast_swissprot"),
+        "arabidopsis_swissprot" => return Some("arabidopsis_swissprot"),
+        "crap" => return Some("crap"),
+        _ => {}
+    }
+    // Fuzzy keyword matching
+    if lower.contains("human")
+        || lower.contains("人")
+        || lower.contains("homo sapiens")
+        || lower.contains("9606")
+    {
+        Some("human_swissprot")
+    } else if lower.contains("mouse")
+        || lower.contains("小鼠")
+        || lower.contains("mus musculus")
+        || lower.contains("10090")
+    {
+        Some("mouse_swissprot")
+    } else if lower.contains("ecoli")
+        || lower.contains("e.coli")
+        || lower.contains("大肠杆菌")
+        || lower.contains("escherichia")
+    {
+        Some("ecoli_swissprot")
+    } else if lower.contains("yeast")
+        || lower.contains("酵母")
+        || lower.contains("saccharomyces")
+    {
+        Some("yeast_swissprot")
+    } else if lower.contains("arabidopsis") || lower.contains("拟南芥") {
+        Some("arabidopsis_swissprot")
+    } else if lower.contains("contaminant")
+        || lower.contains("污染")
+        || lower.contains("crap")
+    {
+        Some("crap")
+    } else {
+        None
     }
 }
 
@@ -2844,6 +2942,142 @@ impl ProteinCopilotServer {
             total_decoy_groups: total_decoy,
             groups_at_1pct_fdr: groups_at_1pct,
             unique_peptides_used,
+        }))
+    }
+
+    // -----------------------------------------------------------------------
+    // Composite: prepare_search
+    // -----------------------------------------------------------------------
+
+    /// One-shot preparation for a database search: read spectra, recommend
+    /// parameters, and resolve a FASTA database — all in a single call.
+    #[rmcp::tool(
+        name = "prepare_search",
+        description = "One-shot search preparation: reads spectrum files, recommends search parameters, and resolves a FASTA database. Combines read_spectra + recommend_params + download_database into a single call. Provide either 'database_path' (direct FASTA path) or 'organism' (e.g. 'human', 'mouse', 'E.coli', '小鼠') for auto-resolution. Returns ready-to-use SearchParams that can be passed directly to run_search."
+    )]
+    async fn prepare_search(
+        &self,
+        Parameters(input): Parameters<PrepareSearchInput>,
+    ) -> Result<Json<PrepareSearchOutput>, ErrorData> {
+        // 1. Validate input_files
+        if input.input_files.is_empty() {
+            return Err(mcp_err(
+                ErrorCode::INVALID_PARAMS,
+                "input_files is empty — provide at least one spectrum file path",
+            ));
+        }
+        for f in &input.input_files {
+            validate_file_path(f)?;
+        }
+
+        // 2. Read spectrum summary from first file
+        let first_path = Path::new(&input.input_files[0]);
+        let info = protein_copilot_spectrum_io::detect_format(first_path)
+            .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
+        let reader = protein_copilot_spectrum_io::create_reader(&info);
+        let summary = reader
+            .read_summary(first_path)
+            .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
+
+        // 3. Recommend parameters
+        let recommender = ParamRecommender;
+        let decision = recommender
+            .recommend(&summary, input.hints.as_ref())
+            .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
+        let mut params = decision.decision;
+
+        // 4. Set engine if specified
+        if let Some(ref engine) = input.engine {
+            params.engine = Some(engine.clone());
+        }
+
+        // 5. Resolve database
+        let database_info = if let Some(ref db_path) = input.database_path {
+            // Direct path takes priority
+            let p = Path::new(db_path);
+            if !p.exists() {
+                return Err(mcp_err(
+                    ErrorCode::INVALID_PARAMS,
+                    format!("database_path does not exist: {db_path}"),
+                ));
+            }
+            params.database_path = db_path.clone();
+            None
+        } else if let Some(ref organism) = input.organism {
+            let db_id = organism_to_database_id(organism).ok_or_else(|| {
+                mcp_err(
+                    ErrorCode::INVALID_PARAMS,
+                    format!(
+                        "Could not resolve organism '{}' to a database. \
+                         Supported: human, mouse, E.coli, yeast, arabidopsis, \
+                         or use database_path for a custom FASTA.",
+                        organism
+                    ),
+                )
+            })?;
+
+            let cache_dir = default_cache_dir(&input.cache_dir);
+
+            // Check if already downloaded
+            let databases = protein_copilot_fasta_db::list_databases(&cache_dir)
+                .map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, e))?;
+
+            let already_downloaded = databases.iter().any(|d| {
+                d.id == db_id
+                    && matches!(
+                        d.status,
+                        protein_copilot_fasta_db::DownloadStatus::Downloaded { .. }
+                    )
+            });
+
+            let dl_result =
+                protein_copilot_fasta_db::download_database(db_id, &cache_dir, false)
+                    .await
+                    .map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, e))?;
+
+            params.database_path = dl_result.path.clone();
+
+            Some(PreparedDatabaseInfo {
+                id: dl_result.id,
+                path: dl_result.path,
+                protein_count: dl_result.protein_count,
+                freshly_downloaded: !already_downloaded,
+            })
+        } else {
+            return Err(mcp_err(
+                ErrorCode::INVALID_PARAMS,
+                "Provide either 'database_path' (direct FASTA path) \
+                 or 'organism' (e.g. 'human', 'mouse') for database resolution.",
+            ));
+        };
+
+        // 6. Validate params
+        params
+            .validate()
+            .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
+
+        // 7. Verify database file exists
+        let db_path = Path::new(&params.database_path);
+        if !db_path.exists() {
+            return Err(mcp_err(
+                ErrorCode::INVALID_PARAMS,
+                format!(
+                    "Database file not found after resolution: {}. \
+                     Use list_databases to see available databases, \
+                     or download_database to fetch one.",
+                    params.database_path
+                ),
+            ));
+        }
+
+        Ok(Json(PrepareSearchOutput {
+            params,
+            reasoning: decision.explanation,
+            confidence: decision.confidence,
+            alternatives: decision.alternatives,
+            evidence: decision.evidence,
+            spectra_summary: summary,
+            database_info,
         }))
     }
 
