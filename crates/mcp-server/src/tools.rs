@@ -770,7 +770,8 @@ impl ProteinCopilotServer {
             run_cache: Arc::new(Mutex::new(OrderedRunCache::new())),
             dia_cache: Arc::new(Mutex::new(OrderedDiaCache::new())),
             reader_cache: Arc::new(Mutex::new(lru::LruCache::new(
-                std::num::NonZeroUsize::new(8).unwrap(),
+                // SAFETY: 8 is a compile-time constant, always non-zero
+                std::num::NonZeroUsize::new(8).expect("reader cache size is hardcoded to 8"),
             ))),
         }
     }
@@ -808,6 +809,13 @@ impl ProteinCopilotServer {
         direct: &Option<SearchResult>,
         run_id: &Option<String>,
     ) -> Result<SearchResult, ErrorData> {
+        // If both provided, reject ambiguity
+        if direct.is_some() && run_id.is_some() {
+            return Err(mcp_err(
+                ErrorCode::INVALID_PARAMS,
+                "provide either 'result' or 'run_id', not both",
+            ));
+        }
         if let Some(r) = direct {
             return Ok(r.clone());
         }
@@ -2555,6 +2563,23 @@ impl ProteinCopilotServer {
         &self,
         Parameters(input): Parameters<InferProteinsInput>,
     ) -> Result<Json<InferenceResult>, ErrorData> {
+        // Validate q_value_threshold
+        if let Some(q) = input.q_value_threshold {
+            if q.is_nan() || q.is_infinite() || !(0.0..=1.0).contains(&q) {
+                return Err(mcp_err(
+                    ErrorCode::INVALID_PARAMS,
+                    format!(
+                        "q_value_threshold must be between 0.0 and 1.0, got {q}"
+                    ),
+                ));
+            }
+        }
+
+        // Validate fasta_path upfront
+        if let Some(ref fp) = input.fasta_path {
+            validate_file_path(fp)?;
+        }
+
         let result = self.get_result(&input.result, &input.run_id)?;
 
         // Build peptide-protein map
