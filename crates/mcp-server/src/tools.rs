@@ -396,6 +396,24 @@ struct DiaExtractionOutput {
     message: String,
 }
 
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct GetDiaCacheStatusInput {
+    /// The dia_run_id returned by extract_dia_precursors
+    dia_run_id: String,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct DiaCacheStatusOutput {
+    /// Whether the cached extraction exists
+    exists: bool,
+    /// Where the cache is stored: "memory", "disk", or "not_found"
+    location: String,
+    /// Number of spectra (only available if in memory)
+    spectrum_count: Option<usize>,
+    /// When the extraction was performed
+    extracted_at: Option<String>,
+}
+
 /// Input for the `extract_xic` MCP tool.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct ExtractXicInput {
@@ -631,40 +649,118 @@ const MAX_CACHE_SIZE: usize = 100;
 
 /// Maximum number of cached DIA extraction runs before eviction.
 /// Ordered DIA cache — insertion order tracked for FIFO eviction.
+/// When entries exceed `MAX_DIA_CACHE_SIZE` in memory, the oldest are spilled to
+/// disk under `.proteincopilot/dia_cache/` and can still be retrieved.
 struct OrderedDiaCache {
     entries: HashMap<Uuid, Vec<Spectrum>>,
     order: Vec<Uuid>,
+    spill_dir: PathBuf,
+    extracted_at: HashMap<Uuid, chrono::DateTime<chrono::Utc>>,
 }
 
 const MAX_DIA_CACHE_SIZE: usize = 10;
 
 impl OrderedDiaCache {
     fn new() -> Self {
+        let spill_dir = PathBuf::from(".proteincopilot/dia_cache");
         Self {
             entries: HashMap::new(),
             order: Vec::new(),
+            spill_dir,
+            extracted_at: HashMap::new(),
         }
     }
 
     fn remove(&mut self, id: &Uuid) -> Option<Vec<Spectrum>> {
         if let Some(spectra) = self.entries.remove(id) {
             self.order.retain(|x| x != id);
-            Some(spectra)
-        } else {
-            None
+            self.extracted_at.remove(id);
+            return Some(spectra);
         }
+        let path = self.spill_dir.join(format!("{}.bin", id));
+        if path.exists() {
+            match std::fs::read(&path) {
+                Ok(data) => {
+                    let _ = std::fs::remove_file(&path);
+                    self.extracted_at.remove(id);
+                    match bincode::deserialize(&data) {
+                        Ok(spectra) => return Some(spectra),
+                        Err(e) => {
+                            tracing::warn!("Failed to deserialize DIA cache {}: {}", id, e);
+                            return None;
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to read DIA cache file {}: {}", id, e);
+                    return None;
+                }
+            }
+        }
+        None
     }
 
     fn insert(&mut self, id: Uuid, spectra: Vec<Spectrum>) {
         while self.order.len() >= MAX_DIA_CACHE_SIZE {
             if let Some(oldest) = self.order.first().copied() {
                 self.order.remove(0);
-                self.entries.remove(&oldest);
+                if let Some(old_spectra) = self.entries.remove(&oldest) {
+                    self.spill_to_disk(oldest, &old_spectra);
+                }
             }
         }
+        self.extracted_at.insert(id, chrono::Utc::now());
         self.entries.insert(id, spectra);
         self.order.push(id);
     }
+
+    fn spill_to_disk(&self, id: Uuid, spectra: &[Spectrum]) {
+        if let Err(e) = std::fs::create_dir_all(&self.spill_dir) {
+            tracing::warn!("Failed to create DIA spill dir: {}", e);
+            return;
+        }
+        let path = self.spill_dir.join(format!("{}.bin", id));
+        match bincode::serialize(spectra) {
+            Ok(data) => {
+                if let Err(e) = std::fs::write(&path, &data) {
+                    tracing::warn!("Failed to write DIA cache to disk {}: {}", id, e);
+                }
+            }
+            Err(e) => {
+                tracing::warn!("Failed to serialize DIA cache {}: {}", id, e);
+            }
+        }
+    }
+
+    fn status(&self, id: &Uuid) -> DiaCacheLocation {
+        if self.entries.contains_key(id) {
+            let count = self.entries[id].len();
+            let ts = self.extracted_at.get(id).copied();
+            DiaCacheLocation::Memory {
+                spectrum_count: count,
+                extracted_at: ts,
+            }
+        } else {
+            let path = self.spill_dir.join(format!("{}.bin", id));
+            if path.exists() {
+                let ts = self.extracted_at.get(id).copied();
+                DiaCacheLocation::Disk { extracted_at: ts }
+            } else {
+                DiaCacheLocation::NotFound
+            }
+        }
+    }
+}
+
+enum DiaCacheLocation {
+    Memory {
+        spectrum_count: usize,
+        extracted_at: Option<chrono::DateTime<chrono::Utc>>,
+    },
+    Disk {
+        extracted_at: Option<chrono::DateTime<chrono::Utc>>,
+    },
+    NotFound,
 }
 
 /// Ordered run cache — insertion order tracked for FIFO eviction.
@@ -1024,6 +1120,18 @@ impl ProteinCopilotServer {
                 .validate()
                 .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
 
+            let db_path = Path::new(&params.database_path);
+            if !db_path.exists() {
+                return Err(mcp_err(
+                    ErrorCode::INVALID_PARAMS,
+                    format!(
+                        "Database file not found: {}. Use list_databases to see available databases, \
+                         or download_database to fetch one.",
+                        params.database_path
+                    ),
+                ));
+            }
+
             // Move spectra out of the DIA cache (frees the slot).
             // This happens after validation so a param error won't lose cached spectra.
             let dia_spectra = {
@@ -1272,6 +1380,18 @@ impl ProteinCopilotServer {
         params
             .validate()
             .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
+
+        let db_path = Path::new(&params.database_path);
+        if !db_path.exists() {
+            return Err(mcp_err(
+                ErrorCode::INVALID_PARAMS,
+                format!(
+                    "Database file not found: {}. Use list_databases to see available databases, \
+                     or download_database to fetch one.",
+                    params.database_path
+                ),
+            ));
+        }
 
         let run_id = Uuid::new_v4();
         let files: Vec<PathBuf> = input.input_files.iter().map(PathBuf::from).collect();
@@ -2223,6 +2343,50 @@ impl ProteinCopilotServer {
             .map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, e))?;
 
         Ok(Json(result))
+    }
+
+    /// Check if a DIA extraction result is still cached.
+    #[rmcp::tool(
+        name = "get_dia_cache_status",
+        description = "Check if a DIA extraction result is still cached and available for use with run_search. Returns cache location (memory/disk/not_found) and spectrum count. Call this before run_search(dia_run_id=...) to verify the extraction hasn't been evicted."
+    )]
+    fn get_dia_cache_status(
+        &self,
+        Parameters(input): Parameters<GetDiaCacheStatusInput>,
+    ) -> Result<Json<DiaCacheStatusOutput>, ErrorData> {
+        let dia_uuid = Uuid::parse_str(&input.dia_run_id)
+            .map_err(|_| mcp_err(ErrorCode::INVALID_PARAMS, "invalid dia_run_id format"))?;
+
+        let cache = self
+            .dia_cache
+            .lock()
+            .map_err(|_| mcp_err(ErrorCode::INTERNAL_ERROR, "DIA cache lock is poisoned"))?;
+
+        let output = match cache.status(&dia_uuid) {
+            DiaCacheLocation::Memory {
+                spectrum_count,
+                extracted_at,
+            } => DiaCacheStatusOutput {
+                exists: true,
+                location: "memory".to_string(),
+                spectrum_count: Some(spectrum_count),
+                extracted_at: extracted_at.map(|t| t.to_rfc3339()),
+            },
+            DiaCacheLocation::Disk { extracted_at } => DiaCacheStatusOutput {
+                exists: true,
+                location: "disk".to_string(),
+                spectrum_count: None,
+                extracted_at: extracted_at.map(|t| t.to_rfc3339()),
+            },
+            DiaCacheLocation::NotFound => DiaCacheStatusOutput {
+                exists: false,
+                location: "not_found".to_string(),
+                spectrum_count: None,
+                extracted_at: None,
+            },
+        };
+
+        Ok(Json(output))
     }
 
     /// Extract XIC (Extracted Ion Chromatogram) for a peptide from an mzML file.
