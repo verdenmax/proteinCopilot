@@ -22,6 +22,10 @@ serde_json = { workspace = true }
 # Added when implementing SimpleSearchEngine (Task 1.4.4):
 tracing = { workspace = true }
 
+# Sage search engine core (pinned to v0.15.0-beta.2, commit cd712d4)
+sage-core = { git = "https://github.com/lazear/sage.git", rev = "cd712d4b88d6c4fe3b317d47ce39e2c83cae7642", package = "sage-core" }
+rayon = "1"
+
 [dev-dependencies]
 protein-copilot-spectrum-io = { workspace = true }
 protein-copilot-param-recommend = { workspace = true }
