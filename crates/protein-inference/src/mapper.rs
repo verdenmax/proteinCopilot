@@ -138,6 +138,7 @@ mod tests {
             q_value,
             protein_accessions: proteins.iter().map(|s| s.to_string()).collect(),
             is_decoy,
+            extra: None,
         }
     }
 

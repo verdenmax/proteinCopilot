@@ -182,6 +182,7 @@ mod tests {
             max_variable_modifications: 3,
             min_peptide_length: 7,
             max_peptide_length: 50,
+            engine: None,
         };
         let engine_info = EngineInfo {
             name: "Test".to_string(),
@@ -209,6 +210,7 @@ mod tests {
                 q_value: Some(0.001),
                 protein_accessions: vec!["P001".to_string()],
                 is_decoy: false,
+                extra: None,
             }],
             peptides: vec![PeptideResult {
                 sequence: "PEPTIDER".to_string(),

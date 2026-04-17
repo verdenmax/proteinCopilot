@@ -144,6 +144,10 @@ pub struct Psm {
     pub protein_accessions: Vec<String>,
     /// Whether this PSM is from the decoy database.
     pub is_decoy: bool,
+    /// Engine-specific extra fields (e.g., Sage's matched_peaks, delta_next).
+    /// Preserves information that doesn't fit the standard Psm fields.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extra: Option<std::collections::HashMap<String, serde_json::Value>>,
 }
 
 impl Psm {
@@ -521,6 +525,7 @@ mod tests {
             q_value: Some(0.001),
             protein_accessions: vec!["P12345".to_string()],
             is_decoy: false,
+            extra: None,
         }
     }
 
@@ -542,6 +547,7 @@ mod tests {
             q_value: Some(0.005),
             protein_accessions: vec!["P12345".to_string(), "Q67890".to_string()],
             is_decoy: false,
+            extra: None,
         }
     }
 
@@ -617,6 +623,7 @@ mod tests {
             max_variable_modifications: 3,
             min_peptide_length: 7,
             max_peptide_length: 50,
+            engine: None,
         }
     }
 

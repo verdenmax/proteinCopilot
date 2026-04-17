@@ -130,6 +130,7 @@ mod tests {
             q_value: None,
             protein_accessions: vec!["P12345".to_string()],
             is_decoy,
+            extra: None,
         }
     }
 

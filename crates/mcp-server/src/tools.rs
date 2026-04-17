@@ -1599,6 +1599,7 @@ impl ProteinCopilotServer {
                             max_variable_modifications: 3,
                             min_peptide_length: 7,
                             max_peptide_length: 50,
+                            engine: None,
                         },
                         total_psms: None,
                         psms_at_1pct_fdr: None,

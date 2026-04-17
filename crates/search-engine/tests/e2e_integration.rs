@@ -137,6 +137,7 @@ async fn scenario_b_direct_params() {
         max_variable_modifications: 3,
         min_peptide_length: 7,
         max_peptide_length: 50,
+        engine: None,
     };
 
     assert!(params.validate().is_ok());
@@ -321,6 +322,7 @@ async fn error_invalid_params() {
         max_variable_modifications: 3,
         min_peptide_length: 7,
         max_peptide_length: 50,
+        engine: None,
     };
 
     let engine = SimpleSearchEngine::new();

@@ -36,6 +36,7 @@ fn make_psm(
         protein_accessions: proteins.iter().map(|s| s.to_string()).collect(),
         is_decoy,
         q_value,
+        extra: None,
     }
 }
 

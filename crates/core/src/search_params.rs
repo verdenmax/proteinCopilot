@@ -275,6 +275,10 @@ pub struct SearchParams {
     /// Peptides longer than this are excluded from search results.
     #[serde(default = "default_max_peptide_length")]
     pub max_peptide_length: u32,
+
+    /// Search engine to use. `None` means default engine (SimpleSearch).
+    #[serde(default)]
+    pub engine: Option<String>,
 }
 
 impl SearchParams {
@@ -383,6 +387,7 @@ mod tests {
             max_variable_modifications: 3,
             min_peptide_length: 7,
             max_peptide_length: 50,
+            engine: None,
         }
     }
 

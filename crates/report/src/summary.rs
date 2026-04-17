@@ -113,6 +113,7 @@ mod tests {
             max_variable_modifications: 3,
             min_peptide_length: 7,
             max_peptide_length: 50,
+            engine: None,
         }
     }
 
@@ -147,6 +148,7 @@ mod tests {
                     q_value: Some(0.001),
                     protein_accessions: vec!["P001".to_string()],
                     is_decoy: false,
+                    extra: None,
                 },
                 Psm {
                     spectrum_scan: 2,
@@ -160,6 +162,7 @@ mod tests {
                     q_value: Some(0.005),
                     protein_accessions: vec!["P001".to_string()],
                     is_decoy: false,
+                    extra: None,
                 },
                 Psm {
                     spectrum_scan: 3,
@@ -173,6 +176,7 @@ mod tests {
                     q_value: Some(0.05),
                     protein_accessions: vec!["REV_P002".to_string()],
                     is_decoy: true,
+                    extra: None,
                 },
             ],
             peptides: vec![],

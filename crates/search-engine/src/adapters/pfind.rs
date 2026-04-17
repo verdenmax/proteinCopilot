@@ -168,6 +168,7 @@ mod tests {
             max_variable_modifications: 3,
             min_peptide_length: 7,
             max_peptide_length: 50,
+            engine: None,
         };
         let result = adapter.search(&params, &[], noop_progress()).await;
         assert!(result.is_err());

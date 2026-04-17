@@ -105,6 +105,7 @@ pub fn standard_preset() -> SearchPreset {
             max_variable_modifications: 3,
             min_peptide_length: 7,
             max_peptide_length: 50,
+            engine: None,
         },
         applicable_scenarios: vec![
             "General protein identification".to_string(),
@@ -138,6 +139,7 @@ pub fn phospho_preset() -> SearchPreset {
             max_variable_modifications: 3,
             min_peptide_length: 7,
             max_peptide_length: 50,
+            engine: None,
         },
         applicable_scenarios: vec![
             "Phosphoproteomics".to_string(),
@@ -172,6 +174,7 @@ pub fn tmt_preset() -> SearchPreset {
             max_variable_modifications: 3,
             min_peptide_length: 7,
             max_peptide_length: 50,
+            engine: None,
         },
         applicable_scenarios: vec![
             "TMT labeling quantification".to_string(),
@@ -205,6 +208,7 @@ pub fn open_search_preset() -> SearchPreset {
             max_variable_modifications: 3,
             min_peptide_length: 7,
             max_peptide_length: 50,
+            engine: None,
         },
         applicable_scenarios: vec![
             "Unknown modification discovery".to_string(),
@@ -250,6 +254,7 @@ pub fn silac_preset() -> SearchPreset {
             max_variable_modifications: 3,
             min_peptide_length: 7,
             max_peptide_length: 50,
+            engine: None,
         },
         applicable_scenarios: vec![
             "SILAC quantification".to_string(),

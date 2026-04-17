@@ -564,6 +564,7 @@ fn build_psm(
         q_value: None,
         protein_accessions: vec![m.peptide.protein_accession.clone()],
         is_decoy,
+        extra: None,
     }
 }
 
@@ -765,6 +766,7 @@ mod tests {
             max_variable_modifications: 3,
             min_peptide_length: 7,
             max_peptide_length: 50,
+            engine: None,
         }
     }
 
@@ -813,6 +815,7 @@ mod tests {
             max_variable_modifications: 3,
             min_peptide_length: 7,
             max_peptide_length: 50,
+            engine: None,
         };
         let engine = SimpleSearchEngine::new();
         let result = engine.run_search(&params, &[PathBuf::from("test.mgf")], &|_| {});

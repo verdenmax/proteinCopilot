@@ -150,6 +150,7 @@ pub fn build_search_result(
         max_variable_modifications: 3,
         min_peptide_length: 7,
         max_peptide_length: 50,
+        engine: None,
     };
 
     let mut metadata = RunMetadata::new(params.clone(), engine_info.clone(), input_files);
@@ -217,6 +218,7 @@ fn to_core_psm(imported: &ImportedPsm) -> Psm {
         q_value: imported.q_value,
         protein_accessions: imported.protein_accessions.clone(),
         is_decoy: false,
+        extra: None,
     }
 }
 

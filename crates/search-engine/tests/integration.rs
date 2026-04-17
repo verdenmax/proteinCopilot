@@ -181,6 +181,7 @@ async fn variable_mod_oxidation_m() {
         min_peptide_length: 7,
         max_peptide_length: 50,
         acquisition_mode: None,
+        engine: None,
     };
 
     let engine = SimpleSearchEngine::new();
@@ -233,6 +234,7 @@ async fn protein_nterm_acetylation_fw1() {
         min_peptide_length: 7,
         max_peptide_length: 50,
         acquisition_mode: None,
+        engine: None,
     };
 
     let engine = SimpleSearchEngine::new();
@@ -286,6 +288,7 @@ async fn fdr_reverse_decoy_strategy_fw6() {
         min_peptide_length: 7,
         max_peptide_length: 50,
         acquisition_mode: None,
+        engine: None,
     };
 
     let engine = SimpleSearchEngine::new();
