@@ -1,6 +1,8 @@
 //! Type conversion between ProteinCopilot and sage-core types.
 
-use protein_copilot_core::search_params::{MassTolerance, ModPosition, Modification, ToleranceUnit};
+use protein_copilot_core::search_params::{
+    MassTolerance, ModPosition, Modification, ToleranceUnit,
+};
 use protein_copilot_core::spectrum::{MsLevel, Spectrum};
 use sage_core::mass::Tolerance as SageTolerance;
 use sage_core::modification::ModificationSpecificity;
@@ -83,12 +85,11 @@ pub fn variable_mod_to_sage(m: &Modification) -> Vec<(ModificationSpecificity, V
 /// Map our ModPosition + residues to one or more sage ModificationSpecificity values.
 fn specificity_targets(m: &Modification) -> Vec<ModificationSpecificity> {
     match m.position {
-        ModPosition::Anywhere => {
-            m.residues
-                .iter()
-                .map(|&r| ModificationSpecificity::Residue(r as u8))
-                .collect()
-        }
+        ModPosition::Anywhere => m
+            .residues
+            .iter()
+            .map(|&r| ModificationSpecificity::Residue(r as u8))
+            .collect(),
         ModPosition::AnyNTerm => {
             if m.residues.is_empty() {
                 vec![ModificationSpecificity::PeptideN(None)]
@@ -222,14 +223,20 @@ mod tests {
 
     #[test]
     fn mass_tolerance_ppm() {
-        let tol = MassTolerance { value: 20.0, unit: ToleranceUnit::Ppm };
+        let tol = MassTolerance {
+            value: 20.0,
+            unit: ToleranceUnit::Ppm,
+        };
         let sage_tol = mass_tolerance_to_sage(&tol);
         assert_eq!(sage_tol, SageTolerance::Ppm(-20.0, 20.0));
     }
 
     #[test]
     fn mass_tolerance_da() {
-        let tol = MassTolerance { value: 0.5, unit: ToleranceUnit::Da };
+        let tol = MassTolerance {
+            value: 0.5,
+            unit: ToleranceUnit::Da,
+        };
         let sage_tol = mass_tolerance_to_sage(&tol);
         assert_eq!(sage_tol, SageTolerance::Da(-0.5, 0.5));
     }

@@ -85,11 +85,10 @@ impl CacheManager {
         let mut registry = self.load_registry()?;
         registry.databases.insert(entry.id.clone(), entry.clone());
 
-        let json = serde_json::to_string_pretty(&registry).map_err(|e| {
-            FastaDbError::RegistryError {
+        let json =
+            serde_json::to_string_pretty(&registry).map_err(|e| FastaDbError::RegistryError {
                 detail: format!("serialization error: {e}"),
-            }
-        })?;
+            })?;
         std::fs::write(self.registry_path(), json).map_err(|e| FastaDbError::IoError {
             path: self.registry_path(),
             source: e,

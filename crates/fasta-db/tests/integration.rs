@@ -1,7 +1,9 @@
 //! Integration tests for fasta-db (requires network access).
 //! Run with: cargo test -p protein-copilot-fasta-db -- --ignored
 
-use protein_copilot_fasta_db::{download_database, get_database_info, list_databases, DownloadStatus};
+use protein_copilot_fasta_db::{
+    download_database, get_database_info, list_databases, DownloadStatus,
+};
 use tempfile::TempDir;
 
 #[tokio::test]
@@ -22,7 +24,10 @@ async fn download_ecoli_end_to_end() {
     let result = download_database("ecoli_swissprot", cache_dir, false)
         .await
         .unwrap();
-    assert!(result.protein_count > 100, "E.coli should have >100 proteins");
+    assert!(
+        result.protein_count > 100,
+        "E.coli should have >100 proteins"
+    );
     assert!(result.file_size_bytes > 0);
 
     // Step 3: List — ecoli should now be Downloaded

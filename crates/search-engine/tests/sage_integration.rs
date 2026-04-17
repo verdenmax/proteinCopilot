@@ -78,8 +78,7 @@ async fn sage_search_produces_results() {
                 result
                     .psms
                     .iter()
-                    .filter(|p| !p.is_decoy
-                        && p.q_value.map_or(false, |q| q <= 0.01))
+                    .filter(|p| !p.is_decoy && p.q_value.map_or(false, |q| q <= 0.01))
                     .count()
             );
 
@@ -93,10 +92,7 @@ async fn sage_search_produces_results() {
                 assert!(psm.charge > 0, "charge should be positive");
                 assert!(psm.precursor_mz > 0.0, "precursor_mz should be positive");
                 assert!(psm.score.is_finite(), "score should be finite");
-                assert!(
-                    psm.q_value.is_some(),
-                    "q_value should be set by Sage FDR"
-                );
+                assert!(psm.q_value.is_some(), "q_value should be set by Sage FDR");
                 assert!(
                     !psm.protein_accessions.is_empty(),
                     "should have protein accessions"
@@ -107,10 +103,7 @@ async fn sage_search_produces_results() {
                 let extra = psm.extra.as_ref().unwrap_or_else(|| {
                     panic!("extra should be Some for PSM scan={}", psm.spectrum_scan)
                 });
-                assert!(
-                    extra.contains_key("hyperscore"),
-                    "should have hyperscore"
-                );
+                assert!(extra.contains_key("hyperscore"), "should have hyperscore");
                 assert!(
                     extra.contains_key("matched_peaks"),
                     "should have matched_peaks"
@@ -140,10 +133,7 @@ async fn sage_engine_info_and_health() {
     let health = adapter.health_check().await;
     match health {
         Ok(status) => {
-            assert_eq!(
-                status,
-                protein_copilot_core::engine::HealthStatus::Healthy
-            );
+            assert_eq!(status, protein_copilot_core::engine::HealthStatus::Healthy);
         }
         Err(e) => {
             panic!("health_check should not fail for Sage: {}", e);

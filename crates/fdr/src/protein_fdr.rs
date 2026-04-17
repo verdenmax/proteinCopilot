@@ -230,7 +230,11 @@ mod tests {
         assert_eq!(result.total_decoy_groups, 1);
         // Both targets win, no decoy winners → all q=0
         assert_eq!(result.groups.len(), 2);
-        let accessions: Vec<&str> = result.groups.iter().map(|g| g.leader_accession.as_str()).collect();
+        let accessions: Vec<&str> = result
+            .groups
+            .iter()
+            .map(|g| g.leader_accession.as_str())
+            .collect();
         assert!(accessions.contains(&"P001"));
         assert!(accessions.contains(&"P003"));
         for g in &result.groups {
@@ -326,11 +330,11 @@ mod tests {
             make_group("P003", 30.0, false),
             make_group("P004", 20.0, false),
             make_group("P005", 10.0, false),
-            make_group("REV_P001", 1.0, true),   // target wins
-            make_group("REV_P002", 1.0, true),   // target wins
-            make_group("REV_P003", 35.0, true),  // decoy wins (35 > 30)
-            make_group("REV_P004", 25.0, true),  // decoy wins (25 > 20)
-            make_group("REV_P005", 1.0, true),   // target wins
+            make_group("REV_P001", 1.0, true),  // target wins
+            make_group("REV_P002", 1.0, true),  // target wins
+            make_group("REV_P003", 35.0, true), // decoy wins (35 > 30)
+            make_group("REV_P004", 25.0, true), // decoy wins (25 > 20)
+            make_group("REV_P005", 1.0, true),  // target wins
         ];
         let result = calculate_protein_fdr(&groups).unwrap();
 

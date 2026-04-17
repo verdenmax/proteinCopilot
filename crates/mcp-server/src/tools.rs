@@ -21,8 +21,8 @@ use uuid::Uuid;
 use protein_copilot_spectrum_io::reader::SpectrumReader;
 
 use protein_copilot_core::ai_decision::AiDecision;
-use protein_copilot_core::protein_group::InferenceResult;
 use protein_copilot_core::engine::{HealthStatus, SearchEngineAdapter};
+use protein_copilot_core::protein_group::InferenceResult;
 use protein_copilot_core::search_params::SearchParams;
 use protein_copilot_core::search_result::{SearchResult, SearchResultSummary};
 use protein_copilot_core::spectrum::{AcquisitionMode, Spectrum, SpectrumSummary};
@@ -601,11 +601,7 @@ fn load_fasta_sequences(fasta_path: &str) -> Result<HashMap<String, String>, Str
                 sequences.insert(current_accession.clone(), current_sequence.clone());
                 current_sequence.clear();
             }
-            let acc = header
-                .split_whitespace()
-                .next()
-                .unwrap_or("")
-                .to_string();
+            let acc = header.split_whitespace().next().unwrap_or("").to_string();
             if acc.is_empty() {
                 tracing::warn!("Skipping FASTA entry with empty accession");
                 current_accession.clear();
@@ -1092,12 +1088,11 @@ impl ProteinCopilotServer {
                 ));
             }
             let engine: Box<dyn SearchEngineAdapter> = if engine_name.eq_ignore_ascii_case("sage") {
-                Box::new(
-                    protein_copilot_search_engine::adapters::sage::SageAdapter::default(),
-                )
+                Box::new(protein_copilot_search_engine::adapters::sage::SageAdapter::default())
             } else {
                 Box::new(SimpleSearchEngine::new())
             };
+            let engine_info_for_error = engine.engine_info();
             let dia_source = vec![PathBuf::from(format!("dia:{}", run_id_str))];
 
             let progress_cache = Arc::clone(&self.run_cache);
@@ -1144,6 +1139,8 @@ impl ProteinCopilotServer {
                                 Ok(mut result) => {
                                     result.run_id = run_id;
                                     result.metadata.run_id = run_id;
+                                    // Populate input_files for DIA results
+                                    result.metadata.input_files = dia_source.clone();
                                     let entry = crate::history::SearchHistoryEntry {
                                         run_id,
                                         status: "Completed".to_string(),
@@ -1175,11 +1172,7 @@ impl ProteinCopilotServer {
                                         status: format!("Failed: {e}"),
                                         created_at: chrono::Utc::now(),
                                         elapsed_sec: duration,
-                                        engine_info: protein_copilot_core::engine::EngineInfo {
-                                            name: "SimpleSearch".into(),
-                                            version: "0.1.0".into(),
-                                            supported_features: vec![],
-                                        },
+                                        engine_info: engine_info_for_error.clone(),
                                         input_files: dia_source.clone(),
                                         params_used: params.clone(),
                                         total_psms: None,
@@ -1328,12 +1321,11 @@ impl ProteinCopilotServer {
             ));
         }
         let engine: Box<dyn SearchEngineAdapter> = if engine_name.eq_ignore_ascii_case("sage") {
-            Box::new(
-                protein_copilot_search_engine::adapters::sage::SageAdapter::default(),
-            )
+            Box::new(protein_copilot_search_engine::adapters::sage::SageAdapter::default())
         } else {
             Box::new(SimpleSearchEngine::new())
         };
+        let engine_info_for_error = engine.engine_info();
 
         // Construct progress callback that writes stage updates to the cache
         let progress_cache = Arc::clone(&self.run_cache);
@@ -1405,11 +1397,7 @@ impl ProteinCopilotServer {
                                     status: format!("Failed: {e}"),
                                     created_at: chrono::Utc::now(),
                                     elapsed_sec: duration,
-                                    engine_info: protein_copilot_core::engine::EngineInfo {
-                                        name: "SimpleSearch".into(),
-                                        version: "0.1.0".into(),
-                                        supported_features: vec![],
-                                    },
+                                    engine_info: engine_info_for_error.clone(),
                                     input_files: files.clone(),
                                     params_used: params.clone(),
                                     total_psms: None,
@@ -2627,9 +2615,7 @@ impl ProteinCopilotServer {
             if q.is_nan() || q.is_infinite() || !(0.0..=1.0).contains(&q) {
                 return Err(mcp_err(
                     ErrorCode::INVALID_PARAMS,
-                    format!(
-                        "q_value_threshold must be between 0.0 and 1.0, got {q}"
-                    ),
+                    format!("q_value_threshold must be between 0.0 and 1.0, got {q}"),
                 ));
             }
         }
@@ -2671,8 +2657,8 @@ impl ProteinCopilotServer {
 
         // Optional: sequence coverage
         if let Some(fasta_path) = &input.fasta_path {
-            let fasta_sequences =
-                load_fasta_sequences(fasta_path).map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, e))?;
+            let fasta_sequences = load_fasta_sequences(fasta_path)
+                .map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, e))?;
             protein_copilot_protein_inference::coverage::calculate_coverage(
                 &mut final_groups,
                 &fasta_sequences,

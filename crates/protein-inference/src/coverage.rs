@@ -22,10 +22,7 @@ fn normalize_il(s: &str) -> String {
 ///
 /// Mutates groups in-place to set the `coverage` field. Proteins not found
 /// in the FASTA map get coverage = None.
-pub fn calculate_coverage(
-    groups: &mut [ProteinGroup],
-    fasta_sequences: &HashMap<String, String>,
-) {
+pub fn calculate_coverage(groups: &mut [ProteinGroup], fasta_sequences: &HashMap<String, String>) {
     for group in groups.iter_mut() {
         let Some(fasta_seq) = fasta_sequences.get(&group.leader_accession) else {
             tracing::warn!(
@@ -75,11 +72,7 @@ pub fn calculate_coverage(
 mod tests {
     use super::*;
 
-    fn make_group(
-        accession: &str,
-        peptides: Vec<&str>,
-        razor_peptides: Vec<&str>,
-    ) -> ProteinGroup {
+    fn make_group(accession: &str, peptides: Vec<&str>, razor_peptides: Vec<&str>) -> ProteinGroup {
         ProteinGroup {
             leader_accession: accession.to_string(),
             leader_description: String::new(),
@@ -97,8 +90,7 @@ mod tests {
     #[test]
     fn full_coverage() {
         let mut groups = vec![make_group("P1", vec!["ACDEFG"], vec![])];
-        let fasta: HashMap<String, String> =
-            [("P1".into(), "ACDEFG".into())].into_iter().collect();
+        let fasta: HashMap<String, String> = [("P1".into(), "ACDEFG".into())].into_iter().collect();
         calculate_coverage(&mut groups, &fasta);
         assert_eq!(groups[0].coverage, Some(1.0));
     }
@@ -143,8 +135,7 @@ mod tests {
     fn peptide_not_found_in_sequence() {
         // Peptide "XYZ" doesn't exist in protein "ABCDEF"
         let mut groups = vec![make_group("P1", vec!["ABC", "XYZ"], vec![])];
-        let fasta: HashMap<String, String> =
-            [("P1".into(), "ABCDEF".into())].into_iter().collect();
+        let fasta: HashMap<String, String> = [("P1".into(), "ABCDEF".into())].into_iter().collect();
         calculate_coverage(&mut groups, &fasta);
         // Only ABC matches → 3/6 = 0.5
         assert_eq!(groups[0].coverage, Some(0.5));
@@ -162,8 +153,7 @@ mod tests {
     fn il_equivalence() {
         // Peptide has L, FASTA has I → should still match via normalization
         let mut groups = vec![make_group("P1", vec!["ALCD"], vec![])];
-        let fasta: HashMap<String, String> =
-            [("P1".into(), "AICD".into())].into_iter().collect();
+        let fasta: HashMap<String, String> = [("P1".into(), "AICD".into())].into_iter().collect();
         calculate_coverage(&mut groups, &fasta);
         assert_eq!(groups[0].coverage, Some(1.0));
     }
@@ -180,8 +170,7 @@ mod tests {
     fn multiple_occurrences() {
         // Protein: ABCABC (len 6), peptide ABC occurs at pos 0 and 3
         let mut groups = vec![make_group("P1", vec!["ABC"], vec![])];
-        let fasta: HashMap<String, String> =
-            [("P1".into(), "ABCABC".into())].into_iter().collect();
+        let fasta: HashMap<String, String> = [("P1".into(), "ABCABC".into())].into_iter().collect();
         calculate_coverage(&mut groups, &fasta);
         // Both occurrences covered → 6/6 = 1.0
         assert_eq!(groups[0].coverage, Some(1.0));
@@ -203,8 +192,7 @@ mod tests {
     #[test]
     fn empty_protein_sequence() {
         let mut groups = vec![make_group("P1", vec!["ABC"], vec![])];
-        let fasta: HashMap<String, String> =
-            [("P1".into(), String::new())].into_iter().collect();
+        let fasta: HashMap<String, String> = [("P1".into(), String::new())].into_iter().collect();
         calculate_coverage(&mut groups, &fasta);
         assert_eq!(groups[0].coverage, None);
     }

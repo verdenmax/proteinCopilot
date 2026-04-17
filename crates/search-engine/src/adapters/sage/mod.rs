@@ -83,22 +83,22 @@ impl SearchEngineAdapter for SageAdapter {
     ) -> Result<SearchResult, CoreError> {
         let mut all_spectra: Vec<Spectrum> = Vec::new();
         for path in input_files {
-            let file_info = protein_copilot_spectrum_io::detect_format(path)
-                .map_err(|e| CoreError::SearchEngineError {
+            let file_info = protein_copilot_spectrum_io::detect_format(path).map_err(|e| {
+                CoreError::SearchEngineError {
                     engine: "Sage".into(),
                     detail: format!("Failed to detect format for {}: {}", path.display(), e),
                     suggestion: "Check that the input file exists and is a valid mzML/mgf file"
                         .into(),
-                })?;
+                }
+            })?;
             let reader = protein_copilot_spectrum_io::create_reader(&file_info);
-            let spectra =
-                reader
-                    .read_all(path)
-                    .map_err(|e| CoreError::SearchEngineError {
-                        engine: "Sage".into(),
-                        detail: format!("Error reading spectra from {}: {}", path.display(), e),
-                        suggestion: "Check input file format".into(),
-                    })?;
+            let spectra = reader
+                .read_all(path)
+                .map_err(|e| CoreError::SearchEngineError {
+                    engine: "Sage".into(),
+                    detail: format!("Error reading spectra from {}: {}", path.display(), e),
+                    suggestion: "Check input file format".into(),
+                })?;
             all_spectra.extend(spectra);
         }
 
@@ -160,13 +160,13 @@ impl SearchEngineAdapter for SageAdapter {
 
         // Read FASTA content
         let fasta_path = &params.database_path;
-        let fasta_content = tokio::fs::read_to_string(fasta_path)
-            .await
-            .map_err(|e| CoreError::SearchEngineError {
+        let fasta_content = tokio::fs::read_to_string(fasta_path).await.map_err(|e| {
+            CoreError::SearchEngineError {
                 engine: "Sage".into(),
                 detail: format!("Failed to read FASTA file {}: {}", fasta_path, e),
                 suggestion: "Check that database_path points to a valid FASTA file".into(),
-            })?;
+            }
+        })?;
 
         // Progress counter shared between rayon workers and the tokio poll task.
         let progress_counter = Arc::new(AtomicUsize::new(0));
@@ -258,9 +258,8 @@ impl SearchEngineAdapter for SageAdapter {
             }
 
             // Sort by discriminant score descending
-            features.par_sort_unstable_by(|a, b| {
-                b.discriminant_score.total_cmp(&a.discriminant_score)
-            });
+            features
+                .par_sort_unstable_by(|a, b| b.discriminant_score.total_cmp(&a.discriminant_score));
 
             // Spectrum-level q-value
             sage_core::ml::qvalue::spectrum_q_value(&mut features);
@@ -326,34 +325,46 @@ impl SearchEngineAdapter for SageAdapter {
 
         // ── Build protein-level results ──────────────────────────────────
         let mut protein_map: HashMap<String, ProteinResult> = HashMap::new();
-        // Track unique peptides per protein for coverage.
-        let mut protein_peptides: HashMap<String, std::collections::HashSet<String>> =
-            HashMap::new();
+        // Track distinct peptides per protein.
+        let mut protein_peptides: HashMap<String, HashSet<String>> = HashMap::new();
+        // Track which proteins each peptide maps to (for unique_peptide_count).
+        let mut peptide_proteins: HashMap<String, HashSet<String>> = HashMap::new();
         for psm in &psms {
             if psm.is_decoy {
                 continue;
             }
             for acc in &psm.protein_accessions {
-                let entry =
-                    protein_map
-                        .entry(acc.clone())
-                        .or_insert_with(|| ProteinResult {
-                            accession: acc.clone(),
-                            description: String::new(),
-                            coverage: 0.0,
-                            peptide_count: 0,
-                            unique_peptide_count: 0,
-                        });
-                entry.peptide_count += 1;
+                protein_map
+                    .entry(acc.clone())
+                    .or_insert_with(|| ProteinResult {
+                        accession: acc.clone(),
+                        description: String::new(),
+                        coverage: 0.0,
+                        peptide_count: 0,
+                        unique_peptide_count: 0,
+                    });
                 protein_peptides
                     .entry(acc.clone())
                     .or_default()
                     .insert(psm.peptide_sequence.clone());
+                peptide_proteins
+                    .entry(psm.peptide_sequence.clone())
+                    .or_default()
+                    .insert(acc.clone());
             }
         }
         for (acc, pep_set) in &protein_peptides {
             if let Some(entry) = protein_map.get_mut(acc) {
-                entry.unique_peptide_count = pep_set.len() as u64;
+                entry.peptide_count = pep_set.len() as u64;
+                // Unique peptides = those mapped to only this protein
+                entry.unique_peptide_count = pep_set
+                    .iter()
+                    .filter(|pep| {
+                        peptide_proteins
+                            .get(*pep)
+                            .is_none_or(|prots| prots.len() == 1)
+                    })
+                    .count() as u64;
             }
         }
         let proteins: Vec<ProteinResult> = protein_map.into_values().collect();
@@ -401,9 +412,7 @@ impl SearchEngineAdapter for SageAdapter {
         let mut modification_distribution: HashMap<String, u64> = HashMap::new();
         for psm in &psms {
             for m in &psm.modifications {
-                *modification_distribution
-                    .entry(m.name.clone())
-                    .or_default() += 1;
+                *modification_distribution.entry(m.name.clone()).or_default() += 1;
             }
         }
 

@@ -22,10 +22,12 @@ pub struct DownloadResult {
 pub async fn download_fasta(url: &str, dest_path: &Path) -> Result<DownloadResult, FastaDbError> {
     tracing::info!(url = url, dest = %dest_path.display(), "starting FASTA download");
 
-    let response = reqwest::get(url).await.map_err(|e| FastaDbError::NetworkError {
-        url: url.to_string(),
-        detail: e.to_string(),
-    })?;
+    let response = reqwest::get(url)
+        .await
+        .map_err(|e| FastaDbError::NetworkError {
+            url: url.to_string(),
+            detail: e.to_string(),
+        })?;
 
     if !response.status().is_success() {
         return Err(FastaDbError::NetworkError {
@@ -46,10 +48,13 @@ pub async fn download_fasta(url: &str, dest_path: &Path) -> Result<DownloadResul
             })?;
     }
 
-    let bytes = response.bytes().await.map_err(|e| FastaDbError::NetworkError {
-        url: url.to_string(),
-        detail: format!("failed to read response body: {e}"),
-    })?;
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|e| FastaDbError::NetworkError {
+            url: url.to_string(),
+            detail: format!("failed to read response body: {e}"),
+        })?;
 
     if bytes.is_empty() {
         return Err(FastaDbError::DownloadFailed {
@@ -59,12 +64,13 @@ pub async fn download_fasta(url: &str, dest_path: &Path) -> Result<DownloadResul
     }
 
     // Write to .part file
-    let mut file = tokio::fs::File::create(&part_path)
-        .await
-        .map_err(|e| FastaDbError::IoError {
-            path: part_path.clone(),
-            source: e,
-        })?;
+    let mut file =
+        tokio::fs::File::create(&part_path)
+            .await
+            .map_err(|e| FastaDbError::IoError {
+                path: part_path.clone(),
+                source: e,
+            })?;
     file.write_all(&bytes)
         .await
         .map_err(|e| FastaDbError::IoError {

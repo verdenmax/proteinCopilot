@@ -25,7 +25,10 @@ pub fn assign_razor_peptides(
     let mut razor_map: HashMap<String, String> = HashMap::new();
 
     if groups.len() <= 1 {
-        debug!(groups = groups.len(), "skipping razor assignment (≤1 group)");
+        debug!(
+            groups = groups.len(),
+            "skipping razor assignment (≤1 group)"
+        );
         return razor_map;
     }
 
@@ -67,7 +70,10 @@ pub fn assign_razor_peptides(
         let indices = &peptide_to_group_indices[pep.as_str()];
 
         // Skip peptides that are already unique to one group.
-        if indices.iter().any(|&i| groups[i].unique_peptides.contains(pep)) {
+        if indices
+            .iter()
+            .any(|&i| groups[i].unique_peptides.contains(pep))
+        {
             continue;
         }
 
@@ -196,7 +202,10 @@ mod tests {
         let razor = assign_razor_peptides(&mut groups, &map);
 
         assert_eq!(razor.len(), 1);
-        assert_eq!(razor["PEP_S"], "PROT_B", "higher score should win tie-break");
+        assert_eq!(
+            razor["PEP_S"], "PROT_B",
+            "higher score should win tie-break"
+        );
         assert!(groups[0].razor_peptides.is_empty());
         assert_eq!(groups[1].razor_peptides, vec!["PEP_S"]);
     }
@@ -230,12 +239,7 @@ mod tests {
                 &["PEP1", "PEP2", "PEP3"],
                 10.0,
             ),
-            make_group(
-                "PROT_B",
-                &["PEP4", "PEP_S1", "PEP_S2"],
-                &["PEP4"],
-                8.0,
-            ),
+            make_group("PROT_B", &["PEP4", "PEP_S1", "PEP_S2"], &["PEP4"], 8.0),
         ];
         let map = empty_map();
         let razor = assign_razor_peptides(&mut groups, &map);

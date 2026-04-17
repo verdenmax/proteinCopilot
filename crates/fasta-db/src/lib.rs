@@ -104,13 +104,14 @@ pub async fn download_database(
     cache_dir: &Path,
     force: bool,
 ) -> Result<DownloadDatabaseResult, FastaDbError> {
-    let entry = registry::get_database(database_id).ok_or_else(|| FastaDbError::UnknownDatabase {
-        id: database_id.to_string(),
-        available: registry::all_database_ids()
-            .into_iter()
-            .map(String::from)
-            .collect(),
-    })?;
+    let entry =
+        registry::get_database(database_id).ok_or_else(|| FastaDbError::UnknownDatabase {
+            id: database_id.to_string(),
+            available: registry::all_database_ids()
+                .into_iter()
+                .map(String::from)
+                .collect(),
+        })?;
 
     let cache = CacheManager::new(cache_dir.to_path_buf());
 
@@ -155,13 +156,14 @@ pub fn get_database_info(
     database_id: &str,
     cache_dir: &Path,
 ) -> Result<DatabaseInfo, FastaDbError> {
-    let entry = registry::get_database(database_id).ok_or_else(|| FastaDbError::UnknownDatabase {
-        id: database_id.to_string(),
-        available: registry::all_database_ids()
-            .into_iter()
-            .map(String::from)
-            .collect(),
-    })?;
+    let entry =
+        registry::get_database(database_id).ok_or_else(|| FastaDbError::UnknownDatabase {
+            id: database_id.to_string(),
+            available: registry::all_database_ids()
+                .into_iter()
+                .map(String::from)
+                .collect(),
+        })?;
 
     let cache = CacheManager::new(cache_dir.to_path_buf());
     let cached = cache

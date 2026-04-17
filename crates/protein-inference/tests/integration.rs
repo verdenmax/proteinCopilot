@@ -191,9 +191,7 @@ fn test_full_inference_pipeline() {
         .find(|g| g.member_accessions.contains(&"P002".to_string()))
         .expect("P002 should be in a group");
     assert!(
-        p002_group
-            .member_accessions
-            .contains(&"P004".to_string()),
+        p002_group.member_accessions.contains(&"P004".to_string()),
         "P002 and P004 should be in the same group (indistinguishable)"
     );
 
@@ -271,12 +269,8 @@ fn test_full_inference_pipeline() {
 
     // Validate each group structurally
     for g in &final_groups {
-        g.validate().unwrap_or_else(|e| {
-            panic!(
-                "group {} failed validation: {e}",
-                g.leader_accession
-            )
-        });
+        g.validate()
+            .unwrap_or_else(|e| panic!("group {} failed validation: {e}", g.leader_accession));
     }
 }
 
@@ -392,11 +386,16 @@ fn test_pipeline_all_psms_above_threshold() {
 
 #[test]
 fn test_pipeline_single_protein_single_peptide() {
-    let psms = vec![make_psm("SIMPLEPEP", &["PROT_SOLO"], 25.0, Some(0.001), false)];
-    let fasta: HashMap<String, String> =
-        [("PROT_SOLO".into(), "MSIMPLEPEPENDXYZ".into())]
-            .into_iter()
-            .collect();
+    let psms = vec![make_psm(
+        "SIMPLEPEP",
+        &["PROT_SOLO"],
+        25.0,
+        Some(0.001),
+        false,
+    )];
+    let fasta: HashMap<String, String> = [("PROT_SOLO".into(), "MSIMPLEPEPENDXYZ".into())]
+        .into_iter()
+        .collect();
 
     let map = build_peptide_protein_map(&psms, Some(0.01)).unwrap();
     let mut groups = run_parsimony(&map).unwrap();
@@ -546,10 +545,9 @@ fn test_pipeline_coverage_missing_fasta() {
         make_psm("PEPTIDEB", &["PROT_MISSING"], 18.0, Some(0.002), false),
     ];
     // Only provide FASTA for PROT_KNOWN
-    let fasta: HashMap<String, String> =
-        [("PROT_KNOWN".into(), "MPEPTIDEAENDXYZ".into())]
-            .into_iter()
-            .collect();
+    let fasta: HashMap<String, String> = [("PROT_KNOWN".into(), "MPEPTIDEAENDXYZ".into())]
+        .into_iter()
+        .collect();
 
     let map = build_peptide_protein_map(&psms, Some(0.01)).unwrap();
     let mut groups = run_parsimony(&map).unwrap();
@@ -593,7 +591,13 @@ fn test_pipeline_razor_assignment_correctness() {
         // P_SMALL has 1 unique peptide
         make_psm("UNIQUE_SMALL", &["P_SMALL"], 17.0, Some(0.002), false),
         // Shared peptide between both
-        make_psm("SHARED_PEP", &["P_BIG", "P_SMALL"], 16.0, Some(0.003), false),
+        make_psm(
+            "SHARED_PEP",
+            &["P_BIG", "P_SMALL"],
+            16.0,
+            Some(0.003),
+            false,
+        ),
     ];
 
     let map = build_peptide_protein_map(&psms, Some(0.01)).unwrap();
@@ -700,9 +704,7 @@ fn test_pipeline_coverage_includes_razor_peptides() {
     calculate_coverage(&mut final_groups, &fasta);
 
     // PROT_A should have coverage > 0
-    let prot_a = final_groups
-        .iter()
-        .find(|g| g.leader_accession == "PROT_A");
+    let prot_a = final_groups.iter().find(|g| g.leader_accession == "PROT_A");
     if let Some(g) = prot_a {
         assert!(g.coverage.is_some());
         assert!(

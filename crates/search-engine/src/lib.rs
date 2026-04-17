@@ -32,11 +32,11 @@ pub mod registry;
 pub mod simple_engine;
 pub mod varmod;
 
+pub use adapters::sage::SageAdapter;
 pub use error::SearchEngineError;
 pub use progress::SearchProgress;
 pub use registry::EngineRegistry;
 pub use simple_engine::SimpleSearchEngine;
-pub use adapters::sage::SageAdapter;
 
 #[cfg(test)]
 mod tests {

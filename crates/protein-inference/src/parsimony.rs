@@ -50,10 +50,7 @@ pub fn run_parsimony(map: &PeptideProteinMap) -> Result<Vec<ProteinGroup>, Infer
 
     // Step 2: Remove subset proteins — subsume strict subsets into supersets.
     remove_subsets(&mut indistinguishable);
-    info!(
-        groups = indistinguishable.len(),
-        "after subset removal"
-    );
+    info!(groups = indistinguishable.len(), "after subset removal");
 
     // Step 3: Greedy set cover.
     let selected = greedy_set_cover(&indistinguishable);
@@ -85,7 +82,10 @@ fn group_indistinguishable(map: &PeptideProteinMap) -> Vec<IndistinguishableGrou
 
     for (protein, peptides) in &map.protein_to_peptides {
         let key: BTreeSet<String> = peptides.iter().cloned().collect();
-        key_to_proteins.entry(key).or_default().push(protein.clone());
+        key_to_proteins
+            .entry(key)
+            .or_default()
+            .push(protein.clone());
     }
 
     key_to_proteins
@@ -138,9 +138,7 @@ fn remove_subsets(groups: &mut Vec<IndistinguishableGroup>) {
     let merges: Vec<(usize, Vec<String>)> = merge_into
         .iter()
         .enumerate()
-        .filter_map(|(j, target)| {
-            target.map(|i| (i, groups[j].members.clone()))
-        })
+        .filter_map(|(j, target)| target.map(|i| (i, groups[j].members.clone())))
         .collect();
 
     for (target_idx, members) in merges {
@@ -181,8 +179,16 @@ fn greedy_set_cover(groups: &[IndistinguishableGroup]) -> Vec<&Indistinguishable
             .enumerate()
             .filter(|(i, _)| !used[*i])
             .max_by(|(_, a), (_, b)| {
-                let a_cover = a.peptides.iter().filter(|p| uncovered.contains(p.as_str())).count();
-                let b_cover = b.peptides.iter().filter(|p| uncovered.contains(p.as_str())).count();
+                let a_cover = a
+                    .peptides
+                    .iter()
+                    .filter(|p| uncovered.contains(p.as_str()))
+                    .count();
+                let b_cover = b
+                    .peptides
+                    .iter()
+                    .filter(|p| uncovered.contains(p.as_str()))
+                    .count();
                 a_cover
                     .cmp(&b_cover)
                     .then_with(|| {
@@ -241,7 +247,10 @@ fn build_protein_groups(
                 .collect();
             unique_peptides.sort();
 
-            let is_decoy = group.members.iter().all(|acc| acc.starts_with(DECOY_PREFIX));
+            let is_decoy = group
+                .members
+                .iter()
+                .all(|acc| acc.starts_with(DECOY_PREFIX));
 
             ProteinGroup {
                 leader_accession,
@@ -328,7 +337,11 @@ mod tests {
         assert_eq!(groups[0].leader_accession, "PROT_A");
         assert_eq!(groups[0].member_accessions, vec!["PROT_A"]);
         assert_eq!(groups[0].peptides.len(), 3);
-        assert_eq!(groups[0].unique_peptides.len(), 3, "all peptides should be unique");
+        assert_eq!(
+            groups[0].unique_peptides.len(),
+            3,
+            "all peptides should be unique"
+        );
         assert_eq!(groups[0].score, 10.0);
         assert!(!groups[0].is_decoy);
     }
@@ -386,9 +399,18 @@ mod tests {
         assert_eq!(groups.len(), 3);
 
         // Find the groups by leader.
-        let group_a = groups.iter().find(|g| g.leader_accession == "PROT_A").unwrap();
-        let group_b = groups.iter().find(|g| g.leader_accession == "PROT_B").unwrap();
-        let group_c = groups.iter().find(|g| g.leader_accession == "PROT_C").unwrap();
+        let group_a = groups
+            .iter()
+            .find(|g| g.leader_accession == "PROT_A")
+            .unwrap();
+        let group_b = groups
+            .iter()
+            .find(|g| g.leader_accession == "PROT_B")
+            .unwrap();
+        let group_c = groups
+            .iter()
+            .find(|g| g.leader_accession == "PROT_C")
+            .unwrap();
 
         // PROT_A: PEP1, PEP2 unique; PEP3 shared with PROT_B.
         assert!(group_a.unique_peptides.contains(&"PEP1".to_string()));
@@ -417,10 +439,19 @@ mod tests {
             ("PEP3", &["PROT_B"], 10.0),
         ]);
         let groups = run_parsimony(&map).unwrap();
-        let decoy_group = groups.iter().find(|g| g.leader_accession == "REV_PROT_A").unwrap();
-        assert!(decoy_group.is_decoy, "group with all REV_ members should be decoy");
+        let decoy_group = groups
+            .iter()
+            .find(|g| g.leader_accession == "REV_PROT_A")
+            .unwrap();
+        assert!(
+            decoy_group.is_decoy,
+            "group with all REV_ members should be decoy"
+        );
 
-        let target_group = groups.iter().find(|g| g.leader_accession == "PROT_B").unwrap();
+        let target_group = groups
+            .iter()
+            .find(|g| g.leader_accession == "PROT_B")
+            .unwrap();
         assert!(!target_group.is_decoy);
     }
 
@@ -459,10 +490,7 @@ mod tests {
     fn test_score_selection_and_leader() {
         // Two proteins with different peptides but we verify scoring and leader selection.
         // PROT_B has a higher-scoring peptide, but leader should be alphabetically first within group.
-        let map = build_map(&[
-            ("PEP1", &["PROT_A"], 5.0),
-            ("PEP2", &["PROT_B"], 15.0),
-        ]);
+        let map = build_map(&[("PEP1", &["PROT_A"], 5.0), ("PEP2", &["PROT_B"], 15.0)]);
         let groups = run_parsimony(&map).unwrap();
         assert_eq!(groups.len(), 2);
 
@@ -483,10 +511,7 @@ mod tests {
         let groups = run_parsimony(&map).unwrap();
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0].leader_accession, "ALPHA");
-        assert_eq!(
-            groups[0].member_accessions,
-            vec!["ALPHA", "BETA", "GAMMA"]
-        );
+        assert_eq!(groups[0].member_accessions, vec!["ALPHA", "BETA", "GAMMA"]);
     }
 
     #[test]

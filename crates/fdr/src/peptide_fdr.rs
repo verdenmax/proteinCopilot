@@ -83,7 +83,9 @@ pub fn calculate_peptide_fdr(peptides: &[PeptideScore]) -> Result<PeptideFdrResu
 ///
 /// Note: This function does NOT normalize I/L — the caller should
 /// normalize first if desired.
-pub fn extract_unique_peptides(psms: &[protein_copilot_core::search_result::Psm]) -> Vec<PeptideScore> {
+pub fn extract_unique_peptides(
+    psms: &[protein_copilot_core::search_result::Psm],
+) -> Vec<PeptideScore> {
     let mut best_per_seq: HashMap<&str, (f64, bool)> = HashMap::new();
 
     for psm in psms {

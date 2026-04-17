@@ -16,5 +16,7 @@ pub mod protein_fdr;
 pub use calculation::calculate_fdr;
 pub use decoy::{generate_decoys, DecoyProtein};
 pub use error::FdrError;
-pub use peptide_fdr::{calculate_peptide_fdr, extract_unique_peptides, PeptideFdrResult, PeptideScore};
+pub use peptide_fdr::{
+    calculate_peptide_fdr, extract_unique_peptides, PeptideFdrResult, PeptideScore,
+};
 pub use protein_fdr::{calculate_protein_fdr, ProteinFdrResult};

@@ -84,7 +84,10 @@ mod tests {
     #[test]
     fn registry_has_expected_entries() {
         let entries = all_databases();
-        assert!(entries.len() >= 6, "should have at least 6 built-in databases");
+        assert!(
+            entries.len() >= 6,
+            "should have at least 6 built-in databases"
+        );
 
         let human = get_database("human_swissprot");
         assert!(human.is_some(), "human_swissprot must exist");
