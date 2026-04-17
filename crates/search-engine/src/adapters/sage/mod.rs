@@ -7,7 +7,7 @@
 pub mod config;
 pub mod convert;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -38,7 +38,7 @@ use self::convert::{mass_tolerance_to_sage, spectrum_to_raw};
 ///
 /// Wraps sage-core for in-process proteomics search with rayon parallelism.
 /// Each `search()` call creates an independent `IndexedDatabase` and `Scorer`.
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct SageAdapter {
     /// Number of threads for rayon (0 = use rayon default = all cores).
     /// Reserved for future per-search thread pool configuration.
@@ -81,18 +81,6 @@ impl SearchEngineAdapter for SageAdapter {
         input_files: &[PathBuf],
         on_progress: ProgressCallback,
     ) -> Result<SearchResult, CoreError> {
-        let start = Instant::now();
-        let run_id = Uuid::new_v4();
-
-        on_progress(SearchProgress {
-            run_id,
-            status: "Running".to_string(),
-            stage: Some("Loading spectra".to_string()),
-            progress_pct: Some(0.0),
-            elapsed_sec: 0.0,
-            estimated_remaining_sec: None,
-        });
-
         let mut all_spectra: Vec<Spectrum> = Vec::new();
         for path in input_files {
             let file_info = protein_copilot_spectrum_io::detect_format(path)
@@ -114,17 +102,14 @@ impl SearchEngineAdapter for SageAdapter {
             all_spectra.extend(spectra);
         }
 
-        on_progress(SearchProgress {
-            run_id,
-            status: "Running".to_string(),
-            stage: Some("Loading spectra".to_string()),
-            progress_pct: Some(100.0),
-            elapsed_sec: start.elapsed().as_secs_f64(),
-            estimated_remaining_sec: None,
-        });
+        let mut result = self
+            .search_with_spectra(params, all_spectra, on_progress)
+            .await?;
 
-        self.search_with_spectra(params, all_spectra, on_progress)
-            .await
+        // Populate input_files in metadata (search_with_spectra doesn't have them)
+        result.metadata.input_files = input_files.to_vec();
+
+        Ok(result)
     }
 
     async fn search_with_spectra(
@@ -265,10 +250,10 @@ impl SearchEngineAdapter for SageAdapter {
             if sage_core::ml::linear_discriminant::score_psms(&mut features, precursor_tol)
                 .is_none()
             {
-                // Fallback: heuristic discriminant score
+                // Fallback: heuristic discriminant score (guard against NaN from ln_1p)
                 features.par_iter_mut().for_each(|feat| {
-                    feat.discriminant_score =
-                        (-feat.poisson as f32).ln_1p() + feat.longest_y_pct / 3.0;
+                    let p = (-feat.poisson as f32).max(-0.999);
+                    feat.discriminant_score = p.ln_1p() + feat.longest_y_pct / 3.0;
                 });
             }
 
@@ -428,12 +413,25 @@ impl SearchEngineAdapter for SageAdapter {
             *charge_distribution.entry(psm.charge).or_default() += 1;
         }
 
+        // Count proteins at 1% FDR using protein_q from sage features
+        let proteins_at_1pct: u64 = {
+            let mut protein_accs_at_1pct: HashSet<&str> = HashSet::new();
+            for feat in &features {
+                if feat.label != -1 && feat.protein_q <= 0.01 {
+                    for acc in &db[feat.peptide_idx].proteins {
+                        protein_accs_at_1pct.insert(acc.as_ref());
+                    }
+                }
+            }
+            protein_accs_at_1pct.len() as u64
+        };
+
         let summary = SearchResultSummary {
             total_spectra_searched: total_spectra as u64,
             total_psms: psms.len() as u64,
             psms_at_1pct_fdr: psms_at_1pct,
             unique_peptides_at_1pct_fdr: peptides_at_1pct,
-            protein_groups_at_1pct_fdr: proteins.len() as u64,
+            protein_groups_at_1pct_fdr: proteins_at_1pct,
             median_score,
             median_delta_mass_ppm,
             identification_rate,
@@ -503,7 +501,10 @@ fn feature_to_psm(feat: &Feature, db: &IndexedDatabase) -> Psm {
     };
 
     // spec_id is the scan number stored as a string (see convert::spectrum_to_raw)
-    let spectrum_scan = feat.spec_id.parse::<u32>().unwrap_or(1);
+    let spectrum_scan = feat.spec_id.parse::<u32>().unwrap_or_else(|_| {
+        tracing::warn!(spec_id = %feat.spec_id, "Failed to parse spec_id as scan number, defaulting to 1");
+        1
+    });
 
     // Preserve sage-specific scoring details in extra fields.
     let mut extra = HashMap::new();

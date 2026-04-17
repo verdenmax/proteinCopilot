@@ -249,6 +249,9 @@ fn default_qvalue_threshold() -> Option<f64> {
 struct EngineStatus {
     engine: protein_copilot_core::engine::EngineInfo,
     status: HealthStatus,
+    /// All available engines (when multiple are registered)
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    all_engines: Vec<protein_copilot_core::engine::EngineInfo>,
 }
 
 /// Response when search is started asynchronously
@@ -1070,11 +1073,30 @@ impl ProteinCopilotServer {
 
             let run_cache_clone = Arc::clone(&self.run_cache);
             let engine_name = params.engine.as_deref().unwrap_or("SimpleSearch");
-            let engine: Box<dyn SearchEngineAdapter> = match engine_name {
-                "Sage" | "sage" => Box::new(
+            // Validate engine exists in registry before spawning
+            if self.registry.get(engine_name).is_none()
+                && !engine_name.eq_ignore_ascii_case("sage")
+                && !engine_name.eq_ignore_ascii_case("simplesearch")
+            {
+                return Err(mcp_err(
+                    ErrorCode::INVALID_PARAMS,
+                    format!(
+                        "Engine '{}' not registered. Available: {:?}",
+                        engine_name,
+                        self.registry
+                            .list_available()
+                            .iter()
+                            .map(|e| &e.name)
+                            .collect::<Vec<_>>()
+                    ),
+                ));
+            }
+            let engine: Box<dyn SearchEngineAdapter> = if engine_name.eq_ignore_ascii_case("sage") {
+                Box::new(
                     protein_copilot_search_engine::adapters::sage::SageAdapter::default(),
-                ),
-                _ => Box::new(SimpleSearchEngine::new()),
+                )
+            } else {
+                Box::new(SimpleSearchEngine::new())
             };
             let dia_source = vec![PathBuf::from(format!("dia:{}", run_id_str))];
 
@@ -1287,11 +1309,30 @@ impl ProteinCopilotServer {
 
         let run_cache_clone = Arc::clone(&self.run_cache);
         let engine_name = params.engine.as_deref().unwrap_or("SimpleSearch");
-        let engine: Box<dyn SearchEngineAdapter> = match engine_name {
-            "Sage" | "sage" => Box::new(
+        // Validate engine exists in registry before spawning
+        if self.registry.get(engine_name).is_none()
+            && !engine_name.eq_ignore_ascii_case("sage")
+            && !engine_name.eq_ignore_ascii_case("simplesearch")
+        {
+            return Err(mcp_err(
+                ErrorCode::INVALID_PARAMS,
+                format!(
+                    "Engine '{}' not registered. Available: {:?}",
+                    engine_name,
+                    self.registry
+                        .list_available()
+                        .iter()
+                        .map(|e| &e.name)
+                        .collect::<Vec<_>>()
+                ),
+            ));
+        }
+        let engine: Box<dyn SearchEngineAdapter> = if engine_name.eq_ignore_ascii_case("sage") {
+            Box::new(
                 protein_copilot_search_engine::adapters::sage::SageAdapter::default(),
-            ),
-            _ => Box::new(SimpleSearchEngine::new()),
+            )
+        } else {
+            Box::new(SimpleSearchEngine::new())
         };
 
         // Construct progress callback that writes stage updates to the cache
@@ -1486,8 +1527,8 @@ impl ProteinCopilotServer {
         description = "Check available search engines and their health status. Returns engine name, version, supported features, and availability."
     )]
     async fn check_engine(&self) -> Json<EngineStatus> {
-        // Use first engine from registry
         let engines = self.registry.list_available();
+        let all_engines = engines.clone();
         if let Some(info) = engines.first() {
             let status = if let Some(engine) = self.registry.get(&info.name) {
                 engine
@@ -1504,6 +1545,7 @@ impl ProteinCopilotServer {
             Json(EngineStatus {
                 engine: info.clone(),
                 status,
+                all_engines,
             })
         } else {
             Json(EngineStatus {
@@ -1515,6 +1557,7 @@ impl ProteinCopilotServer {
                 status: HealthStatus::Unavailable {
                     reason: "no engines registered".to_string(),
                 },
+                all_engines: vec![],
             })
         }
     }
