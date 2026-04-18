@@ -19,36 +19,88 @@ pub enum IndexSource {
     BuiltFromScan,
 }
 
-/// Maps scan numbers to byte offsets within an mzML file.
+/// Per-scan metadata stored in the index.
+#[derive(Debug, Clone)]
+pub struct ScanMeta {
+    /// Byte offset of the `<spectrum>` opening tag in the mzML file.
+    pub offset: u64,
+    /// Retention time in seconds. 0.0 if unknown.
+    pub rt_seconds: f64,
+    /// MS level (1=MS1, 2=MS2). 0 if unknown.
+    pub ms_level: u8,
+    /// Isolation window: (target_mz, lower_offset, upper_offset). None for MS1 or unknown.
+    pub isolation_window: Option<(f64, f64, f64)>,
+}
+
+/// Maps scan numbers to byte offsets and metadata within an mzML file.
 ///
-/// Enables O(1) spectrum lookup: seek to offset → parse single `<spectrum>` node.
+/// Enables O(1) spectrum lookup by scan number and O(log N) lookup by
+/// retention time via a pre-sorted RT index.
 #[derive(Debug, Clone)]
 pub struct ScanIndex {
-    /// scan_number → byte offset of the `<spectrum>` opening tag.
-    offsets: HashMap<u32, u64>,
+    /// scan_number → metadata (offset, RT, ms_level, isolation_window).
+    entries: HashMap<u32, ScanMeta>,
     /// How this index was built.
     source: IndexSource,
+    /// Pre-sorted (rt_seconds, scan_number) pairs for binary search.
+    rt_sorted: Vec<(f64, u32)>,
 }
 
 impl ScanIndex {
-    /// Creates a new ScanIndex from a pre-built map.
+    /// Creates a ScanIndex from a legacy offset-only map.
+    ///
+    /// Metadata fields are set to defaults (rt=0, ms_level=0, no isolation).
     pub fn new(offsets: HashMap<u32, u64>, source: IndexSource) -> Self {
-        Self { offsets, source }
+        let entries: HashMap<u32, ScanMeta> = offsets
+            .into_iter()
+            .map(|(scan, offset)| {
+                (
+                    scan,
+                    ScanMeta {
+                        offset,
+                        rt_seconds: 0.0,
+                        ms_level: 0,
+                        isolation_window: None,
+                    },
+                )
+            })
+            .collect();
+        let rt_sorted = build_rt_sorted(&entries);
+        Self {
+            entries,
+            source,
+            rt_sorted,
+        }
+    }
+
+    /// Creates a ScanIndex from a full metadata map.
+    pub fn from_meta(entries: HashMap<u32, ScanMeta>, source: IndexSource) -> Self {
+        let rt_sorted = build_rt_sorted(&entries);
+        Self {
+            entries,
+            source,
+            rt_sorted,
+        }
     }
 
     /// Returns the byte offset for a given scan number, or `None`.
     pub fn get_offset(&self, scan: u32) -> Option<u64> {
-        self.offsets.get(&scan).copied()
+        self.entries.get(&scan).map(|m| m.offset)
+    }
+
+    /// Returns the full metadata for a given scan number, or `None`.
+    pub fn get_meta(&self, scan: u32) -> Option<&ScanMeta> {
+        self.entries.get(&scan)
     }
 
     /// Returns the number of indexed scans.
     pub fn len(&self) -> usize {
-        self.offsets.len()
+        self.entries.len()
     }
 
     /// Whether the index is empty.
     pub fn is_empty(&self) -> bool {
-        self.offsets.is_empty()
+        self.entries.is_empty()
     }
 
     /// How this index was constructed.
@@ -56,17 +108,101 @@ impl ScanIndex {
         self.source
     }
 
-    /// Returns a reference to the underlying offsets map.
-    pub fn offsets(&self) -> &HashMap<u32, u64> {
-        &self.offsets
+    /// Returns offset references for disk cache serialization.
+    pub fn iter_meta(&self) -> impl Iterator<Item = (&u32, &ScanMeta)> {
+        self.entries.iter()
+    }
+
+    /// Returns a legacy offsets map (for backward compatibility).
+    pub fn offsets(&self) -> HashMap<u32, u64> {
+        self.entries
+            .iter()
+            .map(|(&scan, meta)| (scan, meta.offset))
+            .collect()
     }
 
     /// Returns all indexed scan numbers, sorted ascending.
     pub fn scan_numbers(&self) -> Vec<u32> {
-        let mut scans: Vec<u32> = self.offsets.keys().copied().collect();
+        let mut scans: Vec<u32> = self.entries.keys().copied().collect();
         scans.sort_unstable();
         scans
     }
+
+    /// Returns the pre-sorted RT index for binary search.
+    pub fn rt_sorted(&self) -> &[(f64, u32)] {
+        &self.rt_sorted
+    }
+
+    /// Find the best MS2 scan matching a given RT and precursor m/z.
+    ///
+    /// Uses binary search on the pre-sorted RT index. O(log N + k) where
+    /// k is the number of scans in the RT tolerance window.
+    ///
+    /// Returns `(scan_number, rt_delta_min)` or `None`.
+    pub fn find_by_rt(
+        &self,
+        rt_min: f64,
+        precursor_mz: f64,
+        rt_tolerance_min: f64,
+    ) -> Option<(u32, f64)> {
+        let rt_sec = rt_min * 60.0;
+        let tol_sec = rt_tolerance_min * 60.0;
+
+        let start = self
+            .rt_sorted
+            .partition_point(|&(rt, _)| rt < rt_sec - tol_sec);
+
+        let mut best: Option<(u32, f64)> = None;
+
+        for &(rt, scan) in &self.rt_sorted[start..] {
+            let delta_sec = rt - rt_sec;
+            if delta_sec > tol_sec {
+                break;
+            }
+            if delta_sec.abs() > tol_sec {
+                continue;
+            }
+
+            let meta = match self.entries.get(&scan) {
+                Some(m) => m,
+                None => continue,
+            };
+
+            if meta.ms_level != 2 {
+                continue;
+            }
+
+            if let Some((target, lower, upper)) = meta.isolation_window {
+                let low = target - lower;
+                let high = target + upper;
+                if precursor_mz < low || precursor_mz > high {
+                    continue;
+                }
+            }
+
+            let delta_min = delta_sec / 60.0;
+            match &best {
+                None => best = Some((scan, delta_min)),
+                Some((_, best_delta)) => {
+                    if delta_min.abs() < best_delta.abs() {
+                        best = Some((scan, delta_min));
+                    }
+                }
+            }
+        }
+
+        best
+    }
+}
+
+/// Build sorted (rt_seconds, scan_number) pairs from the entries map.
+fn build_rt_sorted(entries: &HashMap<u32, ScanMeta>) -> Vec<(f64, u32)> {
+    let mut sorted: Vec<(f64, u32)> = entries
+        .iter()
+        .map(|(&scan, meta)| (meta.rt_seconds, scan))
+        .collect();
+    sorted.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    sorted
 }
 
 /// Size of the tail chunk to read when searching for `<indexListOffset>`.
