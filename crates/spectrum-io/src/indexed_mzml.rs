@@ -166,6 +166,22 @@ impl SpectrumReader for IndexedMzMLReader {
     ) -> Result<Option<(u32, f64)>, SpectrumIoError> {
         Ok(self.index.find_by_rt(rt_min, precursor_mz, rt_tolerance_min))
     }
+
+    fn list_ms2_meta(
+        &self,
+        _path: &Path,
+    ) -> Result<Vec<crate::reader::Ms2ScanMeta>, SpectrumIoError> {
+        Ok(self
+            .index
+            .iter_meta()
+            .filter(|(_, meta)| meta.ms_level == 2)
+            .map(|(&scan, meta)| crate::reader::Ms2ScanMeta {
+                scan_number: scan,
+                rt_min: meta.rt_seconds / 60.0,
+                isolation_window: meta.isolation_window,
+            })
+            .collect())
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -6,6 +6,14 @@ use protein_copilot_core::spectrum::{Spectrum, SpectrumSummary};
 
 use crate::error::SpectrumIoError;
 
+/// MS2 scan metadata returned by [`SpectrumReader::list_ms2_meta`].
+#[derive(Debug, Clone)]
+pub struct Ms2ScanMeta {
+    pub scan_number: u32,
+    pub rt_min: f64,
+    pub isolation_window: Option<(f64, f64, f64)>,
+}
+
 /// Unified interface for reading spectrum files.
 ///
 /// Each supported format (mgf, mzML) implements this trait.
@@ -43,6 +51,36 @@ pub trait SpectrumReader: Send + Sync {
         path: &Path,
         handler: &mut dyn FnMut(Spectrum) -> Result<bool, SpectrumIoError>,
     ) -> Result<u32, SpectrumIoError>;
+
+    /// Returns metadata for all MS2 scans: `(scan_number, rt_min, isolation_window)`.
+    ///
+    /// Default implementation reads all spectra (slow for large files).
+    /// [`crate::IndexedMzMLReader`] overrides to read directly from the
+    /// PCIX v2 disk cache index — zero I/O, sub-millisecond.
+    fn list_ms2_meta(
+        &self,
+        path: &Path,
+    ) -> Result<Vec<Ms2ScanMeta>, SpectrumIoError> {
+        use protein_copilot_core::spectrum::MsLevel;
+
+        let spectra = self.read_all(path)?;
+        Ok(spectra
+            .iter()
+            .filter(|s| s.ms_level == MsLevel::MS2)
+            .map(|s| {
+                let iso = s.precursors.first().and_then(|p| {
+                    p.isolation_window
+                        .as_ref()
+                        .map(|w| (w.target_mz, w.lower_offset, w.upper_offset))
+                });
+                Ms2ScanMeta {
+                    scan_number: s.scan_number,
+                    rt_min: s.retention_time_min,
+                    isolation_window: iso,
+                }
+            })
+            .collect())
+    }
 
     /// Find the best MS2 scan matching a given RT and precursor m/z.
     ///

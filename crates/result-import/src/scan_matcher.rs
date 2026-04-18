@@ -9,7 +9,6 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use protein_copilot_core::spectrum::MsLevel;
 use protein_copilot_spectrum_io::reader::SpectrumReader;
 
 use crate::{FileMatchStats, ImportedPsm, MatchReport, ResultImportError};
@@ -176,25 +175,17 @@ pub fn collect_ms2_info(
     reader: &dyn SpectrumReader,
     path: &Path,
 ) -> Result<Vec<Ms2Info>, ResultImportError> {
-    let spectra = reader
-        .read_all(path)
+    let meta = reader
+        .list_ms2_meta(path)
         .map_err(|e| ResultImportError::SpectrumIo(e.to_string()))?;
-    let mut infos = Vec::new();
-    for spec in &spectra {
-        if spec.ms_level == MsLevel::MS2 {
-            let isolation = spec.precursors.first().and_then(|p| {
-                p.isolation_window
-                    .as_ref()
-                    .map(|w| (w.target_mz, w.lower_offset, w.upper_offset))
-            });
-            infos.push(Ms2Info {
-                scan_number: spec.scan_number,
-                rt_min: spec.retention_time_min,
-                isolation_window: isolation,
-            });
-        }
-    }
-    Ok(infos)
+    Ok(meta
+        .into_iter()
+        .map(|m| Ms2Info {
+            scan_number: m.scan_number,
+            rt_min: m.rt_min,
+            isolation_window: m.isolation_window,
+        })
+        .collect())
 }
 
 /// Find the best matching MS2 for a given RT and precursor m/z.
