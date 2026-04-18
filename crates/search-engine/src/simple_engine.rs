@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use protein_copilot_core::diagnostics::SearchDiagnostics;
+use protein_copilot_core::diagnostics::{ErrorCategory, SearchDiagnostics};
 use protein_copilot_core::engine::{EngineInfo, HealthStatus, SearchEngineAdapter};
 use protein_copilot_core::error::CoreError;
 use protein_copilot_core::progress::{ProgressCallback, SearchProgress};
@@ -86,6 +86,7 @@ impl SimpleSearchEngine {
         on_progress: &dyn Fn(SearchProgress),
         total_spectra: u64,
         mut psms: Vec<Psm>,
+        diagnostics: &mut SearchDiagnostics,
     ) -> Result<SearchResult, SearchEngineError> {
         let report = |stage: &str, pct: f64| {
             on_progress(SearchProgress {
@@ -101,6 +102,7 @@ impl SimpleSearchEngine {
         };
 
         // Calculate FDR and assign q-values if decoy strategy is active
+        diagnostics.begin_stage("fdr_calculation");
         if params.decoy_strategy != DecoyStrategy::None {
             report("Calculating FDR", 0.88);
             let scored: Vec<protein_copilot_fdr::calculation::ScoredPsm> = psms
@@ -128,6 +130,7 @@ impl SimpleSearchEngine {
             // Remove decoy PSMs from final results
             psms.retain(|p| !p.is_decoy);
         }
+        diagnostics.end_stage(Some(psms.len() as u64));
 
         // Aggregate peptide and protein level results
         report("Aggregating results", 0.92);
@@ -164,6 +167,7 @@ impl SimpleSearchEngine {
         params: &SearchParams,
         input_files: &[PathBuf],
         on_progress: &dyn Fn(SearchProgress),
+        diagnostics: &mut SearchDiagnostics,
     ) -> Result<SearchResult, SearchEngineError> {
         let start = Instant::now();
         let run_id = Uuid::new_v4();
@@ -183,22 +187,30 @@ impl SimpleSearchEngine {
         };
 
         // Step 1: Validate parameters
-        params
-            .validate()
-            .map_err(|e| SearchEngineError::InvalidParams {
+        params.validate().map_err(|e| {
+            diagnostics.set_error(ErrorCategory::Parameters, &e.to_string());
+            SearchEngineError::InvalidParams {
                 detail: e.to_string(),
-            })?;
+            }
+        })?;
 
         if input_files.is_empty() {
+            diagnostics.set_error(ErrorCategory::InputData, "No input spectrum files");
             return Err(SearchEngineError::NoInputSpectra);
         }
 
         // Step 2: Read FASTA database and digest
         report("Reading FASTA database", 0.02);
+        diagnostics.begin_stage("fasta_parsing");
         let fasta_path = Path::new(&params.database_path);
-        let proteins = parse_fasta(fasta_path)?;
+        let proteins = parse_fasta(fasta_path).inspect_err(|e| {
+            diagnostics.fail_stage(&e.to_string());
+            diagnostics.set_error(ErrorCategory::Database, &e.to_string());
+        })?;
+        diagnostics.end_stage(Some(proteins.len() as u64));
 
         report("Digesting proteins", 0.08);
+        diagnostics.begin_stage("digestion");
         let mut all_peptides: Vec<DigestedPeptide> = Vec::new();
         for protein in &proteins {
             let peptides = digest_with_length(
@@ -213,15 +225,16 @@ impl SimpleSearchEngine {
         }
 
         if all_peptides.is_empty() {
-            return Err(SearchEngineError::ExecutionError {
-                detail: format!(
-                    "no candidate peptides generated from {} proteins \
-                     (all peptides may be shorter than {} or longer than {} residues)",
-                    proteins.len(),
-                    params.min_peptide_length,
-                    params.max_peptide_length,
-                ),
-            });
+            let detail = format!(
+                "no candidate peptides generated from {} proteins \
+                 (all peptides may be shorter than {} or longer than {} residues)",
+                proteins.len(),
+                params.min_peptide_length,
+                params.max_peptide_length,
+            );
+            diagnostics.fail_stage(&detail);
+            diagnostics.set_error(ErrorCategory::Database, &detail);
+            return Err(SearchEngineError::ExecutionError { detail });
         }
 
         // Generate and digest decoy database if strategy is active
@@ -251,28 +264,36 @@ impl SimpleSearchEngine {
                 all_peptides.extend(peptides);
             }
         }
+        diagnostics.end_stage(Some(all_peptides.len() as u64));
 
         // Step 3: Pre-scan file summaries so we can stream spectra during search
         // while preserving progress reporting and final summary counts.
+        diagnostics.begin_stage("matching");
         report("Scanning spectrum summaries", 0.12);
         let mut total_ms2_spectra: u64 = 0;
         for file_path in input_files {
             let info = protein_copilot_spectrum_io::detect_format(file_path).map_err(|e| {
-                SearchEngineError::IoError {
-                    detail: e.to_string(),
-                }
+                let detail = e.to_string();
+                diagnostics.fail_stage(&detail);
+                diagnostics.set_error(ErrorCategory::InputData, &detail);
+                SearchEngineError::IoError { detail }
             })?;
             let reader = protein_copilot_spectrum_io::create_reader(&info);
             let summary =
                 reader
                     .read_summary(file_path)
-                    .map_err(|e| SearchEngineError::IoError {
-                        detail: e.to_string(),
+                    .map_err(|e| {
+                        let detail = e.to_string();
+                        diagnostics.fail_stage(&detail);
+                        diagnostics.set_error(ErrorCategory::InputData, &detail);
+                        SearchEngineError::IoError { detail }
                     })?;
             total_ms2_spectra += summary.ms2_count;
         }
 
         if total_ms2_spectra == 0 {
+            diagnostics.fail_stage("No MS2 spectra found in input files");
+            diagnostics.set_error(ErrorCategory::InputData, "No MS2 spectra found in input files");
             return Err(SearchEngineError::NoInputSpectra);
         }
 
@@ -282,9 +303,10 @@ impl SimpleSearchEngine {
 
         for file_path in input_files {
             let info = protein_copilot_spectrum_io::detect_format(file_path).map_err(|e| {
-                SearchEngineError::IoError {
-                    detail: e.to_string(),
-                }
+                let detail = e.to_string();
+                diagnostics.fail_stage(&detail);
+                diagnostics.set_error(ErrorCategory::InputData, &detail);
+                SearchEngineError::IoError { detail }
             })?;
             let reader = protein_copilot_spectrum_io::create_reader(&info);
             let mut handler = |spectrum: Spectrum| {
@@ -311,10 +333,14 @@ impl SimpleSearchEngine {
 
             reader
                 .for_each_spectrum(file_path, &mut handler)
-                .map_err(|e| SearchEngineError::IoError {
-                    detail: e.to_string(),
+                .map_err(|e| {
+                    let detail = e.to_string();
+                    diagnostics.fail_stage(&detail);
+                    diagnostics.set_error(ErrorCategory::InputData, &detail);
+                    SearchEngineError::IoError { detail }
                 })?;
         }
+        diagnostics.end_stage(Some(total_ms2_spectra));
 
         self.finalize_search_result(
             params,
@@ -325,6 +351,7 @@ impl SimpleSearchEngine {
             on_progress,
             total_ms2_spectra,
             psms,
+            diagnostics,
         )
     }
 
@@ -342,6 +369,7 @@ impl SimpleSearchEngine {
         run_id: Uuid,
         start: Instant,
         on_progress: &dyn Fn(SearchProgress),
+        diagnostics: &mut SearchDiagnostics,
     ) -> Result<SearchResult, SearchEngineError> {
         let report = |stage: &str, pct: f64| {
             on_progress(SearchProgress {
@@ -357,11 +385,14 @@ impl SimpleSearchEngine {
         };
 
         // Filter to MS2 only (MS1 survey scans have no precursors to match)
+        diagnostics.begin_stage("matching");
         let ms2_spectra: Vec<&Spectrum> = all_spectra
             .iter()
             .filter(|s| s.ms_level == MsLevel::MS2)
             .collect();
         if ms2_spectra.is_empty() {
+            diagnostics.fail_stage("No MS2 spectra in input");
+            diagnostics.set_error(ErrorCategory::InputData, "No MS2 spectra in input");
             return Err(SearchEngineError::NoInputSpectra);
         }
         let total_spectra = ms2_spectra.len();
@@ -378,6 +409,7 @@ impl SimpleSearchEngine {
 
             Self::collect_psms_for_spectrum(spectrum, params, &all_peptides, &mut psms);
         }
+        diagnostics.end_stage(Some(total_spectra as u64));
 
         self.finalize_search_result(
             params,
@@ -388,6 +420,7 @@ impl SimpleSearchEngine {
             on_progress,
             total_spectra as u64,
             psms,
+            diagnostics,
         )
     }
 }
@@ -407,8 +440,7 @@ impl SearchEngineAdapter for SimpleSearchEngine {
         on_progress: ProgressCallback,
         diagnostics: &mut SearchDiagnostics,
     ) -> Result<SearchResult, CoreError> {
-        let _ = &diagnostics; // Will be used in Task 5
-        self.run_search(params, input_files, &*on_progress)
+        self.run_search(params, input_files, &*on_progress, diagnostics)
             .map_err(CoreError::from)
     }
 
@@ -431,7 +463,6 @@ impl SearchEngineAdapter for SimpleSearchEngine {
         on_progress: ProgressCallback,
         diagnostics: &mut SearchDiagnostics,
     ) -> Result<SearchResult, CoreError> {
-        let _ = &diagnostics; // Will be used in Task 5
         let start = Instant::now();
         let run_id = Uuid::new_v4();
 
@@ -454,21 +485,30 @@ impl SearchEngineAdapter for SimpleSearchEngine {
 
         // Validate params
         params.validate().map_err(|e| {
+            diagnostics.set_error(ErrorCategory::Parameters, &e.to_string());
             CoreError::from(SearchEngineError::InvalidParams {
                 detail: e.to_string(),
             })
         })?;
 
         if spectra.is_empty() {
+            diagnostics.set_error(ErrorCategory::InputData, "No input spectra provided");
             return Err(CoreError::from(SearchEngineError::NoInputSpectra));
         }
 
         // Digest database (same as run_search)
         report("Reading FASTA database", 0.02);
+        diagnostics.begin_stage("fasta_parsing");
         let fasta_path = Path::new(&params.database_path);
-        let proteins = parse_fasta(fasta_path).map_err(CoreError::from)?;
+        let proteins = parse_fasta(fasta_path).map_err(|e| {
+            diagnostics.fail_stage(&e.to_string());
+            diagnostics.set_error(ErrorCategory::Database, &e.to_string());
+            CoreError::from(e)
+        })?;
+        diagnostics.end_stage(Some(proteins.len() as u64));
 
         report("Digesting proteins", 0.08);
+        diagnostics.begin_stage("digestion");
         let mut all_peptides: Vec<DigestedPeptide> = Vec::new();
         for protein in &proteins {
             let peptides = digest_with_length(
@@ -483,14 +523,17 @@ impl SearchEngineAdapter for SimpleSearchEngine {
         }
 
         if all_peptides.is_empty() {
+            let detail = format!(
+                "no candidate peptides generated from {} proteins \
+                 (all peptides may be shorter than {} or longer than {} residues)",
+                proteins.len(),
+                params.min_peptide_length,
+                params.max_peptide_length,
+            );
+            diagnostics.fail_stage(&detail);
+            diagnostics.set_error(ErrorCategory::Database, &detail);
             return Err(CoreError::from(SearchEngineError::ExecutionError {
-                detail: format!(
-                    "no candidate peptides generated from {} proteins \
-                     (all peptides may be shorter than {} or longer than {} residues)",
-                    proteins.len(),
-                    params.min_peptide_length,
-                    params.max_peptide_length,
-                ),
+                detail,
             }));
         }
 
@@ -521,6 +564,7 @@ impl SearchEngineAdapter for SimpleSearchEngine {
                 all_peptides.extend(peptides);
             }
         }
+        diagnostics.end_stage(Some(all_peptides.len() as u64));
 
         // Use the shared core logic (no input files for spectra-based search)
         self.run_search_on_spectra(
@@ -532,6 +576,7 @@ impl SearchEngineAdapter for SimpleSearchEngine {
             run_id,
             start,
             &progress_fn,
+            diagnostics,
         )
         .map_err(CoreError::from)
     }
@@ -803,7 +848,8 @@ mod tests {
         let fasta = create_test_fasta();
         let params = test_params(&fasta.path().to_string_lossy());
         let engine = SimpleSearchEngine::new();
-        let result = engine.run_search(&params, &[], &|_| {});
+        let mut diag = SearchDiagnostics::new();
+        let result = engine.run_search(&params, &[], &|_| {}, &mut diag);
         assert!(result.is_err());
     }
 
@@ -831,7 +877,8 @@ mod tests {
             engine: None,
         };
         let engine = SimpleSearchEngine::new();
-        let result = engine.run_search(&params, &[PathBuf::from("test.mgf")], &|_| {});
+        let mut diag = SearchDiagnostics::new();
+        let result = engine.run_search(&params, &[PathBuf::from("test.mgf")], &|_| {}, &mut diag);
         assert!(result.is_err());
     }
 
@@ -850,7 +897,8 @@ mod tests {
             .join("small.mgf");
 
         let engine = SimpleSearchEngine::new();
-        let result = engine.run_search(&params, &[fixture], &|_| {}).unwrap();
+        let mut diag = SearchDiagnostics::new();
+        let result = engine.run_search(&params, &[fixture], &|_| {}, &mut diag).unwrap();
 
         // Basic structural checks
         assert_eq!(result.engine_info.name, "SimpleSearch");
@@ -913,7 +961,8 @@ mod tests {
             .join("small.mgf");
 
         let engine = SimpleSearchEngine::new();
-        let result = engine.run_search(&params, &[fixture], &|_| {});
+        let mut diag = SearchDiagnostics::new();
+        let result = engine.run_search(&params, &[fixture], &|_| {}, &mut diag);
         assert!(result.is_err());
         assert!(result
             .unwrap_err()
