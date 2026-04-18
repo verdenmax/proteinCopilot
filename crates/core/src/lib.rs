@@ -13,6 +13,7 @@
 pub mod ai_decision;
 pub mod engine;
 pub mod error;
+pub mod diagnostics;
 pub mod label;
 pub mod progress;
 pub mod protein_group;
