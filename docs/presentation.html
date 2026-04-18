@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ProteinCopilot — AI 驱动的蛋白质组学平台</title>
+<title>ProteinCopilot — Rust 确定性计算 + LLM 智能编排</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
@@ -29,6 +29,9 @@
   .green { color: #3fb950; }
   .blue { color: #58a6ff; }
   .purple { color: #bc8cff; }
+  .rust-color { color: #f74c00; font-weight: 700; }
+  .llm-color { color: #bc8cff; font-weight: 700; }
+  .mcp-color { color: #58a6ff; font-weight: 700; }
 
   /* Stats grid */
   .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 30px; margin: 40px 0; }
@@ -56,6 +59,9 @@
   .feature-card:hover { border-color: #58a6ff; }
   .feature-card h3 { font-size: 1.2em; margin-bottom: 10px; }
   .feature-card p { font-size: 0.9em; color: #8b949e; }
+  .feature-card.rust-card { border-left: 4px solid #f74c00; }
+  .feature-card.llm-card { border-left: 4px solid #bc8cff; }
+  .feature-card.mcp-card { border-left: 4px solid #58a6ff; }
   .feature-icon { font-size: 2em; margin-bottom: 10px; }
 
   /* Timeline */
@@ -109,6 +115,8 @@
     background: #161b22; border: 2px solid #30363d; border-radius: 10px;
     padding: 15px 20px; text-align: center; min-width: 120px;
   }
+  .pipe-step.rust-border { border-color: #f74c00; }
+  .pipe-step.llm-border { border-color: #bc8cff; border-style: dashed; }
   .pipe-step .step-name { font-weight: 700; color: #79c0ff; font-size: 0.9em; }
   .pipe-step .step-detail { font-size: 0.75em; color: #8b949e; margin-top: 4px; }
   .pipe-arrow { font-size: 1.5em; color: #484f58; padding: 0 5px; }
@@ -120,6 +128,67 @@
     padding: 20px;
   }
   .compare-card.ours { border-color: #3fb950; }
+
+  /* MCP protocol diagram */
+  .mcp-flow {
+    display: flex; align-items: center; justify-content: center;
+    gap: 0; margin: 30px 0; flex-wrap: wrap;
+  }
+  .mcp-box {
+    background: #161b22; border: 2px solid #30363d; border-radius: 12px;
+    padding: 20px 25px; text-align: center; min-width: 180px;
+  }
+  .mcp-box.client { border-color: #bc8cff; }
+  .mcp-box.server { border-color: #f74c00; }
+  .mcp-box .box-title { font-weight: 700; font-size: 1.1em; margin-bottom: 5px; }
+  .mcp-box .box-detail { font-size: 0.8em; color: #8b949e; }
+  .mcp-arrow {
+    font-size: 0.85em; color: #58a6ff; padding: 0 15px;
+    display: flex; flex-direction: column; align-items: center; gap: 2px;
+  }
+  .mcp-arrow .arrow-line { font-size: 1.8em; line-height: 1; }
+  .mcp-arrow .arrow-label { font-size: 0.75em; color: #8b949e; }
+
+  /* Sequence diagram style */
+  .seq-step {
+    display: flex; align-items: stretch; margin: 8px 0; gap: 0;
+  }
+  .seq-actor {
+    width: 120px; min-width: 120px; text-align: center;
+    padding: 8px 5px; font-size: 0.85em; font-weight: 600;
+  }
+  .seq-msg {
+    flex: 1; padding: 10px 15px; font-size: 0.85em;
+    border-radius: 8px; margin: 0 10px;
+  }
+  .seq-msg.llm-msg {
+    background: #1c1535; border: 1px solid #bc8cff40;
+    color: #d2b3ff;
+  }
+  .seq-msg.rust-msg {
+    background: #1c0e00; border: 1px solid #f74c0040;
+    color: #ffb380;
+  }
+  .seq-msg.user-msg {
+    background: #0d1f12; border: 1px solid #3fb95040;
+    color: #7ee787;
+  }
+  .seq-dir { font-size: 1.2em; color: #484f58; margin: 0 5px; align-self: center; }
+
+  /* Legend */
+  .legend {
+    display: flex; gap: 30px; justify-content: center; margin: 20px 0;
+    flex-wrap: wrap;
+  }
+  .legend-item {
+    display: flex; align-items: center; gap: 8px; font-size: 0.9em;
+  }
+  .legend-dot {
+    width: 14px; height: 14px; border-radius: 50%;
+  }
+  .legend-dot.rust { background: #f74c00; }
+  .legend-dot.llm { background: #bc8cff; }
+  .legend-dot.mcp { background: #58a6ff; }
 
   @media (max-width: 768px) {
     .stats { grid-template-columns: repeat(2, 1fr); }
@@ -135,375 +204,640 @@
 <!-- Nav -->
 <div class="nav-dots" id="navDots"></div>
 
-<!-- Slide 1: Title -->
+<!-- ═══════════════════════════════════════════════════ -->
+<!-- Slide 1: Title — Core Identity -->
+<!-- ═══════════════════════════════════════════════════ -->
 <div class="slide" id="s1">
   <div class="slide-number">01</div>
   <h1>🧬 ProteinCopilot</h1>
-  <p class="subtitle">AI 驱动的蛋白质组学质谱搜索与结果解释平台</p>
+  <p class="subtitle">
+    <span class="rust-color">Rust 确定性计算</span> ＋
+    <span class="llm-color">LLM 智能编排</span> ＋
+    <span class="mcp-color">MCP 协议连接</span>
+  </p>
   <div class="stats">
     <div class="stat-card">
-      <div class="stat-value">13</div>
-      <div class="stat-label">Rust Crates</div>
+      <div class="stat-value" style="color:#f74c00;">13</div>
+      <div class="stat-label">Rust Crates（纯计算逻辑）</div>
     </div>
     <div class="stat-card">
-      <div class="stat-value">25</div>
-      <div class="stat-label">MCP Tools</div>
+      <div class="stat-value" style="color:#58a6ff;">25</div>
+      <div class="stat-label">MCP Tools（暴露给 LLM）</div>
     </div>
     <div class="stat-card">
-      <div class="stat-value">670+</div>
+      <div class="stat-value" style="color:#3fb950;">670+</div>
       <div class="stat-label">测试用例</div>
     </div>
     <div class="stat-card">
-      <div class="stat-value">12</div>
-      <div class="stat-label">Skill Prompts</div>
+      <div class="stat-value" style="color:#bc8cff;">12</div>
+      <div class="stat-label">Skill Prompts（LLM 剧本）</div>
     </div>
   </div>
-  <p style="color:#8b949e; text-align:center;">Rust workspace · MCP Protocol · Agent/Skill 驱动 · 2026 Spring</p>
+  <p style="color:#8b949e; text-align:center; max-width:800px;">
+    蛋白质组学质谱搜索平台：<strong>Rust</strong> 负责所有数值计算和搜索，
+    <strong>LLM</strong> 负责理解用户意图、推荐参数、解释结果，
+    两者通过 <strong>MCP 协议</strong> 连接
+  </p>
 </div>
 
-<!-- Slide 2: Problem -->
+<!-- ═══════════════════════════════════════════════════ -->
+<!-- Slide 2: What is MCP? -->
+<!-- ═══════════════════════════════════════════════════ -->
 <div class="slide" id="s2">
   <div class="slide-number">02</div>
   <div class="content">
-    <h2>🎯 解决什么问题？</h2>
-    <div class="compare-row">
-      <div class="compare-card">
-        <h3>传统蛋白组学工具</h3>
-        <p>❌ 参数配置复杂（200+ 参数）</p>
-        <p>❌ 命令行或 GUI，无智能交互</p>
-        <p>❌ 结果解读需要专家知识</p>
-        <p>❌ 搜索失败无诊断</p>
-        <p>❌ 工具间数据不互通</p>
-        <p style="margin-top:15px; color:#484f58;">MaxQuant · FragPipe · Spectronaut · DIA-NN</p>
+    <h2>🔗 MCP 是什么？</h2>
+    <p style="text-align:center; color:#8b949e; margin-bottom:30px; font-size:1.1em;">
+      <strong style="color:#58a6ff;">Model Context Protocol</strong> —— Anthropic 设计的开放协议<br>
+      让 LLM 能够<span class="highlight">调用外部工具</span>，就像浏览器能打开网页一样
+    </p>
+
+    <!-- Client ↔ Server diagram -->
+    <div class="mcp-flow">
+      <div class="mcp-box client">
+        <div class="box-title" style="color:#bc8cff;">🤖 MCP Client</div>
+        <div class="box-detail">
+          Claude Desktop<br>
+          Copilot CLI<br>
+          Cursor / Windsurf<br>
+          <em>任何支持 MCP 的 AI 客户端</em>
+        </div>
       </div>
-      <div class="compare-card ours">
-        <h3>ProteinCopilot</h3>
-        <p>✅ AI 自动推荐搜索参数</p>
-        <p>✅ 自然语言交互（MCP 协议）</p>
-        <p>✅ LLM 自动解释搜索结果</p>
-        <p>✅ 结构化诊断 + 修复建议</p>
-        <p>✅ 统一平台：搜索→推断→可视化</p>
-        <p style="margin-top:15px; color:#3fb950;">🎯 核心差异化：<strong>AI 编排</strong></p>
+      <div class="mcp-arrow">
+        <div class="arrow-label">JSON-RPC 请求</div>
+        <div class="arrow-line">──►</div>
+        <div class="arrow-line">◄──</div>
+        <div class="arrow-label">结构化响应</div>
       </div>
+      <div class="mcp-box server">
+        <div class="box-title" style="color:#f74c00;">🦀 MCP Server</div>
+        <div class="box-detail">
+          ProteinCopilot<br>
+          25 个 tools<br>
+          stdio 传输<br>
+          <em>纯 Rust 实现</em>
+        </div>
+      </div>
+    </div>
+
+    <!-- What MCP provides -->
+    <div class="features" style="margin-top:30px;">
+      <div class="feature-card mcp-card">
+        <h3>📋 Tools</h3>
+        <p>MCP Server 向 LLM 暴露"可调用的函数"。
+          每个 Tool 有名称、描述、JSON Schema 输入输出。
+          LLM 读描述后<strong>自主决定</strong>何时调用哪个 Tool。</p>
+      </div>
+      <div class="feature-card mcp-card">
+        <h3>📡 传输层</h3>
+        <p>基于 <strong>JSON-RPC 2.0</strong> 协议。
+          支持 stdio（本地进程）和 SSE（远程 HTTP）两种传输。
+          ProteinCopilot 使用 stdio —— MCP Client 直接启动 Rust 进程。</p>
+      </div>
+      <div class="feature-card mcp-card">
+        <h3>🔌 即插即用</h3>
+        <p>写好 MCP Server 后，<strong>无需修改</strong>即可接入任何 MCP Client。
+          Claude Desktop、Copilot CLI、Cursor 都能直接调用。
+          一次开发，多客户端受益。</p>
+      </div>
+    </div>
+
+    <div style="text-align:center; margin-top:20px;">
+      <p style="color:#58a6ff; font-size:1.1em;">
+        <strong>类比</strong>：MCP 之于 LLM ≈ HTTP 之于浏览器
+      </p>
+      <p style="color:#8b949e; font-size:0.9em;">
+        浏览器通过 HTTP 访问网页；LLM 通过 MCP 调用工具。协议标准化，生态开放。
+      </p>
     </div>
   </div>
 </div>
 
-<!-- Slide 3: Architecture -->
+<!-- ═══════════════════════════════════════════════════ -->
+<!-- Slide 3: Core Design — Rust vs LLM Strict Split -->
+<!-- ═══════════════════════════════════════════════════ -->
 <div class="slide" id="s3">
   <div class="slide-number">03</div>
   <div class="content">
-    <h2>🏗️ 架构设计</h2>
-    <div class="arch-diagram">
-<span style="color:#8b949e">用户</span> ◄─► <span style="color:#58a6ff">MCP Client</span> (Copilot CLI / Claude Desktop)
-           │
-           ├── <span style="color:#bc8cff">.github/agents/</span>    ← 领域 Agent（LLM 读取）
-           ├── <span style="color:#bc8cff">.github/prompts/</span>   ← 12 个 Skill Prompt
-           │
-           └── <span style="color:#f0883e">MCP Server</span> (Rust, 25 tools, stdio transport)
-                 │
-                 ├── <span style="color:#3fb950">spectrum-io</span>      谱图解析（mgf/mzML, DDA+DIA）
-                 ├── <span style="color:#3fb950">param-recommend</span>  参数推荐（规则引擎）
-                 ├── <span style="color:#3fb950">search-engine</span>    搜索（SimpleSearch + <span style="color:#f0883e">Sage</span> + pFind）
-                 ├── <span style="color:#3fb950">protein-inference</span> 蛋白推断（parsimony + razor）
-                 ├── <span style="color:#3fb950">fdr</span>              FDR 控制（PSM/肽段/蛋白 三级）
-                 ├── <span style="color:#3fb950">xic</span>             XIC 色谱图 + SILAC
-                 ├── <span style="color:#3fb950">dia-extraction</span>   DIA 前体提取
-                 ├── <span style="color:#3fb950">result-import</span>    外部结果导入
-                 ├── <span style="color:#3fb950">fasta-db</span>         数据库管理
-                 ├── <span style="color:#3fb950">report</span>           报告生成
-                 └── <span style="color:#3fb950">core</span>             共享模型 + <span style="color:#f0883e">diagnostics</span>
-    </div>
-    <p style="text-align:center; color:#8b949e; margin-top:15px;">
-      <strong>核心原则</strong>：Rust 做所有确定性计算 · LLM 做意图理解和结果解释 · 绝对分层
+    <h2>🏗️ 核心设计：严格分层</h2>
+    <p style="text-align:center; color:#8b949e; margin-bottom:25px; font-size:1.05em;">
+      系统分为两个世界：<span class="rust-color">确定性</span> 和 <span class="llm-color">推理性</span>，绝不混合
     </p>
+    <div class="compare-row">
+      <div class="compare-card" style="border-color:#f74c00;">
+        <h3 style="color:#f74c00;">🦀 Rust 做什么（确定性）</h3>
+        <p style="margin:8px 0;">✅ 谱图解析（mzML / mgf 二进制解码）</p>
+        <p style="margin:8px 0;">✅ 蛋白数据库酶切（Trypsin / Lys-C / ...）</p>
+        <p style="margin:8px 0;">✅ b/y 碎片离子理论值计算</p>
+        <p style="margin:8px 0;">✅ 谱图 vs 理论谱匹配打分</p>
+        <p style="margin:8px 0;">✅ FDR 统计（target-decoy · PSM/肽段/蛋白 三级）</p>
+        <p style="margin:8px 0;">✅ 蛋白推断（parsimony · razor peptide）</p>
+        <p style="margin:8px 0;">✅ XIC 提取 · DIA 前体检测</p>
+        <p style="margin:8px 0;">✅ 搜索诊断异常规则（7 条硬编码规则）</p>
+        <p style="margin-top:15px; color:#f74c00; font-weight:700;">
+          ❌ 绝不调用 LLM API<br>
+          ❌ 绝不做"猜测"或"推理"
+        </p>
+      </div>
+      <div class="compare-card" style="border-color:#bc8cff;">
+        <h3 style="color:#bc8cff;">🤖 LLM 做什么（推理性）</h3>
+        <p style="margin:8px 0;">✅ 理解用户自然语言意图</p>
+        <p style="margin:8px 0;">✅ 根据谱图特征<em>推荐</em>搜索参数</p>
+        <p style="margin:8px 0;">✅ 用通俗语言<em>解释</em>搜索结果</p>
+        <p style="margin:8px 0;">✅ 读取诊断报告 → 生成修复建议</p>
+        <p style="margin:8px 0;">✅ 规划多步骤工作流顺序</p>
+        <p style="margin:8px 0;">✅ 处理模糊请求（"帮我搜一下这个样本"）</p>
+        <p style="margin:8px 0;">✅ 失败时提供人类可读的诊断</p>
+        <p style="margin:8px 0;">✅ 跨工具协调（搜索 → 推断 → 可视化）</p>
+        <p style="margin-top:15px; color:#bc8cff; font-weight:700;">
+          ❌ 绝不做数值计算（FDR / 打分 / 质量）<br>
+          ❌ 绝不直接操作文件或进程
+        </p>
+      </div>
+    </div>
+    <div class="legend">
+      <div class="legend-item"><div class="legend-dot rust"></div> Rust — 可验证、可复现、有测试</div>
+      <div class="legend-item"><div class="legend-dot llm"></div> LLM — 灵活、上下文感知、可解释</div>
+      <div class="legend-item"><div class="legend-dot mcp"></div> MCP — 连接两者的标准协议</div>
+    </div>
   </div>
 </div>
 
-<!-- Slide 4: Search Pipeline -->
+<!-- ═══════════════════════════════════════════════════ -->
+<!-- Slide 4: How LLM Orchestrates — Concrete Workflow -->
+<!-- ═══════════════════════════════════════════════════ -->
 <div class="slide" id="s4">
   <div class="slide-number">04</div>
   <div class="content">
-    <h2>🔬 搜索流水线</h2>
-    <div class="pipeline">
-      <div class="pipe-step">
-        <div class="step-name">📂 read_spectra</div>
-        <div class="step-detail">mgf / mzML</div>
+    <h2>🤖 LLM 如何串联整个流程</h2>
+    <p style="text-align:center; color:#8b949e; margin-bottom:20px;">
+      一次真实的蛋白质搜索对话：用户说了一句话，LLM 自动编排 6 个 MCP Tool 调用
+    </p>
+
+    <div style="background:#161b22; border:1px solid #30363d; border-radius:12px; padding:25px; margin:10px 0;">
+      <!-- Step 1 -->
+      <div class="seq-step">
+        <div class="seq-actor" style="color:#3fb950;">👤 用户</div>
+        <div class="seq-dir">→</div>
+        <div class="seq-msg user-msg">"帮我搜一下 sample.mgf，用人的数据库"</div>
       </div>
-      <div class="pipe-arrow">→</div>
-      <div class="pipe-step">
-        <div class="step-name">🎛️ recommend_params</div>
-        <div class="step-detail">AI 参数推荐</div>
+
+      <!-- Step 2 -->
+      <div class="seq-step">
+        <div class="seq-actor" style="color:#bc8cff;">🤖 LLM</div>
+        <div class="seq-dir">→</div>
+        <div class="seq-msg llm-msg">
+          <strong>意图理解</strong>：用户要做 DDA 搜索，物种=human，需要先读谱图 → 下载数据库 → 推荐参数 → 执行搜索
+        </div>
       </div>
-      <div class="pipe-arrow">→</div>
-      <div class="pipe-step">
-        <div class="step-name">⚡ run_search</div>
-        <div class="step-detail">Sage / SimpleSearch</div>
+
+      <!-- Step 3: read_spectra -->
+      <div class="seq-step">
+        <div class="seq-actor" style="color:#bc8cff;">🤖 LLM</div>
+        <div class="seq-dir">→</div>
+        <div class="seq-msg rust-msg">
+          调用 <code>read_spectra("sample.mgf")</code>
+          <span style="color:#8b949e;">→ Rust 返回：1,234 张 MS2 谱图，m/z 范围 300-1800</span>
+        </div>
       </div>
-      <div class="pipe-arrow">→</div>
-      <div class="pipe-step">
-        <div class="step-name">🧬 infer_proteins</div>
-        <div class="step-detail">parsimony + FDR</div>
+
+      <!-- Step 4: download_database -->
+      <div class="seq-step">
+        <div class="seq-actor" style="color:#bc8cff;">🤖 LLM</div>
+        <div class="seq-dir">→</div>
+        <div class="seq-msg rust-msg">
+          调用 <code>download_database("human")</code>
+          <span style="color:#8b949e;">→ Rust 返回：UniProt human FASTA, 20,442 蛋白</span>
+        </div>
       </div>
-      <div class="pipe-arrow">→</div>
-      <div class="pipe-step">
-        <div class="step-name">📊 export_results</div>
-        <div class="step-detail">TSV / JSON</div>
+
+      <!-- Step 5: recommend_params -->
+      <div class="seq-step">
+        <div class="seq-actor" style="color:#bc8cff;">🤖 LLM</div>
+        <div class="seq-dir">→</div>
+        <div class="seq-msg rust-msg">
+          调用 <code>recommend_params(spectra_summary)</code>
+          <span style="color:#8b949e;">→ Rust 返回：Trypsin, 10ppm, b/y ions, Carbamidomethyl[C]</span>
+        </div>
+      </div>
+
+      <!-- Step 5.5: LLM decides -->
+      <div class="seq-step">
+        <div class="seq-actor" style="color:#bc8cff;">🤖 LLM</div>
+        <div class="seq-dir">→</div>
+        <div class="seq-msg llm-msg">
+          <strong>推理</strong>："谱图的碎裂模式和 m/z 分布符合 Trypsin 消化特征，推荐参数合理，直接启动搜索"
+        </div>
+      </div>
+
+      <!-- Step 6: run_search -->
+      <div class="seq-step">
+        <div class="seq-actor" style="color:#bc8cff;">🤖 LLM</div>
+        <div class="seq-dir">→</div>
+        <div class="seq-msg rust-msg">
+          调用 <code>run_search(params, database, spectra)</code>
+          <span style="color:#8b949e;">→ Rust 启动 Sage 引擎异步搜索...</span>
+        </div>
+      </div>
+
+      <!-- Step 7: LLM explains -->
+      <div class="seq-step">
+        <div class="seq-actor" style="color:#bc8cff;">🤖 LLM</div>
+        <div class="seq-dir">→</div>
+        <div class="seq-msg llm-msg">
+          <strong>解释结果</strong>："搜索完成！在 1% FDR 下鉴定到 856 个 PSM、623 个肽段、312 个蛋白质。
+          鉴定率 69%，属于正常水平。是否需要我进一步分析或导出结果？"
+        </div>
       </div>
     </div>
-    <div class="pipeline" style="margin-top:10px;">
-      <div class="pipe-step" style="border-color:#f0883e;">
-        <div class="step-name" style="color:#f0883e;">🔍 diagnose_search</div>
-        <div class="step-detail">异常检测 + 修复建议</div>
-      </div>
-      <div class="pipe-arrow">→</div>
-      <div class="pipe-step">
-        <div class="step-name">🖼️ annotate_spectrum</div>
-        <div class="step-detail">b/y 标注 + XIC</div>
-      </div>
-      <div class="pipe-arrow">→</div>
-      <div class="pipe-step">
-        <div class="step-name">📈 extract_xic</div>
-        <div class="step-detail">SILAC 轻重标记</div>
-      </div>
-    </div>
-    <p style="text-align:center; color:#8b949e; margin-top:30px;">
-      支持 <span class="blue">DDA</span> 和 <span class="highlight">DIA</span> 双模式 · 搜索诊断自动触发
+
+    <p style="text-align:center; color:#f0883e; margin-top:15px; font-size:1.05em;">
+      <strong>关键洞察</strong>：每一步数值计算都由 Rust 完成，LLM 只负责决定"下一步做什么"和"怎么解释"
     </p>
   </div>
 </div>
 
-<!-- Slide 5: Crate Map -->
+<!-- ═══════════════════════════════════════════════════ -->
+<!-- Slide 5: Architecture Diagram -->
+<!-- ═══════════════════════════════════════════════════ -->
 <div class="slide" id="s5">
   <div class="slide-number">05</div>
   <div class="content">
-    <h2>📦 13 个 Rust Crates</h2>
-    <div class="crate-grid">
-      <div class="crate-box">
-        <div class="name">core</div>
-        <div class="desc">共享数据结构<br>Spectrum · SearchResult<br>SearchDiagnostics</div>
-      </div>
-      <div class="crate-box">
-        <div class="name">spectrum-io</div>
-        <div class="desc">谱图解析<br>mgf · mzML<br>streaming + indexed</div>
-      </div>
-      <div class="crate-box">
-        <div class="name">param-recommend</div>
-        <div class="desc">参数推荐<br>5 个预设<br>规则引擎</div>
-      </div>
-      <div class="crate-box">
-        <div class="name">search-engine</div>
-        <div class="desc">搜索引擎<br>SimpleSearch · Sage<br>pFind 预留</div>
-      </div>
-      <div class="crate-box">
-        <div class="name">fdr</div>
-        <div class="desc">FDR 控制<br>PSM · 肽段 · 蛋白<br>target-decoy</div>
-      </div>
-      <div class="crate-box">
-        <div class="name">protein-inference</div>
-        <div class="desc">蛋白推断<br>parsimony · razor<br>picked-protein FDR</div>
-      </div>
-      <div class="crate-box">
-        <div class="name">xic</div>
-        <div class="desc">XIC 色谱图<br>SILAC 轻重标记<br>Plotly.js HTML</div>
-      </div>
-      <div class="crate-box">
-        <div class="name">dia-extraction</div>
-        <div class="desc">DIA 前体提取<br>同位素模式检测<br>MS1↔MS2 关联</div>
-      </div>
-      <div class="crate-box">
-        <div class="name">result-import</div>
-        <div class="desc">外部结果导入<br>DIA-NN parquet<br>custom JSON</div>
-      </div>
-      <div class="crate-box">
-        <div class="name">fasta-db</div>
-        <div class="desc">数据库管理<br>UniProt 注册表<br>HTTPS 缓存</div>
-      </div>
-      <div class="crate-box">
-        <div class="name">report</div>
-        <div class="desc">报告生成<br>TSV · JSON<br>HTML 可视化</div>
-      </div>
-      <div class="crate-box">
-        <div class="name">integration-tests</div>
-        <div class="desc">端到端测试<br>流水线验证<br>回归保护</div>
-      </div>
-      <div class="crate-box" style="border-color:#f0883e;">
-        <div class="name">mcp-server</div>
-        <div class="desc">MCP Server<br>25 tools · stdio<br>3200+ 行</div>
-      </div>
+    <h2>🏗️ 系统架构</h2>
+    <div class="arch-diagram">
+┌─────────────────────────────────────────────────────────────────────┐
+│  <span style="color:#3fb950">用户</span>  "帮我搜一下这个样本"                                      │
+└────────────────────────────────┬────────────────────────────────────┘
+                                 │ 自然语言
+┌────────────────────────────────▼────────────────────────────────────┐
+│  <span style="color:#bc8cff">MCP Client</span>  (Copilot CLI / Claude Desktop / Cursor)              │
+│                                                                     │
+│  ┌──────────────────────────────────────────────────────────┐       │
+│  │  <span style="color:#bc8cff">LLM</span> (Claude / GPT / ...)                                  │       │
+│  │  读取 <span style="color:#bc8cff">Agent 指令</span> + <span style="color:#bc8cff">Skill Prompt</span> → 决定调用哪些 Tool      │       │
+│  └───────────────────────────┬──────────────────────────────┘       │
+└──────────────────────────────┼──────────────────────────────────────┘
+                               │ <span style="color:#58a6ff">MCP 协议</span> (JSON-RPC 2.0 over stdio)
+┌──────────────────────────────▼──────────────────────────────────────┐
+│  <span style="color:#f74c00">MCP Server</span>  (Rust 进程, 25 个 Tools)                              │
+│                                                                     │
+│  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐ ┌──────────────┐  │
+│  │ <span style="color:#3fb950">spectrum-io</span> │ │ <span style="color:#3fb950">search-eng.</span> │ │ <span style="color:#3fb950">fdr</span>         │ │ <span style="color:#3fb950">protein-inf</span> │  │
+│  │ 谱图解析    │ │ Sage+Simple │ │ 三级 FDR    │ │ parsimony   │  │
+│  └─────────────┘ └─────────────┘ └─────────────┘ └──────────────┘  │
+│  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐ ┌──────────────┐  │
+│  │ <span style="color:#3fb950">param-rec.</span>  │ │ <span style="color:#3fb950">xic</span>         │ │ <span style="color:#3fb950">dia-extract</span> │ │ <span style="color:#3fb950">report</span>      │  │
+│  │ 参数推荐    │ │ XIC+SILAC   │ │ DIA前体     │ │ TSV/JSON    │  │
+│  └─────────────┘ └─────────────┘ └─────────────┘ └──────────────┘  │
+│  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐                   │
+│  │ <span style="color:#3fb950">fasta-db</span>   │ │ <span style="color:#3fb950">result-imp.</span> │ │ <span style="color:#f0883e">core</span>        │ ← 共享模型     │
+│  │ 数据库管理  │ │ 结果导入    │ │ +diagnostics│   + 诊断       │
+│  └─────────────┘ └─────────────┘ └─────────────┘                   │
+└─────────────────────────────────────────────────────────────────────┘
+    </div>
+    <div class="legend">
+      <div class="legend-item"><div class="legend-dot rust"></div> Rust Crate — 确定性计算，670+ 测试覆盖</div>
+      <div class="legend-item"><div class="legend-dot llm"></div> LLM 层 — Agent + Skill Prompt 编排</div>
+      <div class="legend-item"><div class="legend-dot mcp"></div> MCP 协议 — 两者之间的标准接口</div>
     </div>
   </div>
 </div>
 
-<!-- Slide 6: MCP Tools -->
+<!-- ═══════════════════════════════════════════════════ -->
+<!-- Slide 6: Rust Implementation Details -->
+<!-- ═══════════════════════════════════════════════════ -->
 <div class="slide" id="s6">
   <div class="slide-number">06</div>
   <div class="content">
-    <h2>🛠️ 25 个 MCP Tools</h2>
-    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:20px;">
-      <div>
-        <h3>📂 数据管理</h3>
-        <table>
-          <tr><td><code>read_spectra</code></td><td>读取谱图文件</td></tr>
-          <tr><td><code>get_spectrum</code></td><td>按 scan 读取单张谱图</td></tr>
-          <tr><td><code>list_databases</code></td><td>内置 FASTA 注册表</td></tr>
-          <tr><td><code>download_database</code></td><td>下载 FASTA 数据库</td></tr>
-          <tr><td><code>get_database_info</code></td><td>数据库详细信息</td></tr>
-          <tr><td><code>import_search_results</code></td><td>导入外部结果</td></tr>
-        </table>
-        <h3 style="margin-top:20px;">🔬 搜索执行</h3>
-        <table>
-          <tr><td><code>recommend_params</code></td><td>参数推荐</td></tr>
-          <tr><td><code>list_presets</code></td><td>预设列表</td></tr>
-          <tr><td><code>prepare_search</code></td><td>推荐→验证→准备</td></tr>
-          <tr><td><code>run_search</code></td><td>异步搜索</td></tr>
-          <tr><td><code>get_search_status</code></td><td>进度查询</td></tr>
-          <tr><td><code>cancel_search</code></td><td>取消搜索</td></tr>
-          <tr><td><code>check_engine</code></td><td>引擎健康检查</td></tr>
-        </table>
+    <h2>🦀 Rust 实现逻辑详解</h2>
+    <div class="features">
+      <div class="feature-card rust-card">
+        <div class="feature-icon">📂</div>
+        <h3>谱图解析 (spectrum-io)</h3>
+        <p>mzML XML + base64 解码 → f64 数组<br>
+          MGF 文本流式解析<br>
+          DDA/DIA 自动检测（IsolationWindow 宽度）<br>
+          indexed 模式：按 scan 号随机访问<br>
+          <strong style="color:#f74c00;">1 crate · 纯计算 · 无 I/O 副作用</strong></p>
       </div>
-      <div>
-        <h3>📊 结果分析</h3>
-        <table>
-          <tr><td><code>generate_summary</code></td><td>FDR 过滤统计</td></tr>
-          <tr><td><code>export_results</code></td><td>TSV/JSON 导出</td></tr>
-          <tr><td><code>list_searches</code></td><td>搜索历史</td></tr>
-          <tr><td><code>infer_proteins</code></td><td>蛋白推断</td></tr>
-          <tr><td style="color:#f0883e;"><code>diagnose_search</code></td><td style="color:#f0883e;">搜索诊断 🆕</td></tr>
-        </table>
-        <h3 style="margin-top:20px;">🖼️ 可视化</h3>
-        <table>
-          <tr><td><code>annotate_spectrum</code></td><td>谱图注释 HTML</td></tr>
-          <tr><td><code>extract_xic</code></td><td>XIC 色谱图</td></tr>
-          <tr><td><code>extract_dia_precursors</code></td><td>DIA 前体提取</td></tr>
-          <tr><td><code>extract_spectrum_precursors</code></td><td>单谱图前体</td></tr>
-          <tr><td><code>get_dia_cache_status</code></td><td>DIA 缓存状态</td></tr>
-        </table>
+      <div class="feature-card rust-card">
+        <div class="feature-icon">🔬</div>
+        <h3>搜索引擎 (search-engine)</h3>
+        <p>SimpleSearch：b/y 碎片离子理论值 → 逐谱匹配打分<br>
+          Sage：sage-core v0.15.0 库调用，fragment indexing + rayon 并行<br>
+          Adapter trait 抽象 → 引擎可替换<br>
+          <strong style="color:#f74c00;">打分公式、匹配逻辑全在 Rust 中</strong></p>
+      </div>
+      <div class="feature-card rust-card">
+        <div class="feature-icon">📊</div>
+        <h3>FDR 控制 (fdr)</h3>
+        <p>target-decoy 竞争策略<br>
+          PSM → 肽段 → 蛋白 三级过滤<br>
+          Picked-protein FDR（蛋白级别）<br>
+          <strong style="color:#f74c00;">统计计算 100% 在 Rust 中，绝不交给 LLM</strong></p>
+      </div>
+      <div class="feature-card rust-card">
+        <div class="feature-icon">🧬</div>
+        <h3>蛋白推断 (protein-inference)</h3>
+        <p>Parsimony：最小蛋白集合覆盖所有肽段<br>
+          Razor peptide：共享肽段分配给最大蛋白<br>
+          蛋白分组 + 子集/超集关系<br>
+          <strong style="color:#f74c00;">图算法 + 贪心算法，全部确定性</strong></p>
+      </div>
+      <div class="feature-card rust-card">
+        <div class="feature-icon">📈</div>
+        <h3>XIC + DIA (xic · dia-extraction)</h3>
+        <p>XIC 色谱图提取（m/z ± tolerance 窗口）<br>
+          SILAC 轻/重标记 mirror plot<br>
+          DIA：同位素模式检测 + MS1↔MS2 关联<br>
+          <strong style="color:#f74c00;">数值插值 + 峰检测 = 纯数学</strong></p>
+      </div>
+      <div class="feature-card rust-card">
+        <div class="feature-icon">🔍</div>
+        <h3>搜索诊断 (core/diagnostics)</h3>
+        <p>7 条硬编码异常检测规则<br>
+          阶段计时（fasta_parsing → matching → fdr）<br>
+          错误分类（InputData/Parameters/Database/Engine）<br>
+          <strong style="color:#f74c00;">规则是确定性的；LLM 负责解读</strong></p>
       </div>
     </div>
   </div>
 </div>
 
-<!-- Slide 7: Diagnostics Feature -->
+<!-- ═══════════════════════════════════════════════════ -->
+<!-- Slide 7: LLM's Role — Agent + Skill System -->
+<!-- ═══════════════════════════════════════════════════ -->
 <div class="slide" id="s7">
   <div class="slide-number">07</div>
   <div class="content">
-    <h2>🔍 搜索诊断（新功能）</h2>
+    <h2>🤖 LLM 的角色：Agent + Skill 编排</h2>
+    <p style="text-align:center; color:#8b949e; margin-bottom:25px;">
+      LLM 不写代码、不做计算 —— 它是<span class="highlight">指挥官</span>，通过 MCP 调度 Rust 工具
+    </p>
     <div class="features">
-      <div class="feature-card">
-        <div class="feature-icon">🏷️</div>
-        <h3>错误分类</h3>
-        <p>4 类错误分类：InputData · Parameters · Database · Engine<br>自动标记失败阶段</p>
+      <div class="feature-card llm-card">
+        <div class="feature-icon">🎯</div>
+        <h3>Agent 指令</h3>
+        <p><code>.github/agents/proteomics-search.agent.md</code><br>
+          定义 LLM 的"角色"：蛋白质搜索助手<br>
+          列出 25 个可用工具 + 使用场景<br>
+          <strong>LLM 读到这个指令后，知道自己有哪些能力</strong></p>
       </div>
-      <div class="feature-card">
-        <div class="feature-icon">📏</div>
-        <h3>阶段指标</h3>
-        <p>每个搜索阶段记录耗时和处理量：<br>fasta_parsing · digestion · matching · fdr</p>
+      <div class="feature-card llm-card">
+        <div class="feature-icon">📋</div>
+        <h3>12 个 Skill Prompts</h3>
+        <p>预定义的分析"剧本"模板：<br>
+          基础搜索 · 磷酸化搜索 · 开放搜索<br>
+          DIA 分析 · 多引擎比较 · 失败诊断<br>
+          <strong>LLM 按剧本调用 Tool 序列</strong></p>
       </div>
-      <div class="feature-card">
-        <div class="feature-icon">⚠️</div>
-        <h3>7 条异常检测规则</h3>
-        <p>低 ID 率 · 高 FDR · 零 decoy · 窄容差 · 宽容差 · 数据库不匹配 · 搜索过慢</p>
+      <div class="feature-card llm-card">
+        <div class="feature-icon">🧠</div>
+        <h3>推理决策</h3>
+        <p>① 理解："帮我搜一下" → DDA 基础搜索<br>
+          ② 判断：谱图特征 → 适合 Trypsin 消化<br>
+          ③ 解释：FDR 1% 下 856 PSM = 正常水平<br>
+          ④ 诊断：ID 率 5% → 可能是数据库不匹配<br>
+          <strong>每个判断都基于 Rust Tool 返回的数据</strong></p>
       </div>
-      <div class="feature-card">
-        <div class="feature-icon">💡</div>
-        <h3>修复建议</h3>
-        <p>分级优先级建议 + 具体参数修改<br>param_changes JSON 可直接应用</p>
-      </div>
-      <div class="feature-card">
-        <div class="feature-icon">🤖</div>
-        <h3>AI 解释</h3>
-        <p>LLM 读取结构化诊断报告<br>生成人类可读的分析和建议</p>
-      </div>
-      <div class="feature-card">
-        <div class="feature-icon">🛡️</div>
-        <h3>边界安全</h3>
-        <p>fail_stage 幂等 · 双重 finalize 保护<br>零 PSM 错误级别处理</p>
+    </div>
+
+    <div style="background:#161b22; border:1px solid #30363d; border-radius:12px; padding:20px; margin-top:20px;">
+      <h3 style="text-align:center; margin-bottom:15px;">为什么 LLM 不直接算？</h3>
+      <div style="display:grid; grid-template-columns: 1fr 1fr; gap:20px;">
+        <div>
+          <p style="color:#f74c00; font-weight:700;">❌ 如果让 LLM 算 FDR：</p>
+          <p style="color:#8b949e; font-size:0.9em;">
+            "大约 1.2%... 或者可能是 0.8%..."<br>
+            结果不确定、不可复现、无法审计
+          </p>
+        </div>
+        <div>
+          <p style="color:#3fb950; font-weight:700;">✅ 让 Rust 算 FDR：</p>
+          <p style="color:#8b949e; font-size:0.9em;">
+            q_value = 0.00847（精确到小数点后 5 位）<br>
+            有单元测试、可复现、可审计
+          </p>
+        </div>
       </div>
     </div>
   </div>
 </div>
 
-<!-- Slide 8: Search Engines -->
+<!-- ═══════════════════════════════════════════════════ -->
+<!-- Slide 8: MCP Tool Interface — The Bridge -->
+<!-- ═══════════════════════════════════════════════════ -->
 <div class="slide" id="s8">
   <div class="slide-number">08</div>
   <div class="content">
-    <h2>⚡ 搜索引擎</h2>
-    <div class="compare-row">
-      <div class="compare-card">
-        <h3>SimpleSearch (MVP)</h3>
-        <p>📌 内置 b/y 离子匹配</p>
-        <p>📌 酶切 + 固定/可变修饰</p>
-        <p>📌 target-decoy FDR</p>
-        <p>📌 适合功能验证</p>
-        <p style="color:#8b949e; margin-top:10px;">纯 Rust · 单线程 · 教学级</p>
+    <h2>🛠️ 25 个 MCP Tools —— Rust 与 LLM 的桥梁</h2>
+    <p style="text-align:center; color:#8b949e; margin-bottom:20px;">
+      每个 Tool = 一个 Rust 函数 + JSON Schema 描述 → LLM 自主决定调用
+    </p>
+    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:20px;">
+      <div>
+        <h3 style="color:#f74c00;">📂 数据管理 <small style="color:#8b949e;">(Rust 计算)</small></h3>
+        <table>
+          <tr><td><code>read_spectra</code></td><td>解析谱图 → 返回统计摘要</td></tr>
+          <tr><td><code>get_spectrum</code></td><td>按 scan 号随机读取</td></tr>
+          <tr><td><code>list_databases</code></td><td>内置 UniProt 注册表</td></tr>
+          <tr><td><code>download_database</code></td><td>HTTPS 下载 + 缓存</td></tr>
+          <tr><td><code>get_database_info</code></td><td>FASTA 解析统计</td></tr>
+          <tr><td><code>import_search_results</code></td><td>导入外部结果</td></tr>
+        </table>
+        <h3 style="margin-top:20px; color:#f74c00;">🔬 搜索执行 <small style="color:#8b949e;">(Rust 计算)</small></h3>
+        <table>
+          <tr><td><code>recommend_params</code></td><td>规则引擎 → 参数建议</td></tr>
+          <tr><td><code>prepare_search</code></td><td>推荐 → 验证 → 准备</td></tr>
+          <tr><td><code>run_search</code></td><td>异步启动 Sage/Simple</td></tr>
+          <tr><td><code>get_search_status</code></td><td>进度查询</td></tr>
+          <tr><td><code>cancel_search</code></td><td>取消搜索</td></tr>
+          <tr><td><code>check_engine</code></td><td>引擎健康检查</td></tr>
+          <tr><td><code>list_presets</code></td><td>预设参数列表</td></tr>
+        </table>
       </div>
-      <div class="compare-card ours">
-        <h3>Sage (生产级) ⭐</h3>
-        <p>🚀 sage-core v0.15.0 库集成</p>
-        <p>🚀 Fragment indexing</p>
-        <p>🚀 rayon 并行打分</p>
-        <p>🚀 LDA + KDE rescoring</p>
-        <p>🚀 DIA wide-window + chimeric</p>
-        <p style="color:#3fb950; margin-top:10px;">Rust 原生 · 多线程 · 生产级</p>
-      </div>
-      <div class="compare-card">
-        <h3>pFind (预留)</h3>
-        <p>🔮 ICR 自研搜索引擎</p>
-        <p>🔮 支持 open search</p>
-        <p>🔮 SSH 远程执行</p>
-        <p>🔮 Adapter trait 已定义</p>
-        <p style="color:#8b949e; margin-top:10px;">子进程 · Phase 2b</p>
+      <div>
+        <h3 style="color:#f74c00;">📊 结果分析 <small style="color:#8b949e;">(Rust 计算)</small></h3>
+        <table>
+          <tr><td><code>generate_summary</code></td><td>FDR 过滤 + 统计</td></tr>
+          <tr><td><code>export_results</code></td><td>TSV / JSON 导出</td></tr>
+          <tr><td><code>list_searches</code></td><td>搜索历史</td></tr>
+          <tr><td><code>infer_proteins</code></td><td>蛋白推断</td></tr>
+          <tr><td><code>diagnose_search</code></td><td>诊断报告</td></tr>
+        </table>
+        <h3 style="margin-top:20px; color:#f74c00;">🖼️ 可视化 <small style="color:#8b949e;">(Rust 生成)</small></h3>
+        <table>
+          <tr><td><code>annotate_spectrum</code></td><td>谱图 HTML 标注</td></tr>
+          <tr><td><code>extract_xic</code></td><td>XIC 色谱图</td></tr>
+          <tr><td><code>extract_dia_precursors</code></td><td>DIA 前体提取</td></tr>
+          <tr><td><code>extract_spectrum_precursors</code></td><td>单谱图前体</td></tr>
+          <tr><td><code>get_dia_cache_status</code></td><td>缓存状态</td></tr>
+        </table>
       </div>
     </div>
+    <p style="text-align:center; margin-top:20px; color:#58a6ff;">
+      <strong>所有 25 个 Tool 的计算都在 Rust 中完成</strong> · LLM 只读取返回的 JSON 并做出下一步决策
+    </p>
   </div>
 </div>
 
-<!-- Slide 9: Development Progress -->
+<!-- ═══════════════════════════════════════════════════ -->
+<!-- Slide 9: Diagnostics — Rust Rules + LLM Interpretation -->
+<!-- ═══════════════════════════════════════════════════ -->
 <div class="slide" id="s9">
   <div class="slide-number">09</div>
   <div class="content">
-    <h2>📈 开发进度</h2>
-    <div class="timeline">
-      <div class="timeline-item">
-        <div class="timeline-date">MVP Phase</div>
-        <div class="timeline-title">M1.1-M1.7 核心平台</div>
-        <div class="timeline-desc">spectrum-io + param-recommend + search-engine + report + mcp-server</div>
+    <h2>🔍 搜索诊断：Rust 规则 + LLM 解读</h2>
+    <p style="text-align:center; color:#8b949e; margin-bottom:20px;">
+      诊断功能完美体现了 Rust/LLM 分工：<span class="rust-color">Rust 检测异常</span>，<span class="llm-color">LLM 解释原因</span>
+    </p>
+    <div class="compare-row">
+      <div class="compare-card" style="border-color:#f74c00;">
+        <h3 style="color:#f74c00;">🦀 Rust 做的（确定性规则）</h3>
+        <p style="margin:6px 0;">📏 记录每个阶段耗时（fasta → digestion → matching → fdr）</p>
+        <p style="margin:6px 0;">📊 计算指标：ID 率、FDR、decoy 比例</p>
+        <p style="margin:6px 0;">⚠️ 检测 7 类异常：</p>
+        <p style="margin:4px 0 4px 20px; font-size:0.85em; color:#8b949e;">
+          低 ID 率(&lt;5%) · 高 FDR(&gt;5%) · 零 decoy · 窄容差(&lt;3ppm) ·
+          宽容差(&gt;50ppm) · 数据库不匹配 · 搜索过慢
+        </p>
+        <p style="margin:6px 0;">🏷️ 分类错误：InputData / Parameters / Database / Engine</p>
+        <p style="margin:6px 0;">📋 输出结构化 JSON（anomalies + suggestions + stages）</p>
       </div>
-      <div class="timeline-item">
-        <div class="timeline-date">Post-MVP</div>
-        <div class="timeline-title">异步搜索 + 谱图注释 + DIA 支持 + XIC 可视化</div>
-        <div class="timeline-desc">FW-1~6 功能增强 + DIA 前体提取 + SILAC 轻重标记</div>
-      </div>
-      <div class="timeline-item">
-        <div class="timeline-date">生态扩展</div>
-        <div class="timeline-title">外部结果导入 + FASTA 管理 + 索引访问</div>
-        <div class="timeline-desc">DIA-NN parquet + custom JSON + UniProt 注册表 + indexed mzML/mgf</div>
-      </div>
-      <div class="timeline-item">
-        <div class="timeline-date">Phase 2a</div>
-        <div class="timeline-title">蛋白推断 + Sage 集成</div>
-        <div class="timeline-desc">parsimony + razor + picked-protein FDR + sage-core 0.15.0 集成</div>
-      </div>
-      <div class="timeline-item">
-        <div class="timeline-date">Phase 2d ← 当前</div>
-        <div class="timeline-title">工作流优化 + 搜索诊断</div>
-        <div class="timeline-desc">prepare_search 桥接 + DIA 缓存溢出 + 7 条异常检测 + diagnose_search tool</div>
-      </div>
-      <div class="timeline-item pending">
-        <div class="timeline-date">Phase 2b/2c</div>
-        <div class="timeline-title">pFind 对接 · 批处理 · 定量 · PTM</div>
-        <div class="timeline-desc">外部引擎 · 多文件并行 · LFQ/TMT · Ascore</div>
+      <div class="compare-card" style="border-color:#bc8cff;">
+        <h3 style="color:#bc8cff;">🤖 LLM 做的（推理解释）</h3>
+        <p style="margin:6px 0;">📖 读取 Rust 返回的诊断 JSON</p>
+        <p style="margin:6px 0;">🧠 综合判断根本原因：</p>
+        <p style="margin:4px 0 4px 20px; font-size:0.85em; color:#8b949e;">
+          "ID 率只有 3%，同时 decoy 命中为 0 → 很可能数据库物种不匹配"
+        </p>
+        <p style="margin:6px 0;">💡 生成人类可读建议：</p>
+        <p style="margin:4px 0 4px 20px; font-size:0.85em; color:#8b949e;">
+          "建议检查样本物种，当前使用的是 human 数据库，尝试换用 mouse"
+        </p>
+        <p style="margin:6px 0;">🔄 可以自动调整参数并重新搜索</p>
+        <p style="margin:6px 0;">📊 向用户解释每项异常的含义和影响</p>
       </div>
     </div>
   </div>
 </div>
 
-<!-- Slide 10: Competitive Advantage -->
+<!-- ═══════════════════════════════════════════════════ -->
+<!-- Slide 10: Search Engines + Rust Crate Map -->
+<!-- ═══════════════════════════════════════════════════ -->
 <div class="slide" id="s10">
   <div class="slide-number">10</div>
   <div class="content">
-    <h2>🏆 竞品对比</h2>
+    <h2>⚡ 搜索引擎 + Rust Crate 全景</h2>
+    <div class="compare-row">
+      <div class="compare-card" style="border-color:#f74c00;">
+        <h3 style="color:#f74c00;">SimpleSearch (MVP)</h3>
+        <p>📌 内置 b/y 离子匹配（纯 Rust 实现）</p>
+        <p>📌 Trypsin/Lys-C 酶切 · 固定/可变修饰</p>
+        <p>📌 target-decoy FDR · 单线程</p>
+        <p style="color:#8b949e; margin-top:10px;">教学级 · 功能验证用</p>
+      </div>
+      <div class="compare-card ours">
+        <h3 style="color:#3fb950;">Sage (生产级) ⭐</h3>
+        <p>🚀 sage-core v0.15.0 库调用</p>
+        <p>🚀 Fragment indexing · rayon 多线程</p>
+        <p>🚀 LDA + KDE rescoring</p>
+        <p>🚀 DIA wide-window + chimeric deconvolution</p>
+        <p style="color:#3fb950; margin-top:10px;">Rust 原生 · 生产级性能</p>
+      </div>
+      <div class="compare-card">
+        <h3>pFind (预留)</h3>
+        <p>🔮 ICR 自研引擎 · open search</p>
+        <p>🔮 Adapter trait 已定义</p>
+        <p style="color:#8b949e; margin-top:10px;">Phase 2b</p>
+      </div>
+    </div>
+    <h3 style="margin-top:30px; text-align:center;">📦 13 个 Rust Crates</h3>
+    <div class="crate-grid">
+      <div class="crate-box"><div class="name">core</div><div class="desc">共享模型 · Spectrum<br>SearchResult · Diagnostics</div></div>
+      <div class="crate-box"><div class="name">spectrum-io</div><div class="desc">mgf · mzML<br>streaming + indexed</div></div>
+      <div class="crate-box"><div class="name">param-recommend</div><div class="desc">5 个预设<br>规则引擎</div></div>
+      <div class="crate-box"><div class="name">search-engine</div><div class="desc">SimpleSearch · Sage<br>Adapter trait</div></div>
+      <div class="crate-box"><div class="name">fdr</div><div class="desc">PSM · 肽段 · 蛋白<br>target-decoy</div></div>
+      <div class="crate-box"><div class="name">protein-inference</div><div class="desc">parsimony · razor<br>picked-protein FDR</div></div>
+      <div class="crate-box"><div class="name">xic</div><div class="desc">XIC 色谱图<br>SILAC 轻重标记</div></div>
+      <div class="crate-box"><div class="name">dia-extraction</div><div class="desc">DIA 前体提取<br>同位素模式检测</div></div>
+      <div class="crate-box"><div class="name">result-import</div><div class="desc">DIA-NN parquet<br>custom JSON</div></div>
+      <div class="crate-box"><div class="name">fasta-db</div><div class="desc">UniProt 注册表<br>HTTPS 缓存</div></div>
+      <div class="crate-box"><div class="name">report</div><div class="desc">TSV · JSON<br>HTML 可视化</div></div>
+      <div class="crate-box"><div class="name">integration-tests</div><div class="desc">端到端测试<br>回归保护</div></div>
+      <div class="crate-box" style="border-color:#f0883e;"><div class="name">mcp-server</div><div class="desc">25 tools · stdio<br>3200+ 行</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<!-- Slide 11: Why This Architecture -->
+<!-- ═══════════════════════════════════════════════════ -->
+<div class="slide" id="s11">
+  <div class="slide-number">11</div>
+  <div class="content">
+    <h2>💡 为什么这样设计？</h2>
+    <div class="features">
+      <div class="feature-card rust-card">
+        <div class="feature-icon">🔒</div>
+        <h3>可复现性</h3>
+        <p>科学计算必须可复现。<br>
+          同样的输入 → Rust 永远给出同样的结果。<br>
+          LLM 的输出有随机性，不适合做数值计算。<br>
+          <strong style="color:#f74c00;">每次运行记录 run_id + 参数 + 版本</strong></p>
+      </div>
+      <div class="feature-card rust-card">
+        <div class="feature-icon">⚡</div>
+        <h3>性能</h3>
+        <p>质谱搜索需要处理百万级谱图。<br>
+          Rust 零成本抽象 + rayon 并行。<br>
+          Sage 引擎每秒处理数千张谱图。<br>
+          <strong style="color:#f74c00;">LLM 调用延迟 &gt;1s，不适合高频计算</strong></p>
+      </div>
+      <div class="feature-card rust-card">
+        <div class="feature-icon">🧪</div>
+        <h3>可测试性</h3>
+        <p>670+ 测试 · 0 clippy warnings。<br>
+          每个 crate 独立编译和测试。<br>
+          FDR 计算有精确的预期值断言。<br>
+          <strong style="color:#f74c00;">LLM 输出无法写精确断言</strong></p>
+      </div>
+      <div class="feature-card llm-card">
+        <div class="feature-icon">🗣️</div>
+        <h3>自然语言理解</h3>
+        <p>"帮我搜一下" → DDA 基础搜索<br>
+          "磷酸化分析" → 添加 STY 修饰<br>
+          这种模糊指令只有 LLM 能理解。<br>
+          <strong style="color:#bc8cff;">传统工具需要用户精确配置 200+ 参数</strong></p>
+      </div>
+      <div class="feature-card llm-card">
+        <div class="feature-icon">📖</div>
+        <h3>结果解释</h3>
+        <p>"q-value = 0.00847" → 人类看不懂<br>
+          LLM：该蛋白在 1% FDR 下高置信鉴定"<br>
+          降低蛋白组学分析的专业门槛。<br>
+          <strong style="color:#bc8cff;">让非专家也能理解搜索结果</strong></p>
+      </div>
+      <div class="feature-card mcp-card">
+        <div class="feature-icon">🔌</div>
+        <h3>生态开放</h3>
+        <p>MCP 是开放标准协议。<br>
+          Claude / GPT / Gemini 都可以做 Client。<br>
+          一次开发 Rust Server → 多 AI 受益。<br>
+          <strong style="color:#58a6ff;">不绑定任何特定 LLM 供应商</strong></p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<!-- Slide 12: Competitive Edge + Next Steps -->
+<!-- ═══════════════════════════════════════════════════ -->
+<div class="slide" id="s12">
+  <div class="slide-number">12</div>
+  <div class="content">
+    <h2>🏆 竞品对比 + 下一步</h2>
     <table>
       <tr>
         <th>能力</th>
@@ -512,108 +846,47 @@
         <th>DIA-NN</th>
         <th style="color:#3fb950;">ProteinCopilot</th>
       </tr>
+      <tr><td>搜索引擎</td><td>Andromeda</td><td>MSFragger</td><td>自研 C++</td><td class="green">SimpleSearch + Sage</td></tr>
+      <tr><td>DDA + DIA</td><td>DDA</td><td>DDA</td><td>DIA</td><td class="green">✅ 双模式</td></tr>
+      <tr><td>蛋白推断</td><td>✅</td><td>✅</td><td>✅</td><td class="green">✅ Parsimony + Razor</td></tr>
       <tr>
-        <td>搜索引擎</td><td>Andromeda</td><td>MSFragger</td><td>自研 C++</td>
-        <td class="green">SimpleSearch + Sage + pFind</td>
-      </tr>
-      <tr>
-        <td>蛋白推断</td><td>✅</td><td>✅</td><td>✅</td>
-        <td class="green">✅ Parsimony + Razor</td>
-      </tr>
-      <tr>
-        <td>三级 FDR</td><td>✅</td><td>✅</td><td>✅</td>
-        <td class="green">✅ PSM+肽段+蛋白</td>
-      </tr>
-      <tr>
-        <td>DDA + DIA</td><td>DDA</td><td>DDA</td><td>DIA</td>
-        <td class="green">✅ 双模式</td>
-      </tr>
-      <tr>
-        <td>外部结果导入</td><td>❌</td><td>❌</td><td>—</td>
-        <td class="green">✅ DIA-NN + JSON</td>
-      </tr>
-      <tr>
-        <td style="color:#f0883e;">AI 驱动</td><td>❌</td><td>❌</td><td>❌</td>
-        <td style="color:#f0883e; font-weight:700;">✅ MCP + Agent + Skill 🎯</td>
-      </tr>
-      <tr>
-        <td style="color:#f0883e;">搜索诊断</td><td>❌</td><td>❌</td><td>❌</td>
-        <td style="color:#f0883e; font-weight:700;">✅ 7 条规则 + 修复建议 🎯</td>
+        <td style="color:#f0883e;">AI 编排</td><td>❌</td><td>❌</td><td>❌</td>
+        <td style="color:#f0883e; font-weight:700;">✅ MCP + Agent + 12 Skill 🎯</td>
       </tr>
       <tr>
         <td style="color:#f0883e;">自然语言交互</td><td>❌</td><td>❌</td><td>❌</td>
-        <td style="color:#f0883e; font-weight:700;">✅ 25 tools × LLM 🎯</td>
+        <td style="color:#f0883e; font-weight:700;">✅ 25 Rust tools × LLM 🎯</td>
+      </tr>
+      <tr>
+        <td style="color:#f0883e;">搜索诊断</td><td>❌</td><td>❌</td><td>❌</td>
+        <td style="color:#f0883e; font-weight:700;">✅ 7 规则 + LLM 解读 🎯</td>
       </tr>
     </table>
-    <p style="text-align:center; margin-top:20px; color:#f0883e; font-size:1.2em;">
-      <strong>核心差异化：AI 编排是所有竞品都没有的能力</strong>
-    </p>
-  </div>
-</div>
 
-<!-- Slide 11: Tech Stack -->
-<div class="slide" id="s11">
-  <div class="slide-number">11</div>
-  <div class="content">
-    <h2>🔧 技术栈</h2>
-    <div class="features">
-      <div class="feature-card">
-        <div class="feature-icon">🦀</div>
-        <h3>Rust</h3>
-        <p>内存安全 · 零成本抽象 · 高性能<br>tokio 异步 · serde 序列化 · thiserror 错误处理</p>
-      </div>
-      <div class="feature-card">
-        <div class="feature-icon">🔗</div>
-        <h3>MCP Protocol</h3>
-        <p>JSON-RPC 2.0 over stdio<br>rmcp crate · JSON Schema 输入输出<br>任何 MCP Client 可对接</p>
-      </div>
-      <div class="feature-card">
-        <div class="feature-icon">🧪</div>
-        <h3>Sage Engine</h3>
-        <p>sage-core v0.15.0<br>fragment indexing · rayon 并行<br>LDA + KDE FDR</p>
-      </div>
-      <div class="feature-card">
-        <div class="feature-icon">📊</div>
-        <h3>可视化</h3>
-        <p>Plotly.js HTML 报告<br>谱图注释 · XIC 色谱图<br>SILAC mirror plot</p>
-      </div>
-      <div class="feature-card">
-        <div class="feature-icon">🧬</div>
-        <h3>质谱标准</h3>
-        <p>mzML · MGF 解析<br>UniProt FASTA<br>target-decoy FDR</p>
-      </div>
-      <div class="feature-card">
-        <div class="feature-icon">🤖</div>
-        <h3>AI/LLM</h3>
-        <p>Agent + 12 Skill Prompts<br>结构化 AI 决策输出<br>参数推荐 · 结果解释 · 诊断</p>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- Slide 12: Next Steps -->
-<div class="slide" id="s12">
-  <div class="slide-number">12</div>
-  <div class="content">
-    <h2>🚀 下一步计划</h2>
-    <div class="features">
+    <div class="features" style="margin-top:30px;">
       <div class="feature-card">
         <h3>Phase 2b</h3>
         <p>🔮 pFind 引擎对接（SSH 远程执行）<br>🔮 DIA-NN 引擎对接<br>🔮 多文件批处理搜索</p>
       </div>
       <div class="feature-card">
         <h3>Phase 2c</h3>
-        <p>🔮 Percolator 重评分<br>🔮 LFQ / TMT 定量分析<br>🔮 PTM 定位评分 (Ascore)</p>
+        <p>🔮 Percolator 重评分<br>🔮 LFQ / TMT 定量分析<br>🔮 PTM 定位评分</p>
       </div>
       <div class="feature-card">
         <h3>Phase 3</h3>
-        <p>🔮 Match-Between-Runs<br>🔮 Library-free DIA<br>🔮 深度学习谱图预测<br>🔮 Web Dashboard</p>
+        <p>🔮 Match-Between-Runs<br>🔮 深度学习谱图预测<br>🔮 Web Dashboard</p>
       </div>
     </div>
-    <div style="text-align:center; margin-top:50px;">
-      <p style="font-size:1.5em; color:#58a6ff;">🧬 ProteinCopilot</p>
-      <p style="color:#8b949e; margin-top:10px;">让蛋白质组学分析像对话一样简单</p>
-      <p style="color:#484f58; margin-top:20px;">13 crates · 25 tools · 670+ tests · 12 prompts · 0 clippy warnings</p>
+
+    <div style="text-align:center; margin-top:40px;">
+      <p style="font-size:1.8em; color:#58a6ff;">🧬 ProteinCopilot</p>
+      <p style="color:#c9d1d9; margin-top:10px; font-size:1.1em;">
+        <span class="rust-color">Rust 做计算</span> ·
+        <span class="llm-color">LLM 做编排</span> ·
+        <span class="mcp-color">MCP 做连接</span>
+      </p>
+      <p style="color:#8b949e; margin-top:15px;">让蛋白质组学分析像对话一样简单</p>
+      <p style="color:#484f58; margin-top:10px;">13 crates · 25 tools · 670+ tests · 12 prompts · 0 clippy warnings</p>
     </div>
   </div>
 </div>
