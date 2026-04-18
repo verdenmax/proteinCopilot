@@ -2083,14 +2083,18 @@ impl ProteinCopilotServer {
                 let mod_mass: f64 = modifications.iter().map(|m| m.mass_delta).sum();
                 let precursor_mz =
                     (base_mass + mod_mass + charge as f64 * PROTON_MASS) / charge as f64;
-                protein_copilot_result_import::scan_matcher::find_scan_by_rt(
-                    &spectrum_file,
-                    rt,
-                    precursor_mz,
-                    0.5,
-                    &*reader,
-                )
-                .map_err(|e| mcp_err(ErrorCode::INVALID_PARAMS, e))?
+                reader
+                    .find_by_rt(&spectrum_file, rt, precursor_mz, 0.5)
+                    .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?
+                    .map(|(scan, _)| scan)
+                    .ok_or_else(|| {
+                        mcp_err(
+                            ErrorCode::INVALID_PARAMS,
+                            format!(
+                                "No MS2 scan near RT={rt:.2}min mz={precursor_mz:.4}"
+                            ),
+                        )
+                    })?
             } else {
                 return Err(mcp_err(
                     ErrorCode::INVALID_PARAMS,
@@ -2673,14 +2677,18 @@ impl ProteinCopilotServer {
         let resolved_scan = if input.scan_number == 0 {
             if let Some(rt) = input.retention_time_min {
                 let reader = self.get_or_create_reader(&file_path)?;
-                protein_copilot_result_import::scan_matcher::find_scan_by_rt(
-                    &file_path,
-                    rt,
-                    precursor_mz,
-                    0.5,
-                    &*reader,
-                )
-                .map_err(|e| mcp_err(ErrorCode::INVALID_PARAMS, e))?
+                reader
+                    .find_by_rt(&file_path, rt, precursor_mz, 0.5)
+                    .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?
+                    .map(|(scan, _)| scan)
+                    .ok_or_else(|| {
+                        mcp_err(
+                            ErrorCode::INVALID_PARAMS,
+                            format!(
+                                "No MS2 scan near RT={rt:.2}min mz={precursor_mz:.4}"
+                            ),
+                        )
+                    })?
             } else {
                 return Err(mcp_err(
                     ErrorCode::INVALID_PARAMS,

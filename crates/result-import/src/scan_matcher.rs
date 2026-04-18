@@ -158,14 +158,11 @@ pub fn find_scan_by_rt(
     rt_tolerance_min: f64,
     reader: &dyn SpectrumReader,
 ) -> Result<u32, ResultImportError> {
-    let mut ms2_infos = collect_ms2_info(reader, file)?;
-    ms2_infos.sort_by(|a, b| {
-        a.rt_min
-            .partial_cmp(&b.rt_min)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-
-    find_best_match(&ms2_infos, rt_min, precursor_mz, rt_tolerance_min)
+    // Delegate to SpectrumReader::find_by_rt() which uses O(log N) binary
+    // search on IndexedMzMLReader (falls back to read_all on other readers).
+    reader
+        .find_by_rt(file, rt_min, precursor_mz, rt_tolerance_min)
+        .map_err(|e| ResultImportError::SpectrumIo(e.to_string()))?
         .map(|(scan, _delta)| scan)
         .ok_or(ResultImportError::NoMatchingScan {
             rt_min,
