@@ -13,7 +13,7 @@ use quick_xml::events::Event;
 use quick_xml::Reader;
 
 use crate::error::SpectrumIoError;
-use crate::index::{build_index_by_scanning, build_index_from_native_mzml, ScanIndex};
+use crate::index::{build_index_by_byte_scan, build_index_from_native_mzml, ScanIndex};
 use crate::mzml::{
     decode_binary_array, get_attr, parse_scan_from_id, parse_scan_from_spectrum_ref,
     BinaryArrayMeta, MzMLReader,
@@ -33,14 +33,50 @@ pub struct IndexedMzMLReader {
 impl IndexedMzMLReader {
     /// Opens an mzML file and builds a scan index.
     ///
-    /// Tries the native `<indexList>` first (fast, reads only EOF).
-    /// Falls back to scanning all `<spectrum>` tags if no native index exists.
+    /// Uses a three-layer resolution strategy:
+    /// 1. **Disk cache** (`.mzml.idx` sidecar) — milliseconds
+    /// 2. **Native `<indexList>`** from `<indexedmzML>` — milliseconds (reads EOF)
+    /// 3. **SIMD byte-scan fallback** — seconds (scans full file with `memchr`)
+    ///
+    /// After layers 2 or 3 succeed, the result is persisted to disk cache
+    /// so future opens are instant.
     pub fn open(path: &Path) -> Result<Self, SpectrumIoError> {
+        // Layer 1: Try disk cache
+        if let Ok((file_size, file_mtime)) = crate::disk_cache::file_metadata(path) {
+            match crate::disk_cache::load_index(path, file_size, file_mtime) {
+                Ok(Some(cached_index)) => {
+                    tracing::info!(
+                        path = %path.display(),
+                        scans = cached_index.len(),
+                        "loaded index from disk cache"
+                    );
+                    return Ok(Self {
+                        index: cached_index,
+                        path: path.to_path_buf(),
+                    });
+                }
+                Ok(None) => {} // Cache miss — continue to layer 2
+                Err(e) => {
+                    tracing::warn!(error = %e, "disk cache load error, continuing without cache");
+                }
+            }
+        }
+
+        // Layer 2: Try native <indexList>
         let index = if let Some(native) = build_index_from_native_mzml(path)? {
             native
         } else {
-            build_index_by_scanning(path)?
+            // Layer 3: SIMD byte-scan fallback (accelerated)
+            build_index_by_byte_scan(path)?
         };
+
+        // Persist to disk cache for future opens (non-fatal if it fails)
+        if let Ok((file_size, file_mtime)) = crate::disk_cache::file_metadata(path) {
+            if let Err(e) = crate::disk_cache::save_index(path, &index, file_size, file_mtime) {
+                tracing::warn!(error = %e, "failed to persist index cache (non-fatal)");
+            }
+        }
+
         Ok(Self {
             index,
             path: path.to_path_buf(),
@@ -407,9 +443,13 @@ mod tests {
 
     #[test]
     fn open_plain_mzml_builds_scan_index() {
+        // Remove any stale disk cache to test fresh index building
+        let _ = std::fs::remove_file(crate::disk_cache::idx_path(&fixture_path()));
         let reader = IndexedMzMLReader::open(&fixture_path()).unwrap();
         assert_eq!(reader.index().len(), 10);
         assert_eq!(reader.index().source(), IndexSource::BuiltFromScan);
+        // Clean up the .idx created as side effect
+        let _ = std::fs::remove_file(crate::disk_cache::idx_path(&fixture_path()));
     }
 
     #[test]
@@ -418,9 +458,12 @@ mod tests {
         if !path.exists() {
             return;
         }
+        // Remove any stale disk cache to test native index path
+        let _ = std::fs::remove_file(crate::disk_cache::idx_path(&path));
         let reader = IndexedMzMLReader::open(&path).unwrap();
         assert_eq!(reader.index().len(), 10);
         assert_eq!(reader.index().source(), IndexSource::NativeIndex);
+        let _ = std::fs::remove_file(crate::disk_cache::idx_path(&path));
     }
 
     #[test]
@@ -460,6 +503,43 @@ mod tests {
                 std_spec.intensity_array.len()
             );
             assert!((idx_spec.retention_time_min - std_spec.retention_time_min).abs() < 0.001);
+        }
+    }
+
+    #[test]
+    fn open_creates_disk_cache() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = fixture_path();
+        let copy = dir.path().join("test.mzml");
+        std::fs::copy(&src, &copy).unwrap();
+
+        let idx_file = crate::disk_cache::idx_path(&copy);
+        assert!(!idx_file.exists(), "idx should not exist before open");
+
+        let _reader = IndexedMzMLReader::open(&copy).unwrap();
+        assert!(idx_file.exists(), "idx should exist after open");
+    }
+
+    #[test]
+    fn open_uses_disk_cache_on_second_call() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = fixture_path();
+        let copy = dir.path().join("test.mzml");
+        std::fs::copy(&src, &copy).unwrap();
+
+        // First open: builds index + saves cache
+        let reader1 = IndexedMzMLReader::open(&copy).unwrap();
+
+        // Second open: should load from disk cache
+        let reader2 = IndexedMzMLReader::open(&copy).unwrap();
+        assert_eq!(reader1.index().len(), reader2.index().len());
+
+        // Verify scans match
+        for scan in reader1.index().scan_numbers() {
+            assert_eq!(
+                reader1.index().get_offset(scan),
+                reader2.index().get_offset(scan),
+            );
         }
     }
 }

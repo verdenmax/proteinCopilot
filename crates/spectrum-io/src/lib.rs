@@ -28,6 +28,7 @@ pub mod mgf;
 pub mod mzml;
 pub mod reader;
 mod util;
+pub mod disk_cache;
 
 pub use error::SpectrumIoError;
 pub use indexed_mgf::IndexedMgfReader;

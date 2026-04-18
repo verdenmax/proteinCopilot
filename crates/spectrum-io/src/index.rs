@@ -56,6 +56,11 @@ impl ScanIndex {
         self.source
     }
 
+    /// Returns a reference to the underlying offsets map.
+    pub fn offsets(&self) -> &HashMap<u32, u64> {
+        &self.offsets
+    }
+
     /// Returns all indexed scan numbers, sorted ascending.
     pub fn scan_numbers(&self) -> Vec<u32> {
         let mut scans: Vec<u32> = self.offsets.keys().copied().collect();
@@ -342,6 +347,144 @@ pub fn build_index_by_scanning(path: &Path) -> Result<ScanIndex, SpectrumIoError
     Ok(ScanIndex::new(offsets, IndexSource::BuiltFromScan))
 }
 
+/// Extracts a scan number from raw `<spectrum …>` tag bytes without UTF-8 validation.
+///
+/// Searches for ` id="` (note leading space to avoid matching `nativeID=`),
+/// extracts the attribute value, then parses `scan=N` from it.
+/// Falls back to single-quote variant ` id='`.
+/// At most `512` bytes are inspected to avoid scanning into peak data.
+/// Returns `fallback_scan` if no id attribute or no `scan=` is found.
+fn extract_scan_from_tag_bytes(tag_bytes: &[u8], fallback_scan: u32) -> u32 {
+    let limit = tag_bytes.len().min(512);
+    let region = &tag_bytes[..limit];
+
+    // Try double-quote first, then single-quote
+    let (after_id, closing_quote) =
+        if let Some(pos) = memchr::memmem::find(region, b" id=\"") {
+            (&region[pos + 5..], b'"')
+        } else if let Some(pos) = memchr::memmem::find(region, b" id='") {
+            (&region[pos + 5..], b'\'')
+        } else {
+            return fallback_scan;
+        };
+
+    // Find the closing quote to delimit the attribute value
+    let end = match memchr::memchr(closing_quote, after_id) {
+        Some(e) => e,
+        None => return fallback_scan,
+    };
+    let id_value = &after_id[..end];
+
+    // Look for "scan=" inside the id value
+    if let Some(scan_pos) = memchr::memmem::find(id_value, b"scan=") {
+        let digits_start = scan_pos + 5;
+        let mut digits_end = digits_start;
+        while digits_end < id_value.len() && id_value[digits_end].is_ascii_digit() {
+            digits_end += 1;
+        }
+        if digits_end > digits_start {
+            // SAFETY: we checked that all bytes are ASCII digits, so this is valid UTF-8
+            if let Ok(s) = std::str::from_utf8(&id_value[digits_start..digits_end]) {
+                if let Ok(n) = s.parse::<u32>() {
+                    return n;
+                }
+            }
+        }
+    }
+
+    fallback_scan
+}
+
+/// Builds a [`ScanIndex`] by byte-level scanning with SIMD-accelerated search.
+///
+/// Uses `memchr::memmem` to find `<spectrum ` needles in large buffered reads,
+/// avoiding per-line `String` allocation and UTF-8 validation. This is expected
+/// to be 5–10× faster than [`build_index_by_scanning`] on multi-GB mzML files.
+///
+/// Cross-buffer-boundary matches are handled by keeping `needle.len() - 1`
+/// bytes of overlap between consecutive buffer fills.
+pub fn build_index_by_byte_scan(path: &Path) -> Result<ScanIndex, SpectrumIoError> {
+    use std::fs::File;
+    use std::io::BufReader;
+
+    let file = File::open(path).map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            SpectrumIoError::FileNotFound {
+                path: path.to_path_buf(),
+            }
+        } else {
+            SpectrumIoError::IoError {
+                path: path.to_path_buf(),
+                source: e,
+            }
+        }
+    })?;
+
+    let mut reader = BufReader::with_capacity(256 * 1024, file);
+    let needle = b"<spectrum ";
+    let mut offsets = HashMap::new();
+    let mut fallback_scan: u32 = 0;
+    let mut global_pos: u64 = 0;
+
+    // A <spectrum> opening tag is typically ~100-200 bytes. We need at least
+    // this many bytes after a match to reliably parse the id attribute.
+    // Tags found with fewer remaining bytes are skipped and re-found in the
+    // next buffer fill via the overlap region.
+    const TAG_MIN_CONTENT: usize = 256;
+
+    loop {
+        let buf = reader.fill_buf().map_err(|e| SpectrumIoError::IoError {
+            path: path.to_path_buf(),
+            source: e,
+        })?;
+        if buf.is_empty() {
+            break;
+        }
+        let buf_len = buf.len();
+        let mut search_start = 0;
+
+        while let Some(pos) = memchr::memmem::find(&buf[search_start..], needle) {
+            let local_pos = search_start + pos;
+            let remaining = buf_len - local_pos;
+
+            if remaining < TAG_MIN_CONTENT && buf_len >= TAG_MIN_CONTENT + needle.len() {
+                // Not enough content to parse tag reliably at buffer boundary;
+                // skip and let the overlap bring it back in the next fill.
+                break;
+            }
+
+            let abs_pos = global_pos + local_pos as u64;
+            fallback_scan += 1;
+            // Extract scan from tag bytes (limit to 512 bytes or end of buffer)
+            let tag_end = (local_pos + 512).min(buf_len);
+            let scan = extract_scan_from_tag_bytes(&buf[local_pos..tag_end], fallback_scan);
+            if let Some(prev_offset) = offsets.insert(scan, abs_pos) {
+                tracing::warn!(
+                    "duplicate scan {} found while byte-scanning: offset {} replaced by {}",
+                    scan,
+                    prev_offset,
+                    abs_pos
+                );
+            }
+            search_start = local_pos + needle.len();
+        }
+
+        // Keep overlap large enough to cover tags near the buffer boundary.
+        // TAG_MIN_CONTENT bytes ensures any skipped tag is fully available
+        // in the next fill.
+        let overlap = TAG_MIN_CONTENT + needle.len();
+        let consumed = if buf_len > overlap {
+            buf_len - overlap
+        } else {
+            buf_len
+        };
+        global_pos += consumed as u64;
+        reader.consume(consumed);
+    }
+
+    Ok(ScanIndex::new(offsets, IndexSource::BuiltFromScan))
+}
+
 /// Extracts the value of the `id` attribute from an XML tag string.
 fn extract_id_attr(tag_text: &str) -> Option<String> {
     // Match " id=" with leading space to avoid suffix matches (e.g., "nativeID=")
@@ -469,6 +612,82 @@ mod tests {
         for scan in 1..=10 {
             assert!(idx.get_offset(scan).is_some(), "missing scan {scan}");
         }
+    }
+
+    // ── byte-scan & extract_scan_from_tag_bytes tests ──────────────────
+
+    #[test]
+    fn byte_scan_matches_line_scan() {
+        let path =
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/small.mzml");
+        let line_idx = build_index_by_scanning(&path).unwrap();
+        let byte_idx = build_index_by_byte_scan(&path).unwrap();
+
+        assert_eq!(
+            line_idx.len(),
+            byte_idx.len(),
+            "number of indexed scans must match"
+        );
+        assert_eq!(byte_idx.source(), IndexSource::BuiltFromScan);
+
+        // Both must find the same scan numbers
+        assert_eq!(line_idx.scan_numbers(), byte_idx.scan_numbers());
+
+        // The byte scanner finds the exact `<spectrum ` position while
+        // the line scanner records the start of the line (including
+        // leading whitespace). The byte scanner offset should be ≥ the
+        // line offset and within a small indentation delta.
+        let file_bytes = std::fs::read(&path).unwrap();
+        for scan in line_idx.scan_numbers() {
+            let byte_off = byte_idx
+                .get_offset(scan)
+                .unwrap_or_else(|| panic!("byte_scan missing scan {scan}"));
+            let line_off = line_idx.get_offset(scan).unwrap();
+            assert!(
+                byte_off >= line_off,
+                "byte offset {byte_off} should be >= line offset {line_off} for scan {scan}"
+            );
+            assert!(
+                byte_off - line_off < 64,
+                "byte offset delta too large for scan {scan}: line={line_off}, byte={byte_off}"
+            );
+            // Verify the byte offset actually points at `<spectrum `
+            assert_eq!(
+                &file_bytes[byte_off as usize..byte_off as usize + 10],
+                b"<spectrum ",
+                "byte offset for scan {scan} should point at '<spectrum '"
+            );
+        }
+    }
+
+    #[test]
+    fn byte_scan_indexed_mzml_matches() {
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/small_indexed.mzml");
+        if !path.exists() {
+            generate_indexed_fixture(&path);
+        }
+        let idx = build_index_by_byte_scan(&path).unwrap();
+        assert_eq!(idx.len(), 10, "small_indexed.mzml should have 10 spectra");
+        assert_eq!(idx.source(), IndexSource::BuiltFromScan);
+    }
+
+    #[test]
+    fn extract_scan_from_tag_bytes_standard() {
+        let tag = b"<spectrum index=\"0\" id=\"scan=42\" defaultArrayLength=\"4\">";
+        assert_eq!(extract_scan_from_tag_bytes(tag, 99), 42);
+    }
+
+    #[test]
+    fn extract_scan_from_tag_bytes_with_controller() {
+        let tag = b"<spectrum id=\"controllerType=0 controllerNumber=1 scan=123\">";
+        assert_eq!(extract_scan_from_tag_bytes(tag, 99), 123);
+    }
+
+    #[test]
+    fn extract_scan_from_tag_bytes_no_id() {
+        let tag = b"<spectrum index=\"0\">";
+        assert_eq!(extract_scan_from_tag_bytes(tag, 99), 99);
     }
 
     fn generate_indexed_fixture(output_path: &std::path::Path) {

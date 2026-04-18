@@ -141,6 +141,30 @@ Phase 2 计划：`tasks/002-phase2-production-platform.md`
 架构设计：`docs/architecture.md`
 架构演示：`docs/architecture.html`
 
+## 大文件性能优化
+
+处理大型 mzML 文件（>1GB）时，ProteinCopilot 使用三层索引加速：
+
+1. **磁盘索引缓存**（`.mzml.idx`）— 首次打开后自动生成，后续毫秒级加载
+2. **mzML 原生索引**（`<indexList>`）— 直接读取文件末尾，秒级完成
+3. **SIMD 字节扫描**（fallback）— 使用 `memchr` 加速全文件扫描
+
+### MCP 超时配置
+
+对于 8GB+ 的大文件，建议在 `.mcp.json` 中增加超时时间：
+
+```json
+{
+  "mcpServers": {
+    "protein-copilot": {
+      "timeout": 300
+    }
+  }
+}
+```
+
+默认超时 60 秒可能不足以完成首次索引构建。设置 `timeout: 300`（5 分钟）可避免超时错误。
+
 ## License
 
 MIT
