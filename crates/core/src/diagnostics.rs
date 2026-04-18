@@ -182,6 +182,186 @@ impl SearchDiagnostics {
         self.error_category = Some(category);
         self.error_detail = Some(detail.to_string());
     }
+
+    /// Run anomaly detection rules after search completes.
+    ///
+    /// Arguments come from `SearchResultSummary` and `SearchParams`:
+    /// - `identification_rate`: PSMs at 1% FDR / total spectra (0.0 to 1.0)
+    /// - `psms_at_1pct_fdr`: absolute count of PSMs passing 1% FDR
+    /// - `decoy_count`: number of decoy PSM hits
+    /// - `total_elapsed_sec`: total wall-clock seconds
+    /// - `precursor_tolerance_ppm`: precursor mass tolerance in ppm (None if Da units)
+    pub fn finalize(
+        &mut self,
+        identification_rate: Option<f64>,
+        psms_at_1pct_fdr: Option<u64>,
+        decoy_count: Option<u64>,
+        total_elapsed_sec: f64,
+        precursor_tolerance_ppm: Option<f64>,
+    ) {
+        self.total_elapsed_sec = total_elapsed_sec;
+
+        // Rule 1: Low identification rate
+        if let Some(rate) = identification_rate {
+            if rate < 0.10 {
+                self.anomalies.push(SearchAnomaly {
+                    severity: "warning".to_string(),
+                    category: AnomalyCategory::LowIdentificationRate,
+                    message: format!(
+                        "PSM identification rate is {:.1}%, well below typical 10-40%",
+                        rate * 100.0
+                    ),
+                    metric_name: Some("identification_rate".to_string()),
+                    metric_value: Some(rate),
+                    expected_range: Some("10-40%".to_string()),
+                });
+                self.suggestions.push(DiagnosticSuggestion {
+                    priority: 1,
+                    action: "Confirm sample species matches database organism".to_string(),
+                    reason: "Species mismatch is the most common cause of low identification rate"
+                        .to_string(),
+                    param_changes: None,
+                });
+                self.suggestions.push(DiagnosticSuggestion {
+                    priority: 2,
+                    action: "Check enzyme setting matches sample preparation".to_string(),
+                    reason: "Wrong enzyme causes systematic peptide mismatch".to_string(),
+                    param_changes: None,
+                });
+            }
+        }
+
+        // Rule 2: No decoy hits
+        if let Some(0) = decoy_count {
+            self.anomalies.push(SearchAnomaly {
+                severity: "error".to_string(),
+                category: AnomalyCategory::NoDecoyHits,
+                message: "No decoy PSM hits detected — FDR calculation is unreliable".to_string(),
+                metric_name: Some("decoy_count".to_string()),
+                metric_value: Some(0.0),
+                expected_range: Some("> 0".to_string()),
+            });
+            self.suggestions.push(DiagnosticSuggestion {
+                priority: 1,
+                action: "Verify FASTA database contains decoy sequences".to_string(),
+                reason: "Target-decoy FDR requires decoy sequences in the database".to_string(),
+                param_changes: None,
+            });
+        }
+
+        // Rule 3: Very few PSMs at 1% FDR
+        if let Some(count) = psms_at_1pct_fdr {
+            if count < 50 && count > 0 {
+                self.anomalies.push(SearchAnomaly {
+                    severity: "warning".to_string(),
+                    category: AnomalyCategory::HighFdr,
+                    message: format!(
+                        "Only {} PSMs pass 1% FDR — results may not be statistically reliable",
+                        count
+                    ),
+                    metric_name: Some("psms_at_1pct_fdr".to_string()),
+                    metric_value: Some(count as f64),
+                    expected_range: Some("> 100".to_string()),
+                });
+            }
+        }
+
+        // Rule 4: Narrow precursor tolerance + low identification
+        if let (Some(tol), Some(rate)) = (precursor_tolerance_ppm, identification_rate) {
+            if tol < 5.0 && rate < 0.10 {
+                self.anomalies.push(SearchAnomaly {
+                    severity: "warning".to_string(),
+                    category: AnomalyCategory::NarrowTolerance,
+                    message: format!(
+                        "Precursor tolerance {:.1} ppm is narrow and identification rate is low ({:.1}%)",
+                        tol, rate * 100.0
+                    ),
+                    metric_name: Some("precursor_tolerance_ppm".to_string()),
+                    metric_value: Some(tol),
+                    expected_range: Some("5-20 ppm".to_string()),
+                });
+                self.suggestions.push(DiagnosticSuggestion {
+                    priority: 3,
+                    action: "Widen precursor mass tolerance to 10-20 ppm".to_string(),
+                    reason: "Narrow tolerance may exclude correct matches on uncalibrated instruments".to_string(),
+                    param_changes: Some(HashMap::from([(
+                        "precursor_tolerance".to_string(),
+                        serde_json::json!({"value": 20.0, "unit": "ppm"}),
+                    )])),
+                });
+            }
+        }
+
+        // Rule 5: Wide precursor tolerance
+        if let Some(tol) = precursor_tolerance_ppm {
+            if tol > 50.0 {
+                self.anomalies.push(SearchAnomaly {
+                    severity: "warning".to_string(),
+                    category: AnomalyCategory::WideTolerance,
+                    message: format!(
+                        "Precursor tolerance {:.1} ppm is very wide — FDR may be unreliable",
+                        tol
+                    ),
+                    metric_name: Some("precursor_tolerance_ppm".to_string()),
+                    metric_value: Some(tol),
+                    expected_range: Some("5-20 ppm".to_string()),
+                });
+            }
+        }
+
+        // Rule 6: Database mismatch heuristic
+        if let Some(rate) = identification_rate {
+            if rate < 0.05 && self.error_category.is_none() {
+                let already_has = self
+                    .anomalies
+                    .iter()
+                    .any(|a| a.category == AnomalyCategory::DatabaseMismatch);
+                if !already_has {
+                    self.anomalies.push(SearchAnomaly {
+                        severity: "warning".to_string(),
+                        category: AnomalyCategory::DatabaseMismatch,
+                        message: "Identification rate < 5% — database species may not match sample"
+                            .to_string(),
+                        metric_name: Some("identification_rate".to_string()),
+                        metric_value: Some(rate),
+                        expected_range: Some("> 10%".to_string()),
+                    });
+                }
+            }
+        }
+
+        // Rule 7: Slow search (matching > 90% of total time)
+        if total_elapsed_sec > 10.0 {
+            if let Some(matching) = self.stages.iter().find(|s| s.name == "matching") {
+                if matching.elapsed_sec / total_elapsed_sec > 0.90 {
+                    self.anomalies.push(SearchAnomaly {
+                        severity: "warning".to_string(),
+                        category: AnomalyCategory::SlowSearch,
+                        message: format!(
+                            "Matching phase took {:.0}s ({:.0}% of total) — consider reducing search space",
+                            matching.elapsed_sec,
+                            matching.elapsed_sec / total_elapsed_sec * 100.0
+                        ),
+                        metric_name: Some("matching_time_pct".to_string()),
+                        metric_value: Some(matching.elapsed_sec / total_elapsed_sec),
+                        expected_range: Some("< 90%".to_string()),
+                    });
+                    self.suggestions.push(DiagnosticSuggestion {
+                        priority: 4,
+                        action: "Use Sage engine for parallel matching or reduce variable modifications".to_string(),
+                        reason: "Matching is the bottleneck; parallelism or smaller search space helps".to_string(),
+                        param_changes: Some(HashMap::from([(
+                            "engine".to_string(),
+                            serde_json::json!("Sage"),
+                        )])),
+                    });
+                }
+            }
+        }
+
+        // Sort suggestions by priority
+        self.suggestions.sort_by_key(|s| s.priority);
+    }
 }
 
 impl Default for SearchDiagnostics {
@@ -268,5 +448,77 @@ mod tests {
         let d2: SearchDiagnostics = serde_json::from_str(&json).unwrap();
         assert_eq!(d2.error_category, Some(ErrorCategory::InputData));
         assert_eq!(d2.stages.len(), 1);
+    }
+
+    #[test]
+    fn test_finalize_detects_low_identification_rate() {
+        let mut d = SearchDiagnostics::new();
+        d.begin_stage("matching");
+        d.end_stage(Some(10000));
+        // 5% identification rate
+        d.finalize(Some(0.05), Some(500), Some(50), 10.0, None);
+
+        assert!(d.anomalies.iter().any(|a| a.category == AnomalyCategory::LowIdentificationRate));
+        assert!(!d.suggestions.is_empty());
+    }
+
+    #[test]
+    fn test_finalize_detects_no_decoy_hits() {
+        let mut d = SearchDiagnostics::new();
+        d.begin_stage("fdr_calculation");
+        d.end_stage(None);
+        // 0 decoy hits
+        d.finalize(Some(0.30), Some(3000), Some(0), 5.0, None);
+
+        assert!(d.anomalies.iter().any(|a| a.category == AnomalyCategory::NoDecoyHits));
+    }
+
+    #[test]
+    fn test_finalize_detects_narrow_tolerance() {
+        let mut d = SearchDiagnostics::new();
+        d.begin_stage("matching");
+        d.end_stage(Some(5000));
+        // 3 ppm + low rate
+        d.finalize(Some(0.02), Some(100), Some(10), 8.0, Some(3.0));
+
+        assert!(d.anomalies.iter().any(|a| a.category == AnomalyCategory::NarrowTolerance));
+    }
+
+    #[test]
+    fn test_finalize_no_anomalies_for_good_search() {
+        let mut d = SearchDiagnostics::new();
+        d.begin_stage("matching");
+        d.end_stage(Some(10000));
+        // 25% rate, plenty of decoys, 10 ppm
+        d.finalize(Some(0.25), Some(2500), Some(200), 15.0, Some(10.0));
+
+        assert!(d.anomalies.is_empty());
+        assert!(d.suggestions.is_empty());
+    }
+
+    #[test]
+    fn test_finalize_detects_slow_search() {
+        let mut d = SearchDiagnostics::new();
+        // Manually push stages (not using begin/end to avoid timing issues)
+        d.stages.push(DiagnosticStage {
+            name: "file_reading".to_string(),
+            status: "completed".to_string(),
+            elapsed_sec: 1.0,
+            items_processed: Some(1000),
+            items_total: None,
+            detail: None,
+        });
+        d.stages.push(DiagnosticStage {
+            name: "matching".to_string(),
+            status: "completed".to_string(),
+            elapsed_sec: 95.0,
+            items_processed: Some(1000),
+            items_total: None,
+            detail: None,
+        });
+        d.total_elapsed_sec = 100.0;
+        d.finalize(Some(0.25), Some(250), Some(30), 100.0, Some(10.0));
+
+        assert!(d.anomalies.iter().any(|a| a.category == AnomalyCategory::SlowSearch));
     }
 }
