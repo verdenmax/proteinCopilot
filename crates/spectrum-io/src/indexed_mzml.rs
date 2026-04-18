@@ -13,7 +13,7 @@ use quick_xml::events::Event;
 use quick_xml::Reader;
 
 use crate::error::SpectrumIoError;
-use crate::index::{build_index_by_byte_scan, build_index_by_scanning, build_index_from_native_mzml, ScanIndex};
+use crate::index::{build_index_by_byte_scan, build_index_from_native_mzml, ScanIndex};
 use crate::mzml::{
     decode_binary_array, get_attr, parse_scan_from_id, parse_scan_from_spectrum_ref,
     BinaryArrayMeta, MzMLReader,
