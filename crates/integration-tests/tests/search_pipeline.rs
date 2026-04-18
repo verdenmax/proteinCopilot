@@ -54,7 +54,7 @@ async fn full_pipeline_read_search_annotate() {
     // Step 3: Search
     let engine = SimpleSearchEngine::new();
     let result = engine
-        .search(&params, std::slice::from_ref(&mgf), noop_progress())
+        .search(&params, std::slice::from_ref(&mgf), noop_progress(), &mut protein_copilot_core::diagnostics::SearchDiagnostics::new())
         .await
         .unwrap();
     assert!(!result.psms.is_empty(), "should find some PSMs");

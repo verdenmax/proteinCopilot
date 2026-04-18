@@ -15,6 +15,7 @@
 
 use std::path::PathBuf;
 
+use protein_copilot_core::diagnostics::SearchDiagnostics;
 use protein_copilot_core::engine::{EngineInfo, HealthStatus, SearchEngineAdapter};
 use protein_copilot_core::error::CoreError;
 use protein_copilot_core::progress::ProgressCallback;
@@ -85,6 +86,7 @@ impl SearchEngineAdapter for PFindAdapter {
         _params: &SearchParams,
         _input_files: &[PathBuf],
         _on_progress: ProgressCallback,
+        _diagnostics: &mut SearchDiagnostics,
     ) -> Result<SearchResult, CoreError> {
         Err(CoreError::SearchEngineError {
             engine: "pFind".to_string(),
@@ -170,7 +172,7 @@ mod tests {
             max_peptide_length: 50,
             engine: None,
         };
-        let result = adapter.search(&params, &[], noop_progress()).await;
+        let result = adapter.search(&params, &[], noop_progress(), &mut protein_copilot_core::diagnostics::SearchDiagnostics::new()).await;
         assert!(result.is_err());
         assert!(result
             .unwrap_err()

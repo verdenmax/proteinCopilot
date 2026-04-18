@@ -133,8 +133,9 @@ async fn main() {
     println!("  Engine:         {}", engine.engine_info().name);
     println!("  Database:       {fasta_path}");
 
+    let mut diag = protein_copilot_core::diagnostics::SearchDiagnostics::new();
     let result = match engine
-        .search(&params, &[spectrum_path.to_path_buf()], noop_progress())
+        .search(&params, &[spectrum_path.to_path_buf()], noop_progress(), &mut diag)
         .await
     {
         Ok(r) => r,

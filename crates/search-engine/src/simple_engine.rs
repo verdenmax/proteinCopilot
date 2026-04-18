@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
+use protein_copilot_core::diagnostics::SearchDiagnostics;
 use protein_copilot_core::engine::{EngineInfo, HealthStatus, SearchEngineAdapter};
 use protein_copilot_core::error::CoreError;
 use protein_copilot_core::progress::{ProgressCallback, SearchProgress};
@@ -94,6 +95,8 @@ impl SimpleSearchEngine {
                 progress_pct: Some(pct),
                 elapsed_sec: start.elapsed().as_secs_f64(),
                 estimated_remaining_sec: None,
+                error_category: None,
+                has_diagnostics: false,
             });
         };
 
@@ -174,6 +177,8 @@ impl SimpleSearchEngine {
                 progress_pct: Some(pct),
                 elapsed_sec: start.elapsed().as_secs_f64(),
                 estimated_remaining_sec: None,
+                error_category: None,
+                has_diagnostics: false,
             });
         };
 
@@ -346,6 +351,8 @@ impl SimpleSearchEngine {
                 progress_pct: Some(pct),
                 elapsed_sec: start.elapsed().as_secs_f64(),
                 estimated_remaining_sec: None,
+                error_category: None,
+                has_diagnostics: false,
             });
         };
 
@@ -398,7 +405,9 @@ impl SearchEngineAdapter for SimpleSearchEngine {
         params: &SearchParams,
         input_files: &[PathBuf],
         on_progress: ProgressCallback,
+        diagnostics: &mut SearchDiagnostics,
     ) -> Result<SearchResult, CoreError> {
+        let _ = &diagnostics; // Will be used in Task 5
         self.run_search(params, input_files, &*on_progress)
             .map_err(CoreError::from)
     }
@@ -420,7 +429,9 @@ impl SearchEngineAdapter for SimpleSearchEngine {
         params: &SearchParams,
         spectra: Vec<Spectrum>,
         on_progress: ProgressCallback,
+        diagnostics: &mut SearchDiagnostics,
     ) -> Result<SearchResult, CoreError> {
+        let _ = &diagnostics; // Will be used in Task 5
         let start = Instant::now();
         let run_id = Uuid::new_v4();
 
@@ -436,6 +447,8 @@ impl SearchEngineAdapter for SimpleSearchEngine {
                 progress_pct: Some(pct),
                 elapsed_sec: start.elapsed().as_secs_f64(),
                 estimated_remaining_sec: None,
+                error_category: None,
+                has_diagnostics: false,
             });
         };
 
@@ -868,7 +881,7 @@ mod tests {
 
         let engine = SimpleSearchEngine::new();
         let result = engine
-            .search(&params, &[fixture], noop_progress())
+            .search(&params, &[fixture], noop_progress(), &mut protein_copilot_core::diagnostics::SearchDiagnostics::new())
             .await
             .unwrap();
         assert_eq!(result.engine_info.name, "SimpleSearch");
@@ -937,7 +950,7 @@ mod tests {
 
         let engine = SimpleSearchEngine::new();
         let _result = engine
-            .search(&params, &[fixture], on_progress)
+            .search(&params, &[fixture], on_progress, &mut protein_copilot_core::diagnostics::SearchDiagnostics::new())
             .await
             .unwrap();
 

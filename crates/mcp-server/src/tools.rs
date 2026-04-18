@@ -1281,6 +1281,8 @@ impl ProteinCopilotServer {
                             progress_pct: Some(0.0),
                             elapsed_sec: 0.0,
                             estimated_remaining_sec: None,
+                            error_category: None,
+                            has_diagnostics: false,
                         },
                         result: None,
                         handle: None,
@@ -1342,8 +1344,9 @@ impl ProteinCopilotServer {
                     start,
                 };
 
+                let mut diagnostics = protein_copilot_core::diagnostics::SearchDiagnostics::new();
                 let search_result = engine
-                    .search_with_spectra(&params, dia_spectra, on_progress)
+                    .search_with_spectra(&params, dia_spectra, on_progress, &mut diagnostics)
                     .await;
                 let duration = start.elapsed().as_secs_f64();
 
@@ -1526,6 +1529,8 @@ impl ProteinCopilotServer {
                         progress_pct: Some(0.0),
                         elapsed_sec: 0.0,
                         estimated_remaining_sec: None,
+                        error_category: None,
+                        has_diagnostics: false,
                     },
                     result: None,
                     handle: None,
@@ -1587,7 +1592,8 @@ impl ProteinCopilotServer {
                 start,
             };
 
-            let search_result = engine.search(&params, &files, on_progress).await;
+            let mut diagnostics = protein_copilot_core::diagnostics::SearchDiagnostics::new();
+            let search_result = engine.search(&params, &files, on_progress, &mut diagnostics).await;
             let duration = start.elapsed().as_secs_f64();
 
             // Single lock — update progress + result atomically
@@ -2848,6 +2854,8 @@ impl ProteinCopilotServer {
                         progress_pct: Some(1.0),
                         elapsed_sec: duration,
                         estimated_remaining_sec: None,
+                        error_category: None,
+                        has_diagnostics: false,
                     },
                     result: Some(search_result.clone()),
                     handle: None,

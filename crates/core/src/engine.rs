@@ -17,6 +17,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::diagnostics::SearchDiagnostics;
 use crate::error::CoreError;
 use crate::progress::ProgressCallback;
 use crate::search_params::SearchParams;
@@ -89,6 +90,7 @@ pub trait SearchEngineAdapter: Send + Sync {
         params: &SearchParams,
         input_files: &[PathBuf],
         on_progress: ProgressCallback,
+        diagnostics: &mut SearchDiagnostics,
     ) -> Result<SearchResult, CoreError>;
 
     /// Returns static metadata about this engine (name, version, features).
@@ -108,8 +110,9 @@ pub trait SearchEngineAdapter: Send + Sync {
         params: &SearchParams,
         spectra: Vec<Spectrum>,
         on_progress: ProgressCallback,
+        diagnostics: &mut SearchDiagnostics,
     ) -> Result<SearchResult, CoreError> {
-        let _ = (params, spectra, on_progress);
+        let _ = (params, spectra, on_progress, diagnostics);
         Err(CoreError::SearchEngineError {
             engine: "unknown".to_string(),
             detail: "this engine does not support search_with_spectra".to_string(),

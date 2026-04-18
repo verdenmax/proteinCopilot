@@ -13,6 +13,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use protein_copilot_core::diagnostics::SearchDiagnostics;
 use protein_copilot_core::engine::{EngineInfo, HealthStatus, SearchEngineAdapter};
 use protein_copilot_core::error::CoreError;
 use protein_copilot_core::progress::{ProgressCallback, SearchProgress};
@@ -80,6 +81,7 @@ impl SearchEngineAdapter for SageAdapter {
         params: &SearchParams,
         input_files: &[PathBuf],
         on_progress: ProgressCallback,
+        diagnostics: &mut SearchDiagnostics,
     ) -> Result<SearchResult, CoreError> {
         let mut all_spectra: Vec<Spectrum> = Vec::new();
         for path in input_files {
@@ -103,7 +105,7 @@ impl SearchEngineAdapter for SageAdapter {
         }
 
         let mut result = self
-            .search_with_spectra(params, all_spectra, on_progress)
+            .search_with_spectra(params, all_spectra, on_progress, diagnostics)
             .await?;
 
         // Populate input_files in metadata (search_with_spectra doesn't have them)
@@ -117,7 +119,9 @@ impl SearchEngineAdapter for SageAdapter {
         params: &SearchParams,
         spectra: Vec<Spectrum>,
         on_progress: ProgressCallback,
+        diagnostics: &mut SearchDiagnostics,
     ) -> Result<SearchResult, CoreError> {
+        let _ = &diagnostics; // Will be used in Task 6
         let start = Instant::now();
         let run_id = Uuid::new_v4();
 
@@ -151,6 +155,8 @@ impl SearchEngineAdapter for SageAdapter {
             progress_pct: Some(5.0),
             elapsed_sec: start.elapsed().as_secs_f64(),
             estimated_remaining_sec: None,
+            error_category: None,
+            has_diagnostics: false,
         });
 
         // ── Phase 2: Build DB + Score (rayon via spawn_blocking) ─────────
@@ -194,6 +200,8 @@ impl SearchEngineAdapter for SageAdapter {
                     progress_pct: Some(pct.min(100.0)),
                     elapsed_sec: progress_start.elapsed().as_secs_f64(),
                     estimated_remaining_sec: None,
+                    error_category: None,
+                    has_diagnostics: false,
                 });
                 if done >= total_for_poll {
                     break;
@@ -292,6 +300,8 @@ impl SearchEngineAdapter for SageAdapter {
             progress_pct: Some(95.0),
             elapsed_sec: duration,
             estimated_remaining_sec: None,
+            error_category: None,
+            has_diagnostics: false,
         });
 
         // ── Phase 4: Convert Feature → Psm ──────────────────────────────
@@ -468,6 +478,8 @@ impl SearchEngineAdapter for SageAdapter {
             progress_pct: Some(100.0),
             elapsed_sec: duration,
             estimated_remaining_sec: Some(0.0),
+            error_category: None,
+            has_diagnostics: false,
         });
 
         Ok(SearchResult {
@@ -652,7 +664,7 @@ mod tests {
         };
         let on_progress: ProgressCallback = Box::new(|_| {});
         let result = adapter
-            .search_with_spectra(&params, vec![], on_progress)
+            .search_with_spectra(&params, vec![], on_progress, &mut protein_copilot_core::diagnostics::SearchDiagnostics::new())
             .await;
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
