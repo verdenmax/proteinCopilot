@@ -34,6 +34,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 quick-xml = "0.37"
 base64 = "0.22"
 flate2 = "1"
+memchr = "2"
 
 # Internal crates
 protein-copilot-core = { path = "crates/core" }

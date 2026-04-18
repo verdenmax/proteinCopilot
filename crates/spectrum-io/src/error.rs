@@ -94,6 +94,15 @@ pub enum SpectrumIoError {
         /// What went wrong.
         detail: String,
     },
+
+    /// Disk cache (.idx file) I/O error. Non-fatal: used for logging.
+    #[error("disk cache error for {path}: {detail}")]
+    DiskCacheError {
+        /// The mzML file path (not the .idx path).
+        path: PathBuf,
+        /// What went wrong.
+        detail: String,
+    },
 }
 
 // Note: No blanket From<std::io::Error> — all I/O errors are mapped
@@ -174,6 +183,13 @@ impl From<SpectrumIoError> for protein_copilot_core::error::CoreError {
                     detail: format!("{}: {detail}", path.display()),
                     suggestion: "The mzML index may be corrupted. Try re-converting the file."
                         .to_string(),
+                }
+            }
+            SpectrumIoError::DiskCacheError { path, detail } => {
+                protein_copilot_core::error::CoreError::SpectrumParseError {
+                    format: "mzML".to_string(),
+                    detail: format!("{}: {detail}", path.display()),
+                    suggestion: "Delete the .idx cache file and retry".to_string(),
                 }
             }
         }
