@@ -168,6 +168,8 @@ impl SearchEngineAdapter for SageAdapter {
         });
 
         // ── Phase 2: Build DB + Score (rayon via spawn_blocking) ─────────
+        diagnostics.begin_stage("fasta_parsing");
+
         let sage_params = build_sage_parameters(params);
         let precursor_tol = mass_tolerance_to_sage(&params.precursor_tolerance);
         let fragment_tol = mass_tolerance_to_sage(&params.fragment_tolerance);
@@ -175,12 +177,19 @@ impl SearchEngineAdapter for SageAdapter {
         // Read FASTA content
         let fasta_path = &params.database_path;
         let fasta_content = tokio::fs::read_to_string(fasta_path).await.map_err(|e| {
+            diagnostics.fail_stage(&e.to_string());
+            diagnostics.set_error(
+                ErrorCategory::Database,
+                &format!("Failed to read FASTA file: {}", e),
+            );
             CoreError::SearchEngineError {
                 engine: "Sage".into(),
                 detail: format!("Failed to read FASTA file {}: {}", fasta_path, e),
                 suggestion: "Check that database_path points to a valid FASTA file".into(),
             }
         })?;
+
+        diagnostics.end_stage(None);
 
         // Progress counter shared between rayon workers and the tokio poll task.
         let progress_counter = Arc::new(AtomicUsize::new(0));
@@ -218,6 +227,8 @@ impl SearchEngineAdapter for SageAdapter {
         });
 
         // Main search work in a blocking thread pool.
+        diagnostics.begin_stage("matching");
+
         let counter_for_search = Arc::clone(&progress_counter);
         let generate_decoys = sage_params.generate_decoys;
         let decoy_tag = sage_params.decoy_tag.clone();
@@ -288,17 +299,40 @@ impl SearchEngineAdapter for SageAdapter {
 
             Ok::<(Vec<Feature>, IndexedDatabase), CoreError>((features, db))
         })
-        .await
-        .map_err(|e| CoreError::SearchEngineError {
-            engine: "Sage".into(),
-            detail: format!("Search task panicked: {}", e),
-            suggestion: "This is likely a bug in the Sage adapter".into(),
-        })??;
+        .await;
+
+        // Handle spawn failure (panic)
+        let search_result = match search_result {
+            Ok(inner) => inner,
+            Err(e) => {
+                diagnostics.fail_stage(&format!("Search task panicked: {}", e));
+                diagnostics.set_error(
+                    ErrorCategory::Engine,
+                    &format!("Search task panicked: {}", e),
+                );
+                return Err(CoreError::SearchEngineError {
+                    engine: "Sage".into(),
+                    detail: format!("Search task panicked: {}", e),
+                    suggestion: "This is likely a bug in the Sage adapter".into(),
+                });
+            }
+        };
+
+        // Handle inner search error
+        let (features, db) = match search_result {
+            Ok(result) => result,
+            Err(e) => {
+                diagnostics.fail_stage(&e.to_string());
+                diagnostics.set_error(ErrorCategory::Engine, &e.to_string());
+                return Err(e);
+            }
+        };
+
+        diagnostics.end_stage(Some(features.len() as u64));
 
         // Stop the progress polling task.
         progress_handle.abort();
 
-        let (features, db) = search_result;
         let duration = start.elapsed().as_secs_f64();
 
         on_progress_arc(SearchProgress {
