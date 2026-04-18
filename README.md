@@ -11,11 +11,13 @@ AI 驱动的蛋白质组学质谱搜索与结果解释平台。
         │
   ① spectrum-io        读取解析 → SpectrumSummary（支持索引随机访问）
   ② param-recommend    推荐参数 → AiDecision<SearchParams>
-  ③ search-engine      酶切→匹配→打分 → SearchResult
+  ③ search-engine      酶切→匹配→打分 → SearchResult（SimpleSearch + Sage）
   ④ protein-inference  蛋白推断（parsimony + razor + 蛋白级 FDR + 序列覆盖率）
   ⑤ report             统计摘要 + TSV/JSON 导出
   ⑥ xic                碎片离子 XIC 提取 + Plotly.js 可视化
   ⑦ result-import      外部搜索结果导入（DIA-NN / custom JSON）
+  ⑧ fasta-db           FASTA 数据库管理（UniProt 注册表 + 缓存）
+  ⑨ diagnostics        搜索失败诊断 + 质量异常检测 + 修复建议
 ```
 
 **支持格式**：mgf、mzML（DDA + DIA，自动检测采集模式）
@@ -29,6 +31,7 @@ AI 驱动的蛋白质组学质谱搜索与结果解释平台。
 **XIC 可视化**：`extract_xic(run_id, scan)` → 碎片离子色谱图 HTML（支持 SILAC 轻重标记）
 **Sage 搜索引擎**：在 `run_search` 中指定 `engine: "Sage"` 即可使用 sage-core 进行生产级蛋白组学搜索（rayon 并行打分 + LDA rescoring）
 **FASTA 管理**：`list_databases` / `download_database` → 内置 UniProt 数据库注册表 + 自动缓存
+**搜索诊断**：`diagnose_search(run_id)` → 阶段耗时 + 7 条异常检测规则 + 分级修复建议
 
 ## 快速测试
 
@@ -45,7 +48,7 @@ cargo run --release -p protein-copilot-search-engine --example full_search -- \
 
 ```text
 crates/
-├── core/                共享领域模型（Spectrum, SearchParams, SearchResult, ProteinGroup 等）
+├── core/                共享领域模型（Spectrum, SearchParams, SearchResult, ProteinGroup, SearchDiagnostics 等）
 ├── spectrum-io/         谱图文件解析（mgf/mzML streaming + indexed 随机访问）
 ├── param-recommend/     参数推荐规则引擎（确定性，不调 LLM）
 ├── search-engine/       搜索引擎（SimpleSearch + Sage adapter + pFind 预留）
@@ -57,15 +60,21 @@ crates/
 ├── fasta-db/            FASTA 数据库管理（内置注册表 + HTTPS 下载 + 缓存）
 ├── report/              报告生成（摘要 + TSV/JSON 导出）
 ├── integration-tests/   集成测试（端到端流水线验证）
-└── mcp-server/          MCP Server 二进制（20 tools，stdio transport）
+└── mcp-server/          MCP Server 二进制（25 tools，stdio transport）
 
 .github/
-├── agents/proteomics-search.agent.md   蛋白搜索助手 Agent
-├── prompts/basic-search.prompt.md      基础搜索 Skill
+├── agents/proteomics-search.agent.md     蛋白搜索助手 Agent（25 tools 完整工作流）
+├── prompts/basic-search.prompt.md        基础搜索 Skill
+├── prompts/failure-diagnosis.prompt.md   搜索失败诊断 Skill
+├── prompts/sage-search.prompt.md         Sage 引擎搜索 Skill
+├── prompts/protein-inference.prompt.md   蛋白推断 Skill
+├── prompts/database-management.prompt.md FASTA 管理 Skill
+├── prompts/batch-search.prompt.md        批处理搜索 Skill
 └── prompts/result-interpretation.prompt.md  结果解读 Skill
+    (+5 more prompts: dia, spectrum-annotation, prd-creation, task-*)
 ```
 
-## MCP Tools（20 个）
+## MCP Tools（25 个）
 
 | Tool | 功能 |
 |------|------|
@@ -73,9 +82,11 @@ crates/
 | `get_spectrum` | 按 scan 读取单张谱图 |
 | `recommend_params` | 推荐搜索参数 + 解释 |
 | `list_presets` | 列出内置预设 |
+| `prepare_search` | 组合操作：参数推荐 + 验证 + 准备（recommend→search 桥接） |
 | `run_search` | 异步执行数据库搜索（立即返回 run_id） |
-| `get_search_status` | 查询搜索进度（阶段 + 百分比） |
+| `get_search_status` | 查询搜索进度（阶段 + 百分比 + 诊断标记） |
 | `cancel_search` | 取消正在运行的搜索 |
+| `diagnose_search` | 搜索诊断报告（阶段耗时 + 异常检测 + 修复建议） |
 | `check_engine` | 检查引擎状态 |
 | `generate_summary` | FDR 过滤统计摘要 |
 | `export_results` | 导出 TSV/JSON 文件 |
@@ -83,6 +94,7 @@ crates/
 | `annotate_spectrum` | 谱图注释（DIA: 标注+XIC+SILAC 统一视图；DDA: 标注 only） |
 | `extract_dia_precursors` | DIA MS1 前体离子提取（同位素模式检测） |
 | `extract_spectrum_precursors` | 单张 MS2 谱图母离子提取（调试用） |
+| `get_dia_cache_status` | DIA 提取缓存状态（内存/磁盘溢出统计） |
 | `extract_xic` | 碎片离子 XIC 色谱图（支持 SILAC 轻重标记） |
 | `import_search_results` | 导入外部搜索结果（DIA-NN / custom JSON） |
 | `infer_proteins` | 蛋白推断（parsimony + razor + 蛋白级 FDR + 序列覆盖率） |
@@ -97,8 +109,9 @@ crates/
 - **三级 FDR**：PSM → 肽段 → 蛋白质，各级独立 FDR 控制
 - **DDA + DIA 支持**：自动检测采集模式，DIA 数据通过 MS1 同位素模式提取前体离子后搜索
 - **外部结果导入**：DIA-NN parquet / 自定义 JSON → RT 匹配 mzML 扫描号 → 标准 SearchResult
-- **可测试**：600+ 个单元/集成测试，0 clippy warnings
-- **可审计**：每次搜索生成 run_id + 完整参数 + 引擎版本记录
+- **搜索诊断**：结构化错误分类 + 7 条异常检测规则 + 分级修复建议（确定性，不依赖 LLM）
+- **可测试**：670+ 个单元/集成测试，0 clippy warnings
+- **可审计**：每次搜索生成 run_id + 完整参数 + 引擎版本 + 诊断报告
 
 ## 当前进度
 
@@ -109,7 +122,7 @@ crates/
 | M1.3 param-recommend | ✅ 规则引擎 + 5 个预设 |
 | M1.4 search-engine | ✅ SimpleSearch + pFind 预留 |
 | M1.5 report | ✅ 摘要 + TSV/JSON 导出 |
-| M1.6 mcp-server | ✅ 20 MCP tools + Agent + Skill |
+| M1.6 mcp-server | ✅ 25 MCP tools + Agent + 12 Skill Prompts |
 | M1.7 integration | ✅ 端到端测试 + 文档 |
 | Post-MVP | ✅ 异步搜索 + 历史持久化 + 谱图注释 + FW-1/2/3/4/6 |
 | DIA 支持 | ✅ DIA 前体提取 + 搜索集成 + 端到端工作流 |
@@ -120,8 +133,11 @@ crates/
 | FASTA 管理 | ✅ 内置 UniProt 注册表 + HTTPS 下载 + 本地缓存 |
 | **蛋白推断** | ✅ **parsimony + razor + 三级 FDR + 序列覆盖率 + MCP tool** |
 | **Sage 集成** | ✅ **sage-core v0.15.0 库集成 + rayon 并行 + LDA rescoring** |
+| **工作流优化** | ✅ **prepare_search 桥接 + DIA 缓存溢出 + Agent 工作流更新** |
+| **搜索诊断** | ✅ **错误分类 + 阶段指标 + 7 条异常检测 + 修复建议 + diagnose_search tool** |
 
 详细计划：`tasks/001-mvp-proteomics-search-platform.md`
+Phase 2 计划：`tasks/002-phase2-production-platform.md`
 架构设计：`docs/architecture.md`
 架构演示：`docs/architecture.html`
 
