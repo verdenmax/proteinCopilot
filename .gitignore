@@ -24,6 +24,9 @@ output/
 
 # Runtime / cache
 .proteincopilot/
+*.mzml.idx
+*.mzML.idx
+*.mgf.idx
 
 # Copilot CLI
 .superpowers/
