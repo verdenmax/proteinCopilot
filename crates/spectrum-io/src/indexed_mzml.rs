@@ -13,7 +13,7 @@ use quick_xml::events::Event;
 use quick_xml::Reader;
 
 use crate::error::SpectrumIoError;
-use crate::index::{build_index_by_byte_scan, build_index_from_native_mzml, ScanIndex};
+use crate::index::{build_index_by_byte_scan, ScanIndex};
 use crate::mzml::{
     decode_binary_array, get_attr, parse_scan_from_id, parse_scan_from_spectrum_ref,
     BinaryArrayMeta, MzMLReader,
@@ -33,12 +33,13 @@ pub struct IndexedMzMLReader {
 impl IndexedMzMLReader {
     /// Opens an mzML file and builds a scan index.
     ///
-    /// Uses a three-layer resolution strategy:
-    /// 1. **Disk cache** (`.mzml.idx` sidecar) — milliseconds
-    /// 2. **Native `<indexList>`** from `<indexedmzML>` — milliseconds (reads EOF)
-    /// 3. **SIMD byte-scan fallback** — seconds (scans full file with `memchr`)
+    /// Uses a two-layer resolution strategy:
+    /// 1. **Disk cache** (`.mzml.idx` sidecar, PCIX v2) — milliseconds, includes
+    ///    full per-scan metadata (RT, ms_level, isolation_window)
+    /// 2. **SIMD byte-scan** — seconds (scans full file with `memchr`), extracts
+    ///    both offsets and metadata in one pass
     ///
-    /// After layers 2 or 3 succeed, the result is persisted to disk cache
+    /// After layer 2 succeeds, the result is persisted to disk cache
     /// so future opens are instant.
     pub fn open(path: &Path) -> Result<Self, SpectrumIoError> {
         // Layer 1: Try disk cache
@@ -62,13 +63,11 @@ impl IndexedMzMLReader {
             }
         }
 
-        // Layer 2: Try native <indexList>
-        let index = if let Some(native) = build_index_from_native_mzml(path)? {
-            native
-        } else {
-            // Layer 3: SIMD byte-scan fallback (accelerated)
-            build_index_by_byte_scan(path)?
-        };
+        // Layer 2: SIMD byte-scan (extracts full metadata: RT, ms_level,
+        // isolation_window). We always prefer this over native <indexList>
+        // because native index only provides byte offsets — no metadata —
+        // which makes find_by_rt() unusable (all ms_level=0, all rt=0).
+        let index = build_index_by_byte_scan(path)?;
 
         // Persist to disk cache for future opens (non-fatal if it fails)
         if let Ok((file_size, file_mtime)) = crate::disk_cache::file_metadata(path) {
@@ -156,6 +155,32 @@ impl SpectrumReader for IndexedMzMLReader {
         handler: &mut dyn FnMut(Spectrum) -> Result<bool, SpectrumIoError>,
     ) -> Result<u32, SpectrumIoError> {
         MzMLReader.for_each_spectrum(path, handler)
+    }
+
+    fn find_by_rt(
+        &self,
+        _path: &Path,
+        rt_min: f64,
+        precursor_mz: f64,
+        rt_tolerance_min: f64,
+    ) -> Result<Option<(u32, f64)>, SpectrumIoError> {
+        Ok(self.index.find_by_rt(rt_min, precursor_mz, rt_tolerance_min))
+    }
+
+    fn list_ms2_meta(
+        &self,
+        _path: &Path,
+    ) -> Result<Vec<crate::reader::Ms2ScanMeta>, SpectrumIoError> {
+        Ok(self
+            .index
+            .iter_meta()
+            .filter(|(_, meta)| meta.ms_level == 2)
+            .map(|(&scan, meta)| crate::reader::Ms2ScanMeta {
+                scan_number: scan,
+                rt_min: meta.rt_seconds / 60.0,
+                isolation_window: meta.isolation_window,
+            })
+            .collect())
     }
 }
 
@@ -453,16 +478,18 @@ mod tests {
     }
 
     #[test]
-    fn open_indexed_mzml_uses_native_index() {
+    fn open_indexed_mzml_uses_byte_scan_with_metadata() {
         let path = indexed_fixture_path();
         if !path.exists() {
             return;
         }
-        // Remove any stale disk cache to test native index path
+        // Remove any stale disk cache to test fresh byte-scan path
         let _ = std::fs::remove_file(crate::disk_cache::idx_path(&path));
         let reader = IndexedMzMLReader::open(&path).unwrap();
         assert_eq!(reader.index().len(), 10);
-        assert_eq!(reader.index().source(), IndexSource::NativeIndex);
+        // Byte-scan is now always used (instead of native index) to ensure
+        // full metadata (RT, ms_level, isolation_window) is available for find_by_rt.
+        assert_eq!(reader.index().source(), IndexSource::BuiltFromScan);
         let _ = std::fs::remove_file(crate::disk_cache::idx_path(&path));
     }
 

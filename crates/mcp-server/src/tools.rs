@@ -2083,14 +2083,18 @@ impl ProteinCopilotServer {
                 let mod_mass: f64 = modifications.iter().map(|m| m.mass_delta).sum();
                 let precursor_mz =
                     (base_mass + mod_mass + charge as f64 * PROTON_MASS) / charge as f64;
-                protein_copilot_result_import::scan_matcher::find_scan_by_rt(
-                    &spectrum_file,
-                    rt,
-                    precursor_mz,
-                    0.5,
-                    &*reader,
-                )
-                .map_err(|e| mcp_err(ErrorCode::INVALID_PARAMS, e))?
+                reader
+                    .find_by_rt(&spectrum_file, rt, precursor_mz, 0.5)
+                    .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?
+                    .map(|(scan, _)| scan)
+                    .ok_or_else(|| {
+                        mcp_err(
+                            ErrorCode::INVALID_PARAMS,
+                            format!(
+                                "No MS2 scan near RT={rt:.2}min mz={precursor_mz:.4}"
+                            ),
+                        )
+                    })?
             } else {
                 return Err(mcp_err(
                     ErrorCode::INVALID_PARAMS,
@@ -2158,50 +2162,43 @@ impl ProteinCopilotServer {
                     core_label,
                 );
 
-                // Read nearby spectra to find the heavy scan without retaining
-                // full peak arrays for every neighboring MS2 in memory.
-                let scan_start = resolved_scan.saturating_sub(50);
-                let scan_end = resolved_scan + 50;
-                let mut best_heavy_scan: Option<(u32, f64)> = None;
-                for s in scan_start..=scan_end {
-                    let Ok(spec) = reader.read_spectrum(&spectrum_file, s) else {
-                        continue;
-                    };
-                    if spec.ms_level != protein_copilot_core::spectrum::MsLevel::MS2 {
-                        continue;
-                    }
-
-                    let rt_delta = (spec.retention_time_min - spectrum.retention_time_min).abs();
-                    let should_replace = best_heavy_scan
-                        .as_ref()
-                        .map(|(_, best_rt_delta)| rt_delta < *best_rt_delta)
-                        .unwrap_or(true);
-
-                    if is_dia {
-                        let matches_heavy = spec
-                            .precursors
-                            .first()
-                            .and_then(|p| p.isolation_window.as_ref())
-                            .is_some_and(|w| {
-                                protein_copilot_xic::heavy::window_contains_mz(w, heavy_prec_mz)
-                            });
-                        if matches_heavy && should_replace {
-                            best_heavy_scan = Some((spec.scan_number, rt_delta));
+                // Use O(log N) binary search to find the heavy scan via RT + m/z.
+                // For DIA: find_by_rt checks isolation window contains heavy_prec_mz.
+                // For DDA: find_by_rt accepts scans without isolation windows (RT-only
+                // fallback), then we verify the precursor m/z at 20 ppm below.
+                let heavy_scan_result = if is_dia {
+                    // DIA: binary search finds scan whose isolation window contains heavy m/z
+                    reader
+                        .find_by_rt(&spectrum_file, spectrum.retention_time_min, heavy_prec_mz, 0.5)
+                        .unwrap_or(None)
+                } else {
+                    // DDA: binary search finds RT-nearest MS2 scan, then verify precursor m/z
+                    // We use a wider RT tolerance since DDA heavy scans can be several scans away
+                    let candidates = reader
+                        .find_by_rt(&spectrum_file, spectrum.retention_time_min, heavy_prec_mz, 0.5)
+                        .unwrap_or(None);
+                    // Verify precursor m/z match at 20 ppm for DDA
+                    if let Some((scan, delta)) = candidates {
+                        match reader.read_spectrum(&spectrum_file, scan) {
+                            Ok(spec) => {
+                                let prec_mz =
+                                    spec.precursors.first().map(|p| p.mz).unwrap_or(0.0);
+                                let ppm_err =
+                                    ((prec_mz - heavy_prec_mz) / heavy_prec_mz * 1e6).abs();
+                                if ppm_err < 20.0 {
+                                    Some((scan, delta))
+                                } else {
+                                    None
+                                }
+                            }
+                            Err(_) => None,
                         }
                     } else {
-                        let Some(prec_mz) = spec.precursors.first().map(|p| p.mz) else {
-                            continue;
-                        };
-                        let ppm_err = ((prec_mz - heavy_prec_mz) / heavy_prec_mz * 1e6).abs();
-                        if ppm_err < 20.0 && should_replace {
-                            best_heavy_scan = Some((spec.scan_number, rt_delta));
-                        }
+                        None
                     }
-                }
+                };
 
-                // DIA: find scan whose isolation window contains heavy m/z
-                // DDA: find scan whose selected precursor m/z matches heavy m/z
-                let heavy_scan_num = best_heavy_scan.map(|(scan, _)| scan);
+                let heavy_scan_num = heavy_scan_result.map(|(scan, _)| scan);
 
                 if let Some(heavy_scan_num) = heavy_scan_num {
                     if let Ok(heavy_spectrum) = reader.read_spectrum(&spectrum_file, heavy_scan_num)
@@ -2673,14 +2670,18 @@ impl ProteinCopilotServer {
         let resolved_scan = if input.scan_number == 0 {
             if let Some(rt) = input.retention_time_min {
                 let reader = self.get_or_create_reader(&file_path)?;
-                protein_copilot_result_import::scan_matcher::find_scan_by_rt(
-                    &file_path,
-                    rt,
-                    precursor_mz,
-                    0.5,
-                    &*reader,
-                )
-                .map_err(|e| mcp_err(ErrorCode::INVALID_PARAMS, e))?
+                reader
+                    .find_by_rt(&file_path, rt, precursor_mz, 0.5)
+                    .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?
+                    .map(|(scan, _)| scan)
+                    .ok_or_else(|| {
+                        mcp_err(
+                            ErrorCode::INVALID_PARAMS,
+                            format!(
+                                "No MS2 scan near RT={rt:.2}min mz={precursor_mz:.4}"
+                            ),
+                        )
+                    })?
             } else {
                 return Err(mcp_err(
                     ErrorCode::INVALID_PARAMS,

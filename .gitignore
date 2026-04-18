@@ -31,3 +31,4 @@ output/
 # Copilot CLI
 .superpowers/
 .worktrees/
+mcp_stderr.log

@@ -9,7 +9,6 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use protein_copilot_core::spectrum::MsLevel;
 use protein_copilot_spectrum_io::reader::SpectrumReader;
 
 use crate::{FileMatchStats, ImportedPsm, MatchReport, ResultImportError};
@@ -158,14 +157,11 @@ pub fn find_scan_by_rt(
     rt_tolerance_min: f64,
     reader: &dyn SpectrumReader,
 ) -> Result<u32, ResultImportError> {
-    let mut ms2_infos = collect_ms2_info(reader, file)?;
-    ms2_infos.sort_by(|a, b| {
-        a.rt_min
-            .partial_cmp(&b.rt_min)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-
-    find_best_match(&ms2_infos, rt_min, precursor_mz, rt_tolerance_min)
+    // Delegate to SpectrumReader::find_by_rt() which uses O(log N) binary
+    // search on IndexedMzMLReader (falls back to read_all on other readers).
+    reader
+        .find_by_rt(file, rt_min, precursor_mz, rt_tolerance_min)
+        .map_err(|e| ResultImportError::SpectrumIo(e.to_string()))?
         .map(|(scan, _delta)| scan)
         .ok_or(ResultImportError::NoMatchingScan {
             rt_min,
@@ -179,25 +175,17 @@ pub fn collect_ms2_info(
     reader: &dyn SpectrumReader,
     path: &Path,
 ) -> Result<Vec<Ms2Info>, ResultImportError> {
-    let spectra = reader
-        .read_all(path)
+    let meta = reader
+        .list_ms2_meta(path)
         .map_err(|e| ResultImportError::SpectrumIo(e.to_string()))?;
-    let mut infos = Vec::new();
-    for spec in &spectra {
-        if spec.ms_level == MsLevel::MS2 {
-            let isolation = spec.precursors.first().and_then(|p| {
-                p.isolation_window
-                    .as_ref()
-                    .map(|w| (w.target_mz, w.lower_offset, w.upper_offset))
-            });
-            infos.push(Ms2Info {
-                scan_number: spec.scan_number,
-                rt_min: spec.retention_time_min,
-                isolation_window: isolation,
-            });
-        }
-    }
-    Ok(infos)
+    Ok(meta
+        .into_iter()
+        .map(|m| Ms2Info {
+            scan_number: m.scan_number,
+            rt_min: m.rt_min,
+            isolation_window: m.isolation_window,
+        })
+        .collect())
 }
 
 /// Find the best matching MS2 for a given RT and precursor m/z.
