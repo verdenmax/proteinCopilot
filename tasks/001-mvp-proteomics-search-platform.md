@@ -3,7 +3,7 @@
 > **文件名**：`prd-mvp-proteomics-search.md`
 > **版本**：1.0
 > **创建日期**：2026-03-27
-> **状态**：In Progress — M1.1 ✅ M1.2 ✅ M1.3 ✅ M1.4 ✅ M1.5 ✅ M1.6 ✅ M1.7 ✅（510 tests, 0 warnings）— MVP 完成 + Post-MVP 功能（异步搜索优化、搜索历史持久化、谱图注释可视化）+ DIA 数据支持（前体提取 + 搜索集成 + 端到端工作流 + 单谱图母离子提取）+ Biology Audit 完成 + BUG-1 已修复（碎片离子固定修饰）+ 16 MCP Tools + FW-1 ✅ ProteinNTerm 修饰过滤 + FW-2 ✅ 可变修饰枚举 + FW-3 ✅ ppm 碎片离子容差 + FW-4 ✅ 多电荷碎片离子 + FW-6 ✅ 原生 FDR 计算（fdr crate + decoy 生成 + q-value 单调化）+ XIC 可视化（xic crate + extract_xic tool + SILAC 重标轻重离子 + Plotly.js HTML）+ 索引谱图读取（IndexedMzMLReader / IndexedMgfReader + scan offset 随机访问）+ 外部搜索结果导入（result-import crate + import_search_results tool + DIA-NN parquet / custom JSON / RT 扫描匹配）+ 统一标注+XIC 视图（客户端 SILAC 引擎 + 逐离子 L/H 开关 + DDA 自动跳过 XIC）+ M2.0 ✅ Sage 搜索引擎集成（sage-core v0.15.0 库集成 + rayon 并行打分 + LDA rescoring + spectrum/peptide/protein FDR）+ M2.2 ✅ 独立 FDR 计算 + M2.3 ✅ 蛋白推断（Parsimony + Razor）+ M2.4 ✅ FASTA 数据库管理
+> **状态**：In Progress — M1.1 ✅ M1.2 ✅ M1.3 ✅ M1.4 ✅ M1.5 ✅ M1.6 ✅ M1.7 ✅（704 tests, 0 warnings）— MVP 完成 + Post-MVP 功能（异步搜索优化、搜索历史持久化、谱图注释可视化）+ DIA 数据支持（前体提取 + 搜索集成 + 端到端工作流 + 单谱图母离子提取）+ Biology Audit 完成 + BUG-1 已修复（碎片离子固定修饰）+ 16 MCP Tools + FW-1 ✅ ProteinNTerm 修饰过滤 + FW-2 ✅ 可变修饰枚举 + FW-3 ✅ ppm 碎片离子容差 + FW-4 ✅ 多电荷碎片离子 + FW-6 ✅ 原生 FDR 计算（fdr crate + decoy 生成 + q-value 单调化）+ XIC 可视化（xic crate + extract_xic tool + SILAC 重标轻重离子 + Plotly.js HTML）+ 索引谱图读取（IndexedMzMLReader / IndexedMgfReader + scan offset 随机访问）+ 外部搜索结果导入（result-import crate + import_search_results tool + DIA-NN parquet / custom JSON / RT 扫描匹配）+ 统一标注+XIC 视图（客户端 SILAC 引擎 + 逐离子 L/H 开关 + DDA 自动跳过 XIC）+ M2.0 ✅ Sage 搜索引擎集成（sage-core v0.15.0 库集成 + rayon 并行打分 + LDA rescoring + spectrum/peptide/protein FDR）+ M2.2 ✅ 独立 FDR 计算 + M2.3 ✅ 蛋白推断（Parsimony + Razor）+ M2.4 ✅ FASTA 数据库管理 + RT 二分查找优化（ScanIndex + PCIX v2 + find_by_rt O(log N) + collect_ms2_info 零 I/O）
 
 ---
 
@@ -940,10 +940,28 @@ M1.7 (集成验证)    ← 需要所有 MVP Milestone
 - ~~多引擎结果合并与一致性分析~~（待实现）
 - ~~MCP Tool：`compare_engines`~~（待实现）
 
-### Milestone 2.5：失败诊断 Agent
-- `failure-diagnosis.agent.md`
+### Milestone 2.5：失败诊断 Agent ✅
+
+> **状态**：✅ 已完成 — diagnose_search MCP Tool + 7 条异常检测规则 + 分级修复建议
+
+- `failure-diagnosis.prompt.md` Skill 定义
 - 搜索失败原因诊断（参数不合理、数据质量差、数据库不匹配等）
-- 自动建议修复方案
+- 7 条异常检测规则：低鉴定率、高 FDR、低肽段覆盖、搜索超时、空结果等
+- 阶段耗时统计 + 分级修复建议（确定性逻辑，不依赖 LLM）
+
+### Milestone 2.6：RT 二分查找性能优化 ✅
+
+> **状态**：✅ 已完成（704 tests, 0 warnings）— ScanIndex + PCIX v2 + O(log N) RT 查找
+
+- **ScanMeta 结构体**：扩展 ScanIndex，每个 scan 存储 offset + rt_seconds + ms_level + isolation_window
+- **find_by_rt() 二分查找**：O(log N + k) 复杂度，按 RT 容差窗口 + 隔离窗口/前体 m/z 匹配最近 MS2 scan
+- **PCIX v2 磁盘缓存**：46B/entry 二进制格式（含 RT、ms_level、隔离窗口），首次打开后毫秒级加载
+- **字节扫描元数据提取**：`extract_meta_from_region()` 从 mzML 原始字节提取 RT、ms_level、isolation window（2048B 缓冲区）
+- **SpectrumReader trait 扩展**：`find_by_rt()` + `list_ms2_meta()` 默认实现 + IndexedMzMLReader O(log N) 覆写
+- **MCP Tool 集成**：annotate_spectrum / extract_xic / SILAC 重标谱查找全部升级为 find_by_rt()
+- **collect_ms2_info 零 I/O**：从内存 ScanIndex 迭代代替 read_all()，批量 PSM 匹配无需重新读取文件
+- **BUG 修复**：修复 native index 缺元数据导致 find_by_rt 失效、SILAC O(N) 扫描循环、u32 溢出 3 个 bug
+- **性能数据**（7.5GB mzML，SSD）：PCIX v2 加载 <1ms | 二分查找 5ms | 字节扫描构建 ~5s | 首次之后全部走缓存
 
 ---
 
@@ -978,6 +996,7 @@ M1.7 (集成验证)    ← 需要所有 MVP Milestone
 | 2026-04-08 | 更新全部 Milestone 测试计数（382 tests）；BUG-1 已修复标记；SearchParamsError 8 变体；M1.5 含 visualize.rs；M1.6 更新为 14 tools + 5 Skill | 代码审计同步文档 |
 | 2026-04-08 | 新增 FR 完成情况总览表；M1.3 补充 ✅ 状态和 38 tests；M1.7 补充 ⚠️ 状态和逐项完成情况；FR-3/4/5/6 补充逐项状态列；Non-Goals 补充实际状态列 | 全量代码审计，完成 vs 未完成清单 |
 | 2026-04-17 | M2.0 Sage 搜索引擎集成完成；M2.2/M2.3 状态更新为 ✅；M2.4 更新为部分完成（Sage done）；FR-3 状态更新；562 tests | Sage 集成 + 代码审查 + 边界修复 |
+| 2026-04-18 | M2.5 失败诊断完成；M2.6 RT 二分查找优化完成（ScanIndex + PCIX v2 + find_by_rt + 3 bug fix）；704 tests | RT 性能优化 + 代码审计 |
 
 ---
 

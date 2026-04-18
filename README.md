@@ -110,7 +110,7 @@ crates/
 - **DDA + DIA 支持**：自动检测采集模式，DIA 数据通过 MS1 同位素模式提取前体离子后搜索
 - **外部结果导入**：DIA-NN parquet / 自定义 JSON → RT 匹配 mzML 扫描号 → 标准 SearchResult
 - **搜索诊断**：结构化错误分类 + 7 条异常检测规则 + 分级修复建议（确定性，不依赖 LLM）
-- **可测试**：670+ 个单元/集成测试，0 clippy warnings
+- **可测试**：704 个单元/集成测试，0 clippy warnings
 - **可审计**：每次搜索生成 run_id + 完整参数 + 引擎版本 + 诊断报告
 
 ## 当前进度
@@ -135,6 +135,7 @@ crates/
 | **Sage 集成** | ✅ **sage-core v0.15.0 库集成 + rayon 并行 + LDA rescoring** |
 | **工作流优化** | ✅ **prepare_search 桥接 + DIA 缓存溢出 + Agent 工作流更新** |
 | **搜索诊断** | ✅ **错误分类 + 阶段指标 + 7 条异常检测 + 修复建议 + diagnose_search tool** |
+| **RT 二分查找** | ✅ **ScanIndex + PCIX v2 缓存 + O(log N) find_by_rt + collect_ms2_info 零 I/O** |
 
 详细计划：`tasks/001-mvp-proteomics-search-platform.md`
 Phase 2 计划：`tasks/002-phase2-production-platform.md`
@@ -145,9 +146,18 @@ Phase 2 计划：`tasks/002-phase2-production-platform.md`
 
 处理大型 mzML 文件（>1GB）时，ProteinCopilot 使用三层索引加速：
 
-1. **磁盘索引缓存**（`.mzml.idx`）— 首次打开后自动生成，后续毫秒级加载
-2. **mzML 原生索引**（`<indexList>`）— 直接读取文件末尾，秒级完成
-3. **SIMD 字节扫描**（fallback）— 使用 `memchr` 加速全文件扫描
+1. **PCIX v2 磁盘缓存**（`.mzml.idx`）— 首次打开后自动生成，后续毫秒级加载（46B/entry，含 RT + ms_level + 隔离窗口）
+2. **SIMD 字节扫描**（首次构建）— 使用 `memchr` 加速全文件扫描，提取完整元数据
+3. **O(log N) RT 二分查找**（`find_by_rt()`）— 按保留时间 + 前体 m/z 定位 MS2 scan，用于谱图标注、XIC 提取、SILAC 重标谱匹配
+
+### 性能数据（7.5GB mzML，SSD）
+
+| 操作 | 耗时 |
+|------|------|
+| PCIX v2 缓存加载 | <1 ms |
+| RT 二分查找（单次） | ~5 ms |
+| 字节扫描首次构建 | ~5 s |
+| collect_ms2_info（从索引） | <1 ms |
 
 ### MCP 超时配置
 

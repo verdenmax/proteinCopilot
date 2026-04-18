@@ -177,20 +177,38 @@ pub trait SpectrumReader: Send + Sync {
     fn read_all(&self, path: &Path) -> Result<Vec<Spectrum>, SpectrumIoError>;
     fn read_summary(&self, path: &Path) -> Result<SpectrumSummary, SpectrumIoError>;
     fn read_spectrum(&self, path: &Path, scan: u32) -> Result<Spectrum, SpectrumIoError>;
+    fn for_each_spectrum(&self, path: &Path, handler: &mut dyn FnMut(Spectrum) -> Result<bool, SpectrumIoError>) -> Result<u32, SpectrumIoError>;
+    fn list_ms2_meta(&self, path: &Path) -> Result<Vec<Ms2ScanMeta>, SpectrumIoError>;
+    fn find_by_rt(&self, path: &Path, rt_min: f64, precursor_mz: f64, rt_tolerance_min: f64) -> Result<Option<(u32, f64)>, SpectrumIoError>;
 }
 
-pub struct MgfReader;   // impl SpectrumReader
-pub struct MzMLReader;  // impl SpectrumReader
+pub struct Ms2ScanMeta { pub scan_number: u32, pub rt_min: f64, pub isolation_window: Option<(f64, f64, f64)> }
+pub struct MgfReader;            // impl SpectrumReader
+pub struct MzMLReader;           // impl SpectrumReader
+pub struct IndexedMzMLReader;    // impl SpectrumReader（O(1) 随机访问 + O(log N) RT 查找）
 
 pub fn detect_format(path: &Path) -> Result<SpectrumFileInfo, SpectrumIoError>;
 pub fn create_reader(info: &SpectrumFileInfo) -> Box<dyn SpectrumReader>;
 ```
 
-**依赖**：`core`, `quick-xml`（mzML 解析）, `base64`（mzML binary data）, `flate2`（zlib 解压）
+**子模块**：
+
+| 模块 | 功能 |
+|------|------|
+| `index.rs` | ScanMeta + ScanIndex（RT 排序索引 + find_by_rt 二分查找 + 字节扫描元数据提取） |
+| `disk_cache.rs` | PCIX v2 磁盘缓存（46B/entry 二进制格式，含 RT + ms_level + 隔离窗口） |
+| `indexed_mzml.rs` | IndexedMzMLReader（两层策略：PCIX v2 缓存 → 字节扫描构建） |
+| `mgf.rs` | MGF 格式解析器 |
+| `mzml.rs` | mzML 流式解析器 |
+
+**依赖**：`core`, `quick-xml`（mzML 解析）, `base64`（mzML binary data）, `flate2`（zlib 解压）, `memchr`（SIMD 字节扫描）
 
 **设计原则**：
 - Reader trait 使得未来增加新格式（mzXML, .raw）只需新增实现
 - 大文件使用 streaming 解析（逐条读取，不一次性加载全部谱图到内存）
+- IndexedMzMLReader 两层索引策略：PCIX v2 缓存 → 字节扫描构建（跳过 native index）
+- `find_by_rt()` O(log N) 二分查找：RT 容差窗口 + 隔离窗口/前体 m/z 匹配
+- `list_ms2_meta()` 从内存 ScanIndex 直接迭代，零 I/O
 - 格式检测通过文件扩展名（大小写不敏感）
 - 解析后自动按 m/z 升序排序（真实数据可能无序）
 - mzML 保留时间自动单位转换（分钟→秒）
@@ -612,7 +630,7 @@ result-import::
 ├── DiannParser          ← DIA-NN report.parquet 解析器
 ├── CustomJsonParser     ← hela.json 自定义格式解析器
 ├── PFindParser          ← pFind 结果解析（预留骨架）
-├── ScanMatcher          ← RT + isolation window 匹配 mzML scan number
+├── ScanMatcher          ← RT + isolation window 匹配 mzML scan number（委托 reader.find_by_rt()）
 ├── Converter            ← ImportedPsm → core::Psm → SearchResult
 ├── UnimodDb             ← 22 内置修饰 + Unimod XML 解析器
 ├── ImportedPsm          ← 中间表示（format-agnostic）
@@ -626,7 +644,7 @@ result-import::
 **设计要点**：
 - **格式检测**：`detect_format()` 基于文件扩展名 + magic bytes 自动识别
 - **RT 单位转换**：外部数据 RT（分钟）在解析阶段自动 ×60 转为秒（项目内部统一秒）
-- **扫描匹配**：`ScanMatcher` 对 MS2 谱图 RT 排序后二分查找最近匹配，DIA 模式额外检查 isolation window 包含性
+- **扫描匹配**：`ScanMatcher` 委托 `reader.find_by_rt()` 进行 O(log N) RT 二分查找，DIA 模式额外检查 isolation window 包含性
 - **score 方向**：DIA-NN Q.Value (lower=better) 存为 `1.0 - qvalue` 以满足 "higher=better" 约定
 - **UnimodDb**：支持从名称/record_id 查找修饰质量偏移，解析 DIA-NN 带修饰序列（如 `M(UniMod:35)`）
 - **下游兼容**：转换后的 SearchResult 与 run_search 产生的结果结构完全一致，可直接用于所有下游 tool
