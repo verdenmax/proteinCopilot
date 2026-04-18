@@ -156,7 +156,13 @@ impl SearchDiagnostics {
     }
 
     /// Mark the current stage as failed.
+    ///
+    /// This is a terminal operation — no `end_stage()` needed after this.
+    /// Idempotent: if no stage is active, this is a no-op.
     pub fn fail_stage(&mut self, detail: &str) {
+        if self.current_stage_name.is_none() {
+            return;
+        }
         let elapsed = self
             .current_stage_start
             .map(|s| s.elapsed().as_secs_f64())
@@ -199,6 +205,11 @@ impl SearchDiagnostics {
         total_elapsed_sec: f64,
         precursor_tolerance_ppm: Option<f64>,
     ) {
+        // Guard against double-finalize: anomalies would accumulate
+        if !self.anomalies.is_empty() || !self.suggestions.is_empty() {
+            return;
+        }
+
         self.total_elapsed_sec = total_elapsed_sec;
 
         // Rule 1: Low identification rate
@@ -251,7 +262,24 @@ impl SearchDiagnostics {
 
         // Rule 3: Very few PSMs at 1% FDR
         if let Some(count) = psms_at_1pct_fdr {
-            if count < 50 && count > 0 {
+            if count == 0 {
+                self.anomalies.push(SearchAnomaly {
+                    severity: "error".to_string(),
+                    category: AnomalyCategory::HighFdr,
+                    message: "No PSMs pass 1% FDR — search produced no reliable identifications"
+                        .to_string(),
+                    metric_name: Some("psms_at_1pct_fdr".to_string()),
+                    metric_value: Some(0.0),
+                    expected_range: Some("> 100".to_string()),
+                });
+                self.suggestions.push(DiagnosticSuggestion {
+                    priority: 1,
+                    action: "Check database species, enzyme, and modification settings".to_string(),
+                    reason: "Zero identifications usually indicates fundamental parameter mismatch"
+                        .to_string(),
+                    param_changes: None,
+                });
+            } else if count < 50 {
                 self.anomalies.push(SearchAnomaly {
                     severity: "warning".to_string(),
                     category: AnomalyCategory::HighFdr,

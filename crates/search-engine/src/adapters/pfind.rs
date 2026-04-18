@@ -15,7 +15,7 @@
 
 use std::path::PathBuf;
 
-use protein_copilot_core::diagnostics::SearchDiagnostics;
+use protein_copilot_core::diagnostics::{ErrorCategory, SearchDiagnostics};
 use protein_copilot_core::engine::{EngineInfo, HealthStatus, SearchEngineAdapter};
 use protein_copilot_core::error::CoreError;
 use protein_copilot_core::progress::ProgressCallback;
@@ -86,8 +86,12 @@ impl SearchEngineAdapter for PFindAdapter {
         _params: &SearchParams,
         _input_files: &[PathBuf],
         _on_progress: ProgressCallback,
-        _diagnostics: &mut SearchDiagnostics,
+        diagnostics: &mut SearchDiagnostics,
     ) -> Result<SearchResult, CoreError> {
+        diagnostics.set_error(
+            ErrorCategory::Engine,
+            "pFind adapter not yet implemented",
+        );
         Err(CoreError::SearchEngineError {
             engine: "pFind".to_string(),
             detail: "pFind adapter not yet implemented".to_string(),
