@@ -1615,6 +1615,7 @@ version = "0.1.0"
 dependencies = [
  "base64",
  "flate2",
+ "memchr",
  "protein-copilot-core",
  "quick-xml",
  "serde_json",

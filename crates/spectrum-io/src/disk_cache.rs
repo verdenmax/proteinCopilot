@@ -20,7 +20,7 @@
 
 use std::collections::HashMap;
 use std::fs;
-use std::io::{Read, Write};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use crate::error::SpectrumIoError;
@@ -256,31 +256,34 @@ pub fn save_index(
     let cache_path = idx_path(mzml_path);
 
     let offsets = index.offsets();
+    if offsets.len() > u32::MAX as usize {
+        return Err(SpectrumIoError::DiskCacheError {
+            path: mzml_path.to_path_buf(),
+            detail: format!(
+                "index has {} entries, exceeds u32::MAX for PCIX format",
+                offsets.len()
+            ),
+        });
+    }
     let entry_count = offsets.len() as u32;
 
     let total_size = HEADER_SIZE + (entry_count as usize) * ENTRY_SIZE;
     let mut buf = Vec::with_capacity(total_size);
 
-    // Header
-    buf.write_all(MAGIC).map_err(|e| write_err(mzml_path, &e))?;
-    buf.write_all(&[VERSION])
-        .map_err(|e| write_err(mzml_path, &e))?;
-    buf.write_all(&file_size.to_le_bytes())
-        .map_err(|e| write_err(mzml_path, &e))?;
-    buf.write_all(&file_mtime.to_le_bytes())
-        .map_err(|e| write_err(mzml_path, &e))?;
-    buf.write_all(&entry_count.to_le_bytes())
-        .map_err(|e| write_err(mzml_path, &e))?;
+    // Header — Vec::write_all never fails, so no error handling needed
+    buf.extend_from_slice(MAGIC);
+    buf.push(VERSION);
+    buf.extend_from_slice(&file_size.to_le_bytes());
+    buf.extend_from_slice(&file_mtime.to_le_bytes());
+    buf.extend_from_slice(&entry_count.to_le_bytes());
 
     // Entries (sorted by scan number for deterministic output)
     let mut entries: Vec<(&u32, &u64)> = offsets.iter().collect();
     entries.sort_by_key(|&(scan, _)| *scan);
 
     for (&scan, &offset) in &entries {
-        buf.write_all(&scan.to_le_bytes())
-            .map_err(|e| write_err(mzml_path, &e))?;
-        buf.write_all(&offset.to_le_bytes())
-            .map_err(|e| write_err(mzml_path, &e))?;
+        buf.extend_from_slice(&scan.to_le_bytes());
+        buf.extend_from_slice(&offset.to_le_bytes());
     }
 
     // Atomic-ish write: write to file directly (for simplicity)
@@ -297,14 +300,6 @@ pub fn save_index(
     );
 
     Ok(())
-}
-
-/// Helper to create a DiskCacheError from a write error.
-fn write_err(mzml_path: &Path, e: &std::io::Error) -> SpectrumIoError {
-    SpectrumIoError::DiskCacheError {
-        path: mzml_path.to_path_buf(),
-        detail: format!("write error: {e}"),
-    }
 }
 
 #[cfg(test)]

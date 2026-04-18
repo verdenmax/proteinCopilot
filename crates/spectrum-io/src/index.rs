@@ -426,6 +426,12 @@ pub fn build_index_by_byte_scan(path: &Path) -> Result<ScanIndex, SpectrumIoErro
     let mut fallback_scan: u32 = 0;
     let mut global_pos: u64 = 0;
 
+    // A <spectrum> opening tag is typically ~100-200 bytes. We need at least
+    // this many bytes after a match to reliably parse the id attribute.
+    // Tags found with fewer remaining bytes are skipped and re-found in the
+    // next buffer fill via the overlap region.
+    const TAG_MIN_CONTENT: usize = 256;
+
     loop {
         let buf = reader.fill_buf().map_err(|e| SpectrumIoError::IoError {
             path: path.to_path_buf(),
@@ -439,6 +445,14 @@ pub fn build_index_by_byte_scan(path: &Path) -> Result<ScanIndex, SpectrumIoErro
 
         while let Some(pos) = memchr::memmem::find(&buf[search_start..], needle) {
             let local_pos = search_start + pos;
+            let remaining = buf_len - local_pos;
+
+            if remaining < TAG_MIN_CONTENT && buf_len >= TAG_MIN_CONTENT + needle.len() {
+                // Not enough content to parse tag reliably at buffer boundary;
+                // skip and let the overlap bring it back in the next fill.
+                break;
+            }
+
             let abs_pos = global_pos + local_pos as u64;
             fallback_scan += 1;
             // Extract scan from tag bytes (limit to 512 bytes or end of buffer)
@@ -455,8 +469,10 @@ pub fn build_index_by_byte_scan(path: &Path) -> Result<ScanIndex, SpectrumIoErro
             search_start = local_pos + needle.len();
         }
 
-        // Keep overlap for cross-boundary matches
-        let overlap = needle.len() - 1;
+        // Keep overlap large enough to cover tags near the buffer boundary.
+        // TAG_MIN_CONTENT bytes ensures any skipped tag is fully available
+        // in the next fill.
+        let overlap = TAG_MIN_CONTENT + needle.len();
         let consumed = if buf_len > overlap {
             buf_len - overlap
         } else {
