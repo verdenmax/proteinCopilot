@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use protein_copilot_core::diagnostics::SearchDiagnostics;
+use protein_copilot_core::diagnostics::{ErrorCategory, SearchDiagnostics};
 use protein_copilot_core::engine::{EngineInfo, HealthStatus, SearchEngineAdapter};
 use protein_copilot_core::error::CoreError;
 use protein_copilot_core::progress::{ProgressCallback, SearchProgress};
@@ -121,17 +121,23 @@ impl SearchEngineAdapter for SageAdapter {
         on_progress: ProgressCallback,
         diagnostics: &mut SearchDiagnostics,
     ) -> Result<SearchResult, CoreError> {
-        let _ = &diagnostics; // Will be used in Task 6
         let start = Instant::now();
         let run_id = Uuid::new_v4();
 
         // ── Phase 1: filter to MS2 ───────────────────────────────────────
+        diagnostics.begin_stage("file_reading");
+
         let ms2_spectra: Vec<&Spectrum> = spectra
             .iter()
             .filter(|s| s.ms_level == MsLevel::MS2)
             .collect();
 
         if ms2_spectra.is_empty() {
+            diagnostics.fail_stage("No MS2 spectra found in input");
+            diagnostics.set_error(
+                ErrorCategory::InputData,
+                "No MS2 spectra found",
+            );
             return Err(CoreError::SearchEngineError {
                 engine: "Sage".into(),
                 detail: "No MS2 spectra found in input".into(),
@@ -147,6 +153,8 @@ impl SearchEngineAdapter for SageAdapter {
             .enumerate()
             .map(|(i, s)| spectrum_to_raw(s, i))
             .collect();
+
+        diagnostics.end_stage(Some(raw_spectra.len() as u64));
 
         on_progress(SearchProgress {
             run_id,
