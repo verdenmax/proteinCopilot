@@ -56,7 +56,7 @@ async fn scenario_a_full_pipeline() {
     // Step 4: Run search
     let engine = SimpleSearchEngine::new();
     let result = engine
-        .search(&params, &[mgf_path()], noop_progress())
+        .search(&params, &[mgf_path()], noop_progress(), &mut protein_copilot_core::diagnostics::SearchDiagnostics::new())
         .await
         .unwrap();
 
@@ -144,7 +144,7 @@ async fn scenario_b_direct_params() {
 
     let engine = SimpleSearchEngine::new();
     let result = engine
-        .search(&params, &[mgf_path()], noop_progress())
+        .search(&params, &[mgf_path()], noop_progress(), &mut protein_copilot_core::diagnostics::SearchDiagnostics::new())
         .await
         .unwrap();
 
@@ -222,7 +222,7 @@ async fn scenario_phospho_with_hints() {
     params.database_path = fasta_path().to_string_lossy().to_string();
 
     let result = SimpleSearchEngine::new()
-        .search(&params, &[mgf_path()], noop_progress())
+        .search(&params, &[mgf_path()], noop_progress(), &mut protein_copilot_core::diagnostics::SearchDiagnostics::new())
         .await
         .unwrap();
 
@@ -245,7 +245,7 @@ async fn scenario_annotate_psm() {
 
     let engine = SimpleSearchEngine::new();
     let result = engine
-        .search(&params, &[mgf_path()], noop_progress())
+        .search(&params, &[mgf_path()], noop_progress(), &mut protein_copilot_core::diagnostics::SearchDiagnostics::new())
         .await
         .unwrap();
 
@@ -326,7 +326,7 @@ async fn error_invalid_params() {
     };
 
     let engine = SimpleSearchEngine::new();
-    let result = engine.search(&params, &[mgf_path()], noop_progress()).await;
+    let result = engine.search(&params, &[mgf_path()], noop_progress(), &mut protein_copilot_core::diagnostics::SearchDiagnostics::new()).await;
     assert!(result.is_err());
 }
 
@@ -364,7 +364,7 @@ async fn scenario_progress_tracking() {
 
     let engine = SimpleSearchEngine::new();
     let result = engine
-        .search(&params, &[mgf_path()], on_progress)
+        .search(&params, &[mgf_path()], on_progress, &mut protein_copilot_core::diagnostics::SearchDiagnostics::new())
         .await
         .unwrap();
 

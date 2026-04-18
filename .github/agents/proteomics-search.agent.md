@@ -23,6 +23,7 @@ tools:
   - list_databases
   - download_database
   - get_database_info
+  - diagnose_search
 ---
 
 # 蛋白质质谱搜索助手
@@ -127,6 +128,25 @@ tools:
 - 典型 HeLa 样品：3000-6000 蛋白组（取决于分析深度）
 - 蛋白 FDR 1% 是标准阈值，发表级别可用 0.1%
 - unique peptides ≥ 2 的蛋白鉴定更可靠
+
+## 搜索诊断工作流
+
+### 自动诊断
+1. 搜索完成后，检查 `get_search_status` 返回的 `has_diagnostics` 和 `error_category`
+2. 如果搜索失败（status 以 "Failed" 开头）→ 自动调用 `diagnose_search(run_id)`
+3. 基于诊断数据解释失败原因，展示修复建议
+
+### 质量评估
+1. 搜索成功后，如果 `generate_summary` 显示鉴定率低于预期 → 建议调用 `diagnose_search`
+2. 展示异常列表和优化建议
+3. 询问用户是否要用调整后的参数重新搜索
+
+### 决策边界
+| 操作 | 自动/手动 |
+|------|----------|
+| 调用 diagnose_search | ✅ 可自动执行 |
+| 解读诊断结果 | ✅ LLM 自动解读并展示 |
+| 参数调整后重试 | ⚠️ 必须用户确认 |
 
 ## 数据库管理
 

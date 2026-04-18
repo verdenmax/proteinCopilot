@@ -278,6 +278,34 @@ struct CancelSearchInput {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct DiagnoseSearchInput {
+    /// The run_id to diagnose (from run_search or get_search_status)
+    run_id: String,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct DiagnoseSearchOutput {
+    /// The run_id
+    run_id: String,
+    /// Overall search status: "Completed", "Failed: ...", "Cancelled"
+    overall_status: String,
+    /// Error classification (only for failed searches)
+    error_category: Option<protein_copilot_core::diagnostics::ErrorCategory>,
+    /// Stage where failure occurred
+    failure_stage: Option<String>,
+    /// Error detail message
+    error_detail: Option<String>,
+    /// Per-stage metrics
+    stages: Vec<protein_copilot_core::diagnostics::DiagnosticStage>,
+    /// Detected quality anomalies
+    anomalies: Vec<protein_copilot_core::diagnostics::SearchAnomaly>,
+    /// Repair/optimization suggestions, sorted by priority
+    suggestions: Vec<protein_copilot_core::diagnostics::DiagnosticSuggestion>,
+    /// Total search duration in seconds
+    total_elapsed_sec: f64,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct ListSearchesInput {
     /// Filter by status prefix (e.g. "Completed", "Failed"). Optional.
     #[serde(default)]
@@ -740,6 +768,8 @@ struct RunState {
     progress: SearchProgress,
     result: Option<SearchResult>,
     handle: Option<tokio::task::JoinHandle<()>>,
+    diagnostics: Option<protein_copilot_core::diagnostics::SearchDiagnostics>,
+    params_used: Option<protein_copilot_core::search_params::SearchParams>,
 }
 
 /// Maximum number of cached runs before eviction.
@@ -1281,9 +1311,13 @@ impl ProteinCopilotServer {
                             progress_pct: Some(0.0),
                             elapsed_sec: 0.0,
                             estimated_remaining_sec: None,
+                            error_category: None,
+                            has_diagnostics: false,
                         },
                         result: None,
                         handle: None,
+                        diagnostics: None,
+                        params_used: None,
                     },
                 );
             }
@@ -1342,8 +1376,9 @@ impl ProteinCopilotServer {
                     start,
                 };
 
+                let mut diagnostics = protein_copilot_core::diagnostics::SearchDiagnostics::new();
                 let search_result = engine
-                    .search_with_spectra(&params, dia_spectra, on_progress)
+                    .search_with_spectra(&params, dia_spectra, on_progress, &mut diagnostics)
                     .await;
                 let duration = start.elapsed().as_secs_f64();
 
@@ -1362,6 +1397,23 @@ impl ProteinCopilotServer {
                                     result.metadata.run_id = run_id;
                                     // Populate input_files for DIA results
                                     result.metadata.input_files = dia_source.clone();
+                                    // Run anomaly detection
+                                    let tol_ppm = if params.precursor_tolerance.unit == protein_copilot_core::search_params::ToleranceUnit::Ppm {
+                                        Some(params.precursor_tolerance.value)
+                                    } else {
+                                        None
+                                    };
+                                    let decoy_count = result.psms.iter().filter(|p| p.is_decoy).count() as u64;
+                                    diagnostics.finalize(
+                                        Some(result.summary.identification_rate),
+                                        Some(result.summary.psms_at_1pct_fdr),
+                                        Some(decoy_count),
+                                        duration,
+                                        tol_ppm,
+                                    );
+                                    state.diagnostics = Some(diagnostics);
+                                    state.params_used = Some(params.clone());
+                                    state.progress.has_diagnostics = true;
                                     let entry = crate::history::SearchHistoryEntry {
                                         run_id,
                                         status: "Completed".to_string(),
@@ -1388,6 +1440,10 @@ impl ProteinCopilotServer {
                                     Some(entry)
                                 }
                                 Err(e) => {
+                                    state.progress.error_category = diagnostics.error_category.clone();
+                                    state.diagnostics = Some(diagnostics);
+                                    state.params_used = Some(params.clone());
+                                    state.progress.has_diagnostics = true;
                                     let entry = crate::history::SearchHistoryEntry {
                                         run_id,
                                         status: format!("Failed: {e}"),
@@ -1526,9 +1582,13 @@ impl ProteinCopilotServer {
                         progress_pct: Some(0.0),
                         elapsed_sec: 0.0,
                         estimated_remaining_sec: None,
+                        error_category: None,
+                        has_diagnostics: false,
                     },
                     result: None,
                     handle: None,
+                    diagnostics: None,
+                    params_used: None,
                 },
             );
         }
@@ -1587,7 +1647,8 @@ impl ProteinCopilotServer {
                 start,
             };
 
-            let search_result = engine.search(&params, &files, on_progress).await;
+            let mut diagnostics = protein_copilot_core::diagnostics::SearchDiagnostics::new();
+            let search_result = engine.search(&params, &files, on_progress, &mut diagnostics).await;
             let duration = start.elapsed().as_secs_f64();
 
             // Single lock — update progress + result atomically
@@ -1603,6 +1664,23 @@ impl ProteinCopilotServer {
                             Ok(mut result) => {
                                 result.run_id = run_id;
                                 result.metadata.run_id = run_id;
+                                // Run anomaly detection
+                                let tol_ppm = if params.precursor_tolerance.unit == protein_copilot_core::search_params::ToleranceUnit::Ppm {
+                                    Some(params.precursor_tolerance.value)
+                                } else {
+                                    None
+                                };
+                                let decoy_count = result.psms.iter().filter(|p| p.is_decoy).count() as u64;
+                                diagnostics.finalize(
+                                    Some(result.summary.identification_rate),
+                                    Some(result.summary.psms_at_1pct_fdr),
+                                    Some(decoy_count),
+                                    duration,
+                                    tol_ppm,
+                                );
+                                state.diagnostics = Some(diagnostics);
+                                state.params_used = Some(params.clone());
+                                state.progress.has_diagnostics = true;
                                 let entry = crate::history::SearchHistoryEntry {
                                     run_id,
                                     status: "Completed".to_string(),
@@ -1625,6 +1703,10 @@ impl ProteinCopilotServer {
                                 Some(entry)
                             }
                             Err(e) => {
+                                state.progress.error_category = diagnostics.error_category.clone();
+                                state.diagnostics = Some(diagnostics);
+                                state.params_used = Some(params.clone());
+                                state.progress.has_diagnostics = true;
                                 let entry = crate::history::SearchHistoryEntry {
                                     run_id,
                                     status: format!("Failed: {e}"),
@@ -2848,9 +2930,13 @@ impl ProteinCopilotServer {
                         progress_pct: Some(1.0),
                         elapsed_sec: duration,
                         estimated_remaining_sec: None,
+                        error_category: None,
+                        has_diagnostics: false,
                     },
                     result: Some(search_result.clone()),
                     handle: None,
+                    diagnostics: None,
+                    params_used: None,
                 },
             );
         }
@@ -3145,5 +3231,59 @@ impl ProteinCopilotServer {
         protein_copilot_fasta_db::get_database_info(&input.database_id, &cache_dir)
             .map(Json)
             .map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, e))
+    }
+
+    /// Get diagnostic report for a search run.
+    #[rmcp::tool(
+        name = "diagnose_search",
+        description = "Get diagnostic report for a search run. Works for both failed searches (error analysis) and completed searches (quality assessment). Returns stage metrics, detected anomalies, and repair suggestions. Call after get_search_status shows the search has finished (status is Completed, Failed, or Cancelled). Use has_diagnostics=true from get_search_status to confirm diagnostics are available."
+    )]
+    fn diagnose_search(
+        &self,
+        Parameters(input): Parameters<DiagnoseSearchInput>,
+    ) -> Result<Json<DiagnoseSearchOutput>, ErrorData> {
+        let id = Uuid::parse_str(&input.run_id).map_err(|_| {
+            mcp_err(
+                ErrorCode::INVALID_PARAMS,
+                "invalid run_id format — expected UUID",
+            )
+        })?;
+
+        let cache = self.run_cache.lock().map_err(|_| {
+            mcp_err(ErrorCode::INTERNAL_ERROR, "run cache lock is poisoned")
+        })?;
+
+        let state = cache.get(&id).ok_or_else(|| {
+            mcp_err(
+                ErrorCode::INVALID_PARAMS,
+                format!("run_id '{}' not found in cache", input.run_id),
+            )
+        })?;
+
+        if state.progress.status == "Running" {
+            return Err(mcp_err(
+                ErrorCode::INVALID_PARAMS,
+                "Search is still running. Wait for completion before diagnosing.",
+            ));
+        }
+
+        let diag = state.diagnostics.as_ref().ok_or_else(|| {
+            mcp_err(
+                ErrorCode::INTERNAL_ERROR,
+                "No diagnostics available for this run. The search may have been started before the diagnostics feature was added.",
+            )
+        })?;
+
+        Ok(Json(DiagnoseSearchOutput {
+            run_id: input.run_id,
+            overall_status: state.progress.status.clone(),
+            error_category: diag.error_category.clone(),
+            failure_stage: diag.failure_stage.clone(),
+            error_detail: diag.error_detail.clone(),
+            stages: diag.stages.clone(),
+            anomalies: diag.anomalies.clone(),
+            suggestions: diag.suggestions.clone(),
+            total_elapsed_sec: diag.total_elapsed_sec,
+        }))
     }
 }

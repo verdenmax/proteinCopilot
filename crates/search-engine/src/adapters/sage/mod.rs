@@ -13,6 +13,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use protein_copilot_core::diagnostics::{ErrorCategory, SearchDiagnostics};
 use protein_copilot_core::engine::{EngineInfo, HealthStatus, SearchEngineAdapter};
 use protein_copilot_core::error::CoreError;
 use protein_copilot_core::progress::{ProgressCallback, SearchProgress};
@@ -80,6 +81,7 @@ impl SearchEngineAdapter for SageAdapter {
         params: &SearchParams,
         input_files: &[PathBuf],
         on_progress: ProgressCallback,
+        diagnostics: &mut SearchDiagnostics,
     ) -> Result<SearchResult, CoreError> {
         let mut all_spectra: Vec<Spectrum> = Vec::new();
         for path in input_files {
@@ -103,7 +105,7 @@ impl SearchEngineAdapter for SageAdapter {
         }
 
         let mut result = self
-            .search_with_spectra(params, all_spectra, on_progress)
+            .search_with_spectra(params, all_spectra, on_progress, diagnostics)
             .await?;
 
         // Populate input_files in metadata (search_with_spectra doesn't have them)
@@ -117,17 +119,25 @@ impl SearchEngineAdapter for SageAdapter {
         params: &SearchParams,
         spectra: Vec<Spectrum>,
         on_progress: ProgressCallback,
+        diagnostics: &mut SearchDiagnostics,
     ) -> Result<SearchResult, CoreError> {
         let start = Instant::now();
         let run_id = Uuid::new_v4();
 
         // ── Phase 1: filter to MS2 ───────────────────────────────────────
+        diagnostics.begin_stage("file_reading");
+
         let ms2_spectra: Vec<&Spectrum> = spectra
             .iter()
             .filter(|s| s.ms_level == MsLevel::MS2)
             .collect();
 
         if ms2_spectra.is_empty() {
+            diagnostics.fail_stage("No MS2 spectra found in input");
+            diagnostics.set_error(
+                ErrorCategory::InputData,
+                "No MS2 spectra found",
+            );
             return Err(CoreError::SearchEngineError {
                 engine: "Sage".into(),
                 detail: "No MS2 spectra found in input".into(),
@@ -144,6 +154,8 @@ impl SearchEngineAdapter for SageAdapter {
             .map(|(i, s)| spectrum_to_raw(s, i))
             .collect();
 
+        diagnostics.end_stage(Some(raw_spectra.len() as u64));
+
         on_progress(SearchProgress {
             run_id,
             status: "Running".to_string(),
@@ -151,9 +163,13 @@ impl SearchEngineAdapter for SageAdapter {
             progress_pct: Some(5.0),
             elapsed_sec: start.elapsed().as_secs_f64(),
             estimated_remaining_sec: None,
+            error_category: None,
+            has_diagnostics: false,
         });
 
         // ── Phase 2: Build DB + Score (rayon via spawn_blocking) ─────────
+        diagnostics.begin_stage("fasta_parsing");
+
         let sage_params = build_sage_parameters(params);
         let precursor_tol = mass_tolerance_to_sage(&params.precursor_tolerance);
         let fragment_tol = mass_tolerance_to_sage(&params.fragment_tolerance);
@@ -161,12 +177,19 @@ impl SearchEngineAdapter for SageAdapter {
         // Read FASTA content
         let fasta_path = &params.database_path;
         let fasta_content = tokio::fs::read_to_string(fasta_path).await.map_err(|e| {
+            diagnostics.fail_stage(&e.to_string());
+            diagnostics.set_error(
+                ErrorCategory::Database,
+                &format!("Failed to read FASTA file: {}", e),
+            );
             CoreError::SearchEngineError {
                 engine: "Sage".into(),
                 detail: format!("Failed to read FASTA file {}: {}", fasta_path, e),
                 suggestion: "Check that database_path points to a valid FASTA file".into(),
             }
         })?;
+
+        diagnostics.end_stage(None);
 
         // Progress counter shared between rayon workers and the tokio poll task.
         let progress_counter = Arc::new(AtomicUsize::new(0));
@@ -194,6 +217,8 @@ impl SearchEngineAdapter for SageAdapter {
                     progress_pct: Some(pct.min(100.0)),
                     elapsed_sec: progress_start.elapsed().as_secs_f64(),
                     estimated_remaining_sec: None,
+                    error_category: None,
+                    has_diagnostics: false,
                 });
                 if done >= total_for_poll {
                     break;
@@ -202,6 +227,8 @@ impl SearchEngineAdapter for SageAdapter {
         });
 
         // Main search work in a blocking thread pool.
+        diagnostics.begin_stage("matching");
+
         let counter_for_search = Arc::clone(&progress_counter);
         let generate_decoys = sage_params.generate_decoys;
         let decoy_tag = sage_params.decoy_tag.clone();
@@ -272,17 +299,40 @@ impl SearchEngineAdapter for SageAdapter {
 
             Ok::<(Vec<Feature>, IndexedDatabase), CoreError>((features, db))
         })
-        .await
-        .map_err(|e| CoreError::SearchEngineError {
-            engine: "Sage".into(),
-            detail: format!("Search task panicked: {}", e),
-            suggestion: "This is likely a bug in the Sage adapter".into(),
-        })??;
+        .await;
+
+        // Handle spawn failure (panic)
+        let search_result = match search_result {
+            Ok(inner) => inner,
+            Err(e) => {
+                diagnostics.fail_stage(&format!("Search task panicked: {}", e));
+                diagnostics.set_error(
+                    ErrorCategory::Engine,
+                    &format!("Search task panicked: {}", e),
+                );
+                return Err(CoreError::SearchEngineError {
+                    engine: "Sage".into(),
+                    detail: format!("Search task panicked: {}", e),
+                    suggestion: "This is likely a bug in the Sage adapter".into(),
+                });
+            }
+        };
+
+        // Handle inner search error
+        let (features, db) = match search_result {
+            Ok(result) => result,
+            Err(e) => {
+                diagnostics.fail_stage(&e.to_string());
+                diagnostics.set_error(ErrorCategory::Engine, &e.to_string());
+                return Err(e);
+            }
+        };
+
+        diagnostics.end_stage(Some(features.len() as u64));
 
         // Stop the progress polling task.
         progress_handle.abort();
 
-        let (features, db) = search_result;
         let duration = start.elapsed().as_secs_f64();
 
         on_progress_arc(SearchProgress {
@@ -292,6 +342,8 @@ impl SearchEngineAdapter for SageAdapter {
             progress_pct: Some(95.0),
             elapsed_sec: duration,
             estimated_remaining_sec: None,
+            error_category: None,
+            has_diagnostics: false,
         });
 
         // ── Phase 4: Convert Feature → Psm ──────────────────────────────
@@ -468,6 +520,8 @@ impl SearchEngineAdapter for SageAdapter {
             progress_pct: Some(100.0),
             elapsed_sec: duration,
             estimated_remaining_sec: Some(0.0),
+            error_category: None,
+            has_diagnostics: false,
         });
 
         Ok(SearchResult {
@@ -652,7 +706,7 @@ mod tests {
         };
         let on_progress: ProgressCallback = Box::new(|_| {});
         let result = adapter
-            .search_with_spectra(&params, vec![], on_progress)
+            .search_with_spectra(&params, vec![], on_progress, &mut protein_copilot_core::diagnostics::SearchDiagnostics::new())
             .await;
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();

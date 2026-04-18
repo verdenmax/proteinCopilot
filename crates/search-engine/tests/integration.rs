@@ -62,7 +62,7 @@ async fn full_pipeline_mgf_to_search_result() {
     // Step 4: Run search
     let engine = SimpleSearchEngine::new();
     let result = engine
-        .search(&params, &[mgf_path], noop_progress())
+        .search(&params, &[mgf_path], noop_progress(), &mut protein_copilot_core::diagnostics::SearchDiagnostics::new())
         .await
         .unwrap();
 
@@ -106,7 +106,7 @@ async fn full_pipeline_with_phospho_hints() {
     params.database_path = fasta.path().to_string_lossy().to_string();
 
     let result = SimpleSearchEngine::new()
-        .search(&params, &[mgf_path], noop_progress())
+        .search(&params, &[mgf_path], noop_progress(), &mut protein_copilot_core::diagnostics::SearchDiagnostics::new())
         .await
         .unwrap();
     assert_eq!(result.summary.total_spectra_searched, 10);
@@ -133,7 +133,7 @@ async fn full_pipeline_with_enzyme_override() {
     params.database_path = fasta.path().to_string_lossy().to_string();
 
     let result = SimpleSearchEngine::new()
-        .search(&params, &[mgf_path], noop_progress())
+        .search(&params, &[mgf_path], noop_progress(), &mut protein_copilot_core::diagnostics::SearchDiagnostics::new())
         .await
         .unwrap();
     assert_eq!(result.params_used.enzyme, Enzyme::LysC);
@@ -186,7 +186,7 @@ async fn variable_mod_oxidation_m() {
 
     let engine = SimpleSearchEngine::new();
     let result = engine
-        .search(&params, &[mgf_fixture()], noop_progress())
+        .search(&params, &[mgf_fixture()], noop_progress(), &mut protein_copilot_core::diagnostics::SearchDiagnostics::new())
         .await
         .unwrap();
 
@@ -239,7 +239,7 @@ async fn protein_nterm_acetylation_fw1() {
 
     let engine = SimpleSearchEngine::new();
     let result = engine
-        .search(&params, &[mgf_fixture()], noop_progress())
+        .search(&params, &[mgf_fixture()], noop_progress(), &mut protein_copilot_core::diagnostics::SearchDiagnostics::new())
         .await
         .unwrap();
 
@@ -293,7 +293,7 @@ async fn fdr_reverse_decoy_strategy_fw6() {
 
     let engine = SimpleSearchEngine::new();
     let result = engine
-        .search(&params, &[mgf_fixture()], noop_progress())
+        .search(&params, &[mgf_fixture()], noop_progress(), &mut protein_copilot_core::diagnostics::SearchDiagnostics::new())
         .await
         .unwrap();
 

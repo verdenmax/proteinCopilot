@@ -67,7 +67,7 @@ async fn sage_search_produces_results() {
         eprintln!("Progress: {:?} ({:?}%)", p.stage, p.progress_pct);
     });
 
-    let result = adapter.search(&params, &[mgf], on_progress).await;
+    let result = adapter.search(&params, &[mgf], on_progress, &mut protein_copilot_core::diagnostics::SearchDiagnostics::new()).await;
 
     match result {
         Ok(result) => {
@@ -164,7 +164,7 @@ async fn sage_search_with_nonexistent_fasta_returns_error() {
 
     let on_progress: protein_copilot_core::progress::ProgressCallback = Box::new(|_| {});
     let result = adapter
-        .search_with_spectra(&params, vec![spectrum], on_progress)
+        .search_with_spectra(&params, vec![spectrum], on_progress, &mut protein_copilot_core::diagnostics::SearchDiagnostics::new())
         .await;
     assert!(result.is_err(), "Should fail with nonexistent FASTA");
     let err_msg = result.unwrap_err().to_string();

@@ -22,6 +22,14 @@ pub struct SearchProgress {
     pub elapsed_sec: f64,
     /// Estimated remaining time in seconds, `None` if unknown.
     pub estimated_remaining_sec: Option<f64>,
+
+    /// Error classification (set only when status starts with "Failed").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_category: Option<crate::diagnostics::ErrorCategory>,
+
+    /// Whether detailed diagnostics are available via diagnose_search.
+    #[serde(default)]
+    pub has_diagnostics: bool,
 }
 
 /// Callback type for progress reporting from search engines.
