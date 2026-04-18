@@ -4,15 +4,18 @@
 //! only needs to be built once. On subsequent opens the index is loaded
 //! from disk in O(n) time instead of re-scanning the full mzML.
 //!
-//! # PCIX Binary Format (little-endian)
+//! # PCIX Binary Format v2 (little-endian)
 //!
 //! ```text
 //! [magic: 4 bytes "PCIX"]
-//! [version: u8 = 1]
+//! [version: u8 = 2]
 //! [source_file_size: u64 LE]
 //! [source_file_mtime: u64 LE (Unix epoch secs)]
 //! [entry_count: u32 LE]
-//! [entries: (scan_number: u32 LE, byte_offset: u64 LE) × entry_count]
+//! [entries: (scan_number: u32 LE, byte_offset: u64 LE, rt_seconds: f64 LE,
+//!            ms_level: u8, has_isolation: u8,
+//!            target_mz: f64 LE, lower_offset: f64 LE, upper_offset: f64 LE)
+//!           × entry_count]
 //! ```
 //!
 //! Staleness is detected by comparing the source file's size and mtime
@@ -24,19 +27,21 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use crate::error::SpectrumIoError;
-use crate::index::{IndexSource, ScanIndex};
+use crate::index::{IndexSource, ScanIndex, ScanMeta};
 
 /// Magic bytes identifying the PCIX format.
 const MAGIC: &[u8; 4] = b"PCIX";
 
 /// Current format version.
-const VERSION: u8 = 1;
+const VERSION: u8 = 2;
 
 /// Header size: 4 (magic) + 1 (version) + 8 (size) + 8 (mtime) + 4 (count) = 25 bytes.
 const HEADER_SIZE: usize = 4 + 1 + 8 + 8 + 4;
 
-/// Size of a single entry: 4 (scan_number) + 8 (byte_offset) = 12 bytes.
-const ENTRY_SIZE: usize = 4 + 8;
+/// Size of a single v2 entry:
+/// 4 (scan) + 8 (offset) + 8 (rt_seconds) + 1 (ms_level)
+/// + 1 (has_isolation) + 8 (target_mz) + 8 (lower) + 8 (upper) = 46 bytes.
+const ENTRY_SIZE: usize = 4 + 8 + 8 + 1 + 1 + 8 + 8 + 8;
 
 /// Returns the sidecar `.idx` cache path for a given mzML file.
 ///
@@ -207,37 +212,61 @@ pub fn load_index(
     }
 
     // --- Parse entries ---
-    let mut offsets = HashMap::with_capacity(entry_count);
+    let mut entries = HashMap::with_capacity(entry_count);
     let mut cursor = &data[HEADER_SIZE..];
 
     for _ in 0..entry_count {
         let mut scan_buf = [0u8; 4];
         let mut offset_buf = [0u8; 8];
-        cursor.read_exact(&mut scan_buf).map_err(|e| {
-            SpectrumIoError::DiskCacheError {
+        let mut rt_buf = [0u8; 8];
+        let mut ms_level_buf = [0u8; 1];
+        let mut has_iso_buf = [0u8; 1];
+        let mut target_buf = [0u8; 8];
+        let mut lower_buf = [0u8; 8];
+        let mut upper_buf = [0u8; 8];
+
+        let read = |cursor: &mut &[u8], buf: &mut [u8], field: &str| -> Result<(), SpectrumIoError> {
+            cursor.read_exact(buf).map_err(|e| SpectrumIoError::DiskCacheError {
                 path: mzml_path.to_path_buf(),
-                detail: format!("failed to read scan entry: {e}"),
-            }
-        })?;
-        cursor.read_exact(&mut offset_buf).map_err(|e| {
-            SpectrumIoError::DiskCacheError {
-                path: mzml_path.to_path_buf(),
-                detail: format!("failed to read offset entry: {e}"),
-            }
-        })?;
+                detail: format!("failed to read {field}: {e}"),
+            })
+        };
+
+        read(&mut cursor, &mut scan_buf, "scan_number")?;
+        read(&mut cursor, &mut offset_buf, "byte_offset")?;
+        read(&mut cursor, &mut rt_buf, "rt_seconds")?;
+        read(&mut cursor, &mut ms_level_buf, "ms_level")?;
+        read(&mut cursor, &mut has_iso_buf, "has_isolation")?;
+        read(&mut cursor, &mut target_buf, "target_mz")?;
+        read(&mut cursor, &mut lower_buf, "lower_offset")?;
+        read(&mut cursor, &mut upper_buf, "upper_offset")?;
 
         let scan = u32::from_le_bytes(scan_buf);
-        let offset = u64::from_le_bytes(offset_buf);
-        offsets.insert(scan, offset);
+        let isolation_window = if has_iso_buf[0] != 0 {
+            Some((
+                f64::from_le_bytes(target_buf),
+                f64::from_le_bytes(lower_buf),
+                f64::from_le_bytes(upper_buf),
+            ))
+        } else {
+            None
+        };
+
+        entries.insert(scan, ScanMeta {
+            offset: u64::from_le_bytes(offset_buf),
+            rt_seconds: f64::from_le_bytes(rt_buf),
+            ms_level: ms_level_buf[0],
+            isolation_window,
+        });
     }
 
     tracing::info!(
         path = %mzml_path.display(),
         entries = entry_count,
-        "disk cache hit: loaded scan index from .idx file"
+        "disk cache hit: loaded scan index v2 from .idx file"
     );
 
-    Ok(Some(ScanIndex::new(offsets, IndexSource::NativeIndex)))
+    Ok(Some(ScanIndex::from_meta(entries, IndexSource::NativeIndex)))
 }
 
 /// Saves a [`ScanIndex`] to the sidecar `.idx` file.
@@ -255,22 +284,22 @@ pub fn save_index(
 ) -> Result<(), SpectrumIoError> {
     let cache_path = idx_path(mzml_path);
 
-    let offsets = index.offsets();
-    if offsets.len() > u32::MAX as usize {
+    let count = index.len();
+    if count > u32::MAX as usize {
         return Err(SpectrumIoError::DiskCacheError {
             path: mzml_path.to_path_buf(),
             detail: format!(
                 "index has {} entries, exceeds u32::MAX for PCIX format",
-                offsets.len()
+                count
             ),
         });
     }
-    let entry_count = offsets.len() as u32;
+    let entry_count = count as u32;
 
     let total_size = HEADER_SIZE + (entry_count as usize) * ENTRY_SIZE;
     let mut buf = Vec::with_capacity(total_size);
 
-    // Header — Vec::write_all never fails, so no error handling needed
+    // Header
     buf.extend_from_slice(MAGIC);
     buf.push(VERSION);
     buf.extend_from_slice(&file_size.to_le_bytes());
@@ -278,15 +307,30 @@ pub fn save_index(
     buf.extend_from_slice(&entry_count.to_le_bytes());
 
     // Entries (sorted by scan number for deterministic output)
-    let mut entries: Vec<(&u32, &u64)> = offsets.iter().collect();
-    entries.sort_by_key(|&(scan, _)| *scan);
+    let mut entries: Vec<(u32, &ScanMeta)> = index.iter_meta().map(|(&s, m)| (s, m)).collect();
+    entries.sort_by_key(|&(scan, _)| scan);
 
-    for (&scan, &offset) in &entries {
+    for (scan, meta) in &entries {
         buf.extend_from_slice(&scan.to_le_bytes());
-        buf.extend_from_slice(&offset.to_le_bytes());
+        buf.extend_from_slice(&meta.offset.to_le_bytes());
+        buf.extend_from_slice(&meta.rt_seconds.to_le_bytes());
+        buf.push(meta.ms_level);
+        match meta.isolation_window {
+            Some((target, lower, upper)) => {
+                buf.push(1u8);
+                buf.extend_from_slice(&target.to_le_bytes());
+                buf.extend_from_slice(&lower.to_le_bytes());
+                buf.extend_from_slice(&upper.to_le_bytes());
+            }
+            None => {
+                buf.push(0u8);
+                buf.extend_from_slice(&0.0f64.to_le_bytes());
+                buf.extend_from_slice(&0.0f64.to_le_bytes());
+                buf.extend_from_slice(&0.0f64.to_le_bytes());
+            }
+        }
     }
 
-    // Atomic-ish write: write to file directly (for simplicity)
     fs::write(&cache_path, &buf).map_err(|e| SpectrumIoError::DiskCacheError {
         path: mzml_path.to_path_buf(),
         detail: format!("failed to write .idx file: {e}"),
@@ -296,7 +340,7 @@ pub fn save_index(
         path = %mzml_path.display(),
         entries = entry_count,
         cache_path = %cache_path.display(),
-        "saved scan index to .idx cache"
+        "saved scan index v2 to .idx cache"
     );
 
     Ok(())
@@ -450,5 +494,77 @@ mod tests {
         let path = Path::new("/data/experiment/sample.mzML");
         let result = idx_path(path);
         assert_eq!(result, PathBuf::from("/data/experiment/sample.mzML.idx"));
+    }
+
+    /// Helper: build a ScanIndex from ScanMeta entries.
+    fn build_meta_index(entries: &[(u32, ScanMeta)]) -> ScanIndex {
+        let map: HashMap<u32, ScanMeta> = entries.iter().cloned().collect();
+        ScanIndex::from_meta(map, IndexSource::NativeIndex)
+    }
+
+    #[test]
+    fn v2_round_trip_with_metadata() {
+        let dir = tempfile::tempdir().unwrap();
+        let mzml = fake_mzml(dir.path());
+
+        let index = build_meta_index(&[
+            (1, ScanMeta {
+                offset: 100,
+                rt_seconds: 120.5,
+                ms_level: 2,
+                isolation_window: Some((500.0, 1.0, 1.0)),
+            }),
+            (5, ScanMeta {
+                offset: 5000,
+                rt_seconds: 300.0,
+                ms_level: 1,
+                isolation_window: None,
+            }),
+            (10, ScanMeta {
+                offset: 99999,
+                rt_seconds: 600.0,
+                ms_level: 2,
+                isolation_window: Some((750.5, 12.5, 12.5)),
+            }),
+        ]);
+        let size = 123456u64;
+        let mtime = 1700000000u64;
+
+        save_index(&mzml, &index, size, mtime).unwrap();
+        let loaded = load_index(&mzml, size, mtime).unwrap();
+
+        let loaded = loaded.expect("should load cached index");
+        assert_eq!(loaded.len(), 3);
+        assert_eq!(loaded.get_offset(1), Some(100));
+        assert_eq!(loaded.get_offset(5), Some(5000));
+
+        let meta1 = loaded.get_meta(1).unwrap();
+        assert_eq!(meta1.ms_level, 2);
+        assert!((meta1.rt_seconds - 120.5).abs() < 0.001);
+        let iw = meta1.isolation_window.unwrap();
+        assert!((iw.0 - 500.0).abs() < 0.001);
+
+        let meta5 = loaded.get_meta(5).unwrap();
+        assert_eq!(meta5.ms_level, 1);
+        assert!(meta5.isolation_window.is_none());
+    }
+
+    #[test]
+    fn v1_cache_triggers_rebuild() {
+        let dir = tempfile::tempdir().unwrap();
+        let mzml = fake_mzml(dir.path());
+        let cache = idx_path(&mzml);
+
+        // Write a valid v1 format file (version=1)
+        let mut buf = Vec::new();
+        buf.extend_from_slice(MAGIC);
+        buf.push(1); // version 1
+        buf.extend_from_slice(&100u64.to_le_bytes());
+        buf.extend_from_slice(&200u64.to_le_bytes());
+        buf.extend_from_slice(&0u32.to_le_bytes());
+        std::fs::write(&cache, &buf).unwrap();
+
+        let result = load_index(&mzml, 100, 200).unwrap();
+        assert!(result.is_none(), "v1 cache should be rejected by v2 loader");
     }
 }

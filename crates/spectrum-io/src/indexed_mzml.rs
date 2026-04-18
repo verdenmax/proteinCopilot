@@ -157,6 +157,16 @@ impl SpectrumReader for IndexedMzMLReader {
     ) -> Result<u32, SpectrumIoError> {
         MzMLReader.for_each_spectrum(path, handler)
     }
+
+    fn find_by_rt(
+        &self,
+        _path: &Path,
+        rt_min: f64,
+        precursor_mz: f64,
+        rt_tolerance_min: f64,
+    ) -> Result<Option<(u32, f64)>, SpectrumIoError> {
+        Ok(self.index.find_by_rt(rt_min, precursor_mz, rt_tolerance_min))
+    }
 }
 
 // ---------------------------------------------------------------------------

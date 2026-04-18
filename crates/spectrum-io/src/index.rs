@@ -531,6 +531,77 @@ fn extract_scan_from_tag_bytes(tag_bytes: &[u8], fallback_scan: u32) -> u32 {
     fallback_scan
 }
 
+/// Extracts the `value="..."` attribute from a cvParam byte region.
+///
+/// Searches for `value="` within the first 200 bytes, parses the f64.
+fn extract_cv_value(region: &[u8]) -> Option<f64> {
+    let limit = region.len().min(200);
+    let search = &region[..limit];
+    let pos = memchr::memmem::find(search, b"value=\"")?;
+    let after = &search[pos + 7..];
+    let end = memchr::memchr(b'"', after)?;
+    let val_bytes = &after[..end];
+    std::str::from_utf8(val_bytes)
+        .ok()
+        .and_then(|s| s.parse::<f64>().ok())
+}
+
+/// Extracts RT, ms_level, and isolation window from raw XML bytes
+/// following a `<spectrum ` tag.
+///
+/// Searches for well-known cvParam accession numbers in the raw bytes.
+/// Stops at `<binaryDataArrayList` to avoid scanning into peak data.
+fn extract_meta_from_region(region: &[u8]) -> (f64, u8, Option<(f64, f64, f64)>) {
+    let mut rt_seconds: f64 = 0.0;
+    let mut ms_level: u8 = 0;
+    let mut iso_target: Option<f64> = None;
+    let mut iso_lower: Option<f64> = None;
+    let mut iso_upper: Option<f64> = None;
+
+    // Stop scanning if we hit binaryDataArrayList (no metadata after this)
+    let limit = memchr::memmem::find(region, b"<binaryDataArrayList")
+        .unwrap_or(region.len());
+    let region = &region[..limit];
+
+    // MS:1000016 — scan start time (RT)
+    if let Some(pos) = memchr::memmem::find(region, b"MS:1000016") {
+        rt_seconds = extract_cv_value(&region[pos..]).unwrap_or(0.0);
+        // Check if unit is minutes (UO:0000031) — convert to seconds
+        let end = region.len().min(pos + 300);
+        let after = &region[pos..end];
+        if memchr::memmem::find(after, b"UO:0000031").is_some() {
+            rt_seconds *= 60.0;
+        }
+    }
+
+    // MS:1000511 — ms level (the value attribute contains the level number)
+    if let Some(pos) = memchr::memmem::find(region, b"MS:1000511") {
+        ms_level = extract_cv_value(&region[pos..])
+            .map(|v| v as u8)
+            .unwrap_or(0);
+    }
+
+    // MS:1000827 — isolation window target m/z
+    if let Some(pos) = memchr::memmem::find(region, b"MS:1000827") {
+        iso_target = extract_cv_value(&region[pos..]);
+    }
+    // MS:1000828 — isolation window lower offset
+    if let Some(pos) = memchr::memmem::find(region, b"MS:1000828") {
+        iso_lower = extract_cv_value(&region[pos..]);
+    }
+    // MS:1000829 — isolation window upper offset
+    if let Some(pos) = memchr::memmem::find(region, b"MS:1000829") {
+        iso_upper = extract_cv_value(&region[pos..]);
+    }
+
+    let isolation_window = match (iso_target, iso_lower, iso_upper) {
+        (Some(t), Some(l), Some(u)) => Some((t, l, u)),
+        _ => None,
+    };
+
+    (rt_seconds, ms_level, isolation_window)
+}
+
 /// Builds a [`ScanIndex`] by byte-level scanning with SIMD-accelerated search.
 ///
 /// Uses `memchr::memmem` to find `<spectrum ` needles in large buffered reads,
@@ -558,7 +629,7 @@ pub fn build_index_by_byte_scan(path: &Path) -> Result<ScanIndex, SpectrumIoErro
 
     let mut reader = BufReader::with_capacity(256 * 1024, file);
     let needle = b"<spectrum ";
-    let mut offsets = HashMap::new();
+    let mut entries: HashMap<u32, ScanMeta> = HashMap::new();
     let mut fallback_scan: u32 = 0;
     let mut global_pos: u64 = 0;
 
@@ -566,7 +637,7 @@ pub fn build_index_by_byte_scan(path: &Path) -> Result<ScanIndex, SpectrumIoErro
     // this many bytes after a match to reliably parse the id attribute.
     // Tags found with fewer remaining bytes are skipped and re-found in the
     // next buffer fill via the overlap region.
-    const TAG_MIN_CONTENT: usize = 256;
+    const TAG_MIN_CONTENT: usize = 2048;
 
     loop {
         let buf = reader.fill_buf().map_err(|e| SpectrumIoError::IoError {
@@ -594,11 +665,23 @@ pub fn build_index_by_byte_scan(path: &Path) -> Result<ScanIndex, SpectrumIoErro
             // Extract scan from tag bytes (limit to 512 bytes or end of buffer)
             let tag_end = (local_pos + 512).min(buf_len);
             let scan = extract_scan_from_tag_bytes(&buf[local_pos..tag_end], fallback_scan);
-            if let Some(prev_offset) = offsets.insert(scan, abs_pos) {
+
+            let meta_end = (local_pos + TAG_MIN_CONTENT).min(buf_len);
+            let (rt_seconds, ms_level, isolation_window) =
+                extract_meta_from_region(&buf[local_pos..meta_end]);
+
+            let meta = ScanMeta {
+                offset: abs_pos,
+                rt_seconds,
+                ms_level,
+                isolation_window,
+            };
+
+            if let Some(prev) = entries.insert(scan, meta) {
                 tracing::warn!(
                     "duplicate scan {} found while byte-scanning: offset {} replaced by {}",
                     scan,
-                    prev_offset,
+                    prev.offset,
                     abs_pos
                 );
             }
@@ -618,7 +701,7 @@ pub fn build_index_by_byte_scan(path: &Path) -> Result<ScanIndex, SpectrumIoErro
         reader.consume(consumed);
     }
 
-    Ok(ScanIndex::new(offsets, IndexSource::BuiltFromScan))
+    Ok(ScanIndex::from_meta(entries, IndexSource::BuiltFromScan))
 }
 
 /// Extracts the value of the `id` attribute from an XML tag string.
@@ -877,5 +960,228 @@ mod tests {
 
         let mut out = std::fs::File::create(output_path).unwrap();
         write!(out, "{}{}", body, footer).unwrap();
+    }
+
+    fn make_rt_index() -> ScanIndex {
+        let mut meta = HashMap::new();
+        // MS1 scans (should be skipped by find_by_rt)
+        meta.insert(1, ScanMeta {
+            offset: 100,
+            rt_seconds: 100.0 * 60.0,
+            ms_level: 1,
+            isolation_window: None,
+        });
+        meta.insert(3, ScanMeta {
+            offset: 300,
+            rt_seconds: 200.0 * 60.0,
+            ms_level: 1,
+            isolation_window: None,
+        });
+        // MS2 scans
+        meta.insert(2, ScanMeta {
+            offset: 200,
+            rt_seconds: 100.0 * 60.0,
+            ms_level: 2,
+            isolation_window: Some((500.0, 12.5, 12.5)),
+        });
+        meta.insert(4, ScanMeta {
+            offset: 400,
+            rt_seconds: 200.0 * 60.0,
+            ms_level: 2,
+            isolation_window: Some((600.0, 12.5, 12.5)),
+        });
+        meta.insert(5, ScanMeta {
+            offset: 500,
+            rt_seconds: 300.0 * 60.0,
+            ms_level: 2,
+            isolation_window: Some((500.0, 25.0, 25.0)),
+        });
+        meta.insert(6, ScanMeta {
+            offset: 600,
+            rt_seconds: 400.0 * 60.0,
+            ms_level: 2,
+            isolation_window: None,
+        });
+        ScanIndex::from_meta(meta, IndexSource::BuiltFromScan)
+    }
+
+    #[test]
+    fn find_by_rt_exact_match() {
+        let idx = make_rt_index();
+        let result = idx.find_by_rt(100.0, 500.0, 30.0);
+        assert_eq!(result.unwrap().0, 2);
+    }
+
+    #[test]
+    fn find_by_rt_skips_ms1() {
+        let idx = make_rt_index();
+        let result = idx.find_by_rt(100.0, 500.0, 30.0);
+        assert_eq!(result.unwrap().0, 2);
+    }
+
+    #[test]
+    fn find_by_rt_mz_outside_window() {
+        let idx = make_rt_index();
+        let result = idx.find_by_rt(100.0, 550.0, 30.0);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn find_by_rt_outside_tolerance() {
+        let idx = make_rt_index();
+        let result = idx.find_by_rt(150.0, 500.0, 30.0);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn find_by_rt_dda_no_isolation_accepts_any_mz() {
+        let idx = make_rt_index();
+        let result = idx.find_by_rt(400.0, 999.0, 30.0);
+        assert_eq!(result.unwrap().0, 6);
+    }
+
+    #[test]
+    fn find_by_rt_picks_closest() {
+        let mut meta = HashMap::new();
+        meta.insert(1, ScanMeta {
+            offset: 100,
+            rt_seconds: 100.0 * 60.0,
+            ms_level: 2,
+            isolation_window: Some((500.0, 25.0, 25.0)),
+        });
+        meta.insert(2, ScanMeta {
+            offset: 200,
+            rt_seconds: 105.0 * 60.0,
+            ms_level: 2,
+            isolation_window: Some((500.0, 25.0, 25.0)),
+        });
+        let idx = ScanIndex::from_meta(meta, IndexSource::BuiltFromScan);
+        let result = idx.find_by_rt(103.0, 500.0, 30.0);
+        assert_eq!(result.unwrap().0, 2);
+    }
+
+    #[test]
+    fn find_by_rt_empty_index() {
+        let idx = ScanIndex::from_meta(HashMap::new(), IndexSource::BuiltFromScan);
+        assert!(idx.find_by_rt(100.0, 500.0, 30.0).is_none());
+    }
+
+    #[test]
+    fn scan_index_with_meta_basic() {
+        let mut meta_map = HashMap::new();
+        meta_map.insert(1, ScanMeta {
+            offset: 100,
+            rt_seconds: 120.5,
+            ms_level: 2,
+            isolation_window: Some((500.0, 1.0, 1.0)),
+        });
+        meta_map.insert(5, ScanMeta {
+            offset: 5000,
+            rt_seconds: 300.0,
+            ms_level: 1,
+            isolation_window: None,
+        });
+        let idx = ScanIndex::from_meta(meta_map, IndexSource::NativeIndex);
+
+        assert_eq!(idx.len(), 2);
+        assert_eq!(idx.get_offset(1), Some(100));
+        assert_eq!(idx.get_offset(5), Some(5000));
+        assert_eq!(idx.get_offset(99), None);
+
+        let meta = idx.get_meta(1).unwrap();
+        assert_eq!(meta.ms_level, 2);
+        assert!((meta.rt_seconds - 120.5).abs() < 0.001);
+        assert!(meta.isolation_window.is_some());
+        assert!(idx.get_meta(99).is_none());
+    }
+
+    #[test]
+    fn scan_index_from_meta_backward_compat() {
+        let mut offsets = HashMap::new();
+        offsets.insert(1u32, 100u64);
+        offsets.insert(2, 200);
+        let idx = ScanIndex::new(offsets, IndexSource::BuiltFromScan);
+        assert_eq!(idx.len(), 2);
+        assert_eq!(idx.get_offset(1), Some(100));
+        let meta = idx.get_meta(1).unwrap();
+        assert_eq!(meta.offset, 100);
+        assert_eq!(meta.ms_level, 0);
+        assert!((meta.rt_seconds).abs() < 0.001);
+    }
+
+    #[test]
+    fn byte_scan_extracts_metadata() {
+        let path =
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/small.mzml");
+        let idx = build_index_by_byte_scan(&path).unwrap();
+
+        assert_eq!(idx.len(), 10);
+
+        // Scan 1: RT=120.5s, ms_level=2, isolation=(471.2561, 1.0, 1.0)
+        let meta1 = idx.get_meta(1).expect("scan 1 should exist");
+        assert_eq!(meta1.ms_level, 2, "scan 1 ms_level");
+        assert!(
+            (meta1.rt_seconds - 120.5).abs() < 0.1,
+            "scan 1 RT: expected ~120.5, got {}",
+            meta1.rt_seconds
+        );
+        let iw = meta1.isolation_window.expect("scan 1 should have isolation window");
+        assert!(
+            (iw.0 - 471.2561).abs() < 0.01,
+            "scan 1 isolation target_mz: expected ~471.2561, got {}",
+            iw.0
+        );
+
+        // Scan 2: RT=125.3s, ms_level=2, isolation=(523.7832, 1.0, 1.0)
+        let meta2 = idx.get_meta(2).expect("scan 2 should exist");
+        assert_eq!(meta2.ms_level, 2);
+        assert!(
+            (meta2.rt_seconds - 125.3).abs() < 0.1,
+            "scan 2 RT: expected ~125.3, got {}",
+            meta2.rt_seconds
+        );
+    }
+
+    #[test]
+    fn extract_cv_value_basic() {
+        let region = b"accession=\"MS:1000016\" value=\"120.5\" unitCvRef=\"UO\"";
+        assert!((extract_cv_value(region).unwrap() - 120.5).abs() < 0.001);
+    }
+
+    #[test]
+    fn extract_cv_value_no_value() {
+        let region = b"accession=\"MS:1000016\" name=\"scan start time\"";
+        assert!(extract_cv_value(region).is_none());
+    }
+
+    #[test]
+    fn extract_meta_from_region_basic() {
+        let xml = br#"<spectrum index="0" id="scan=1">
+        <cvParam accession="MS:1000511" value="2"/>
+        <scan>
+            <cvParam accession="MS:1000016" value="120.5" unitAccession="UO:0000010"/>
+        </scan>
+        <isolationWindow>
+            <cvParam accession="MS:1000827" value="500.0"/>
+            <cvParam accession="MS:1000828" value="1.0"/>
+            <cvParam accession="MS:1000829" value="1.0"/>
+        </isolationWindow>
+        <binaryDataArrayList>"#;
+        let (rt, ms, iso) = extract_meta_from_region(xml);
+        assert!((rt - 120.5).abs() < 0.001);
+        assert_eq!(ms, 2);
+        let (t, l, u) = iso.unwrap();
+        assert!((t - 500.0).abs() < 0.001);
+        assert!((l - 1.0).abs() < 0.001);
+        assert!((u - 1.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn extract_meta_minutes_conversion() {
+        let xml = br#"<cvParam accession="MS:1000511" value="1"/>
+        <cvParam accession="MS:1000016" value="10.5" unitAccession="UO:0000031"/>"#;
+        let (rt, ms, _) = extract_meta_from_region(xml);
+        assert!((rt - 630.0).abs() < 0.1, "10.5 min should be 630 seconds, got {rt}");
+        assert_eq!(ms, 1);
     }
 }

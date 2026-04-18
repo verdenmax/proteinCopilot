@@ -43,4 +43,51 @@ pub trait SpectrumReader: Send + Sync {
         path: &Path,
         handler: &mut dyn FnMut(Spectrum) -> Result<bool, SpectrumIoError>,
     ) -> Result<u32, SpectrumIoError>;
+
+    /// Find the best MS2 scan matching a given RT and precursor m/z.
+    ///
+    /// Default implementation reads all spectra (slow for large files).
+    /// [`crate::IndexedMzMLReader`] overrides with O(log N) binary search.
+    ///
+    /// Returns `(scan_number, rt_delta_min)` or `None`.
+    fn find_by_rt(
+        &self,
+        path: &Path,
+        rt_min: f64,
+        precursor_mz: f64,
+        rt_tolerance_min: f64,
+    ) -> Result<Option<(u32, f64)>, SpectrumIoError> {
+        use protein_copilot_core::spectrum::MsLevel;
+
+        let spectra = self.read_all(path)?;
+
+        let mut best: Option<(u32, f64)> = None;
+        for spec in &spectra {
+            if spec.ms_level != MsLevel::MS2 {
+                continue;
+            }
+            let delta_min = spec.retention_time_min - rt_min;
+            if delta_min.abs() > rt_tolerance_min {
+                continue;
+            }
+            if let Some(p) = spec.precursors.first() {
+                if let Some(w) = &p.isolation_window {
+                    let low = w.target_mz - w.lower_offset;
+                    let high = w.target_mz + w.upper_offset;
+                    if precursor_mz < low || precursor_mz > high {
+                        continue;
+                    }
+                }
+            }
+            match &best {
+                None => best = Some((spec.scan_number, delta_min)),
+                Some((_, bd)) => {
+                    if delta_min.abs() < bd.abs() {
+                        best = Some((spec.scan_number, delta_min));
+                    }
+                }
+            }
+        }
+        Ok(best)
+    }
 }
