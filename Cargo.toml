@@ -59,6 +59,7 @@ protein-copilot-fasta-db = { path = "crates/fasta-db" }
 
 # Entrapment analysis
 protein-copilot-entrapment-analysis = { path = "crates/entrapment-analysis" }
+protein-copilot-entrapment-cli = { path = "crates/entrapment-cli" }
 
 # YAML config
 serde_yaml = "0.9"
