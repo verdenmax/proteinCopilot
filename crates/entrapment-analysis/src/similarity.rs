@@ -307,9 +307,10 @@ mod tests {
         // Not an exact match – "PEPTLDEK" is in the target DB, not "PEPTIDEK"
         let norm = "PEPTLDEK"; // normalize_li("PEPTIDEK") = "PEPTLDEK"
         index.normalized_set.insert(norm.to_owned());
-        index
-            .normalized_to_original
-            .insert(norm.to_owned(), ("PEPTLDEK".to_owned(), "P00002".to_owned()));
+        index.normalized_to_original.insert(
+            norm.to_owned(),
+            ("PEPTLDEK".to_owned(), "P00002".to_owned()),
+        );
         let config = SimilarityConfig::default();
 
         let result = classify_single(&psm, PsmGroup::Trap, &index, &config);

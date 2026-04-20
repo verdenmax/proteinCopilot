@@ -59,11 +59,7 @@ impl PsmRow {
                 .map(|d| format!("{:.4}", d))
                 .unwrap_or_default(),
             diff_positions: cp.diff_positions.clone().unwrap_or_default(),
-            charge: cp
-                .psm
-                .charge
-                .map(|c| c.to_string())
-                .unwrap_or_default(),
+            charge: cp.psm.charge.map(|c| c.to_string()).unwrap_or_default(),
             precursor_mz: cp
                 .psm
                 .precursor_mz
@@ -122,10 +118,8 @@ pub fn render_report(
         psms: psm_rows,
     };
 
-    let json = serde_json::to_string(&report_data).map_err(|e| {
-        EntrapmentError::ReportError {
-            detail: format!("JSON serialization failed: {e}"),
-        }
+    let json = serde_json::to_string(&report_data).map_err(|e| EntrapmentError::ReportError {
+        detail: format!("JSON serialization failed: {e}"),
     })?;
 
     let html = TEMPLATE.replace(DATA_PLACEHOLDER, &json);

@@ -29,15 +29,19 @@ pub fn load_diann_parquet(path: &Path) -> Result<Vec<UnifiedPsm>, EntrapmentErro
         detail: e.to_string(),
     })?;
 
-    let builder =
-        ParquetRecordBatchReaderBuilder::try_new(file).map_err(|e| EntrapmentError::LoaderError {
+    let builder = ParquetRecordBatchReaderBuilder::try_new(file).map_err(|e| {
+        EntrapmentError::LoaderError {
             format: "DIA-NN parquet".to_string(),
             detail: format!("failed to open parquet file '{}': {e}", path.display()),
-        })?;
+        }
+    })?;
 
     let reader = builder.build().map_err(|e| EntrapmentError::LoaderError {
         format: "DIA-NN parquet".to_string(),
-        detail: format!("failed to build parquet reader for '{}': {e}", path.display()),
+        detail: format!(
+            "failed to build parquet reader for '{}': {e}",
+            path.display()
+        ),
     })?;
 
     let mut psms = Vec::new();
@@ -107,13 +111,12 @@ fn get_string_column(
     schema: &arrow::datatypes::SchemaRef,
     name: &str,
 ) -> Result<Arc<StringArray>, EntrapmentError> {
-    let idx =
-        schema
-            .index_of(name)
-            .map_err(|_| EntrapmentError::LoaderError {
-                format: "DIA-NN parquet".to_string(),
-                detail: format!("missing essential column '{name}'"),
-            })?;
+    let idx = schema
+        .index_of(name)
+        .map_err(|_| EntrapmentError::LoaderError {
+            format: "DIA-NN parquet".to_string(),
+            detail: format!("missing essential column '{name}'"),
+        })?;
     let arr = batch
         .column(idx)
         .as_any()

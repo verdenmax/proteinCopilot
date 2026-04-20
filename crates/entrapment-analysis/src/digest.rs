@@ -106,10 +106,7 @@ impl TargetDigestIndex {
                     protein_accession: dp.protein_accession.clone(),
                     neutral_mass: dp.neutral_mass,
                 };
-                by_length
-                    .entry(seq.len())
-                    .or_default()
-                    .push(target_peptide);
+                by_length.entry(seq.len()).or_default().push(target_peptide);
             }
         }
 
@@ -266,7 +263,9 @@ mod tests {
         // Normalised: "ELVISLSK" → "ELVLSLSK"
         // A query "ELVLSLSK" (with L instead of I) should match via L1
         assert!(idx.has_normalized("ELVLSLSK"));
-        let (orig, _prot) = idx.normalized_match("ELVLSLSK").expect("should find L1 match");
+        let (orig, _prot) = idx
+            .normalized_match("ELVLSLSK")
+            .expect("should find L1 match");
         assert_eq!(orig, "ELVISLSK");
     }
 

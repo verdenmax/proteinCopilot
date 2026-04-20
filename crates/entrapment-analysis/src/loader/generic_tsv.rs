@@ -114,16 +114,15 @@ pub fn load_generic_tsv(
     })?;
 
     // Find column indices
-    let peptide_idx = find_column(headers, &column_map.peptide).ok_or_else(|| {
-        EntrapmentError::LoaderError {
+    let peptide_idx =
+        find_column(headers, &column_map.peptide).ok_or_else(|| EntrapmentError::LoaderError {
             format: "generic TSV".to_string(),
             detail: format!(
                 "missing essential column '{}' in '{}'",
                 column_map.peptide,
                 path.display()
             ),
-        }
-    })?;
+        })?;
 
     let charge_idx = find_column(headers, &column_map.charge);
     let precursor_mz_idx = find_column(headers, &column_map.precursor_mz);
@@ -141,11 +140,7 @@ pub fn load_generic_tsv(
             detail: format!("failed to parse row in '{}': {e}", path.display()),
         })?;
 
-        let peptide = record
-            .get(peptide_idx)
-            .unwrap_or("")
-            .trim()
-            .to_string();
+        let peptide = record.get(peptide_idx).unwrap_or("").trim().to_string();
         if peptide.is_empty() {
             continue;
         }

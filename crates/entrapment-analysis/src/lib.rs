@@ -44,17 +44,24 @@ impl EntrapmentAnalyzer {
     /// index from the FASTA file.
     pub fn new(config: EntrapmentConfig, fasta_path: &Path) -> Result<Self, EntrapmentError> {
         let tagger = Tagger::new(&config)?;
-        let index = TargetDigestIndex::from_fasta(
-            fasta_path,
-            config.similarity.max_missed_cleavages,
-        )?;
-        Ok(Self { config, tagger, index })
+        let index =
+            TargetDigestIndex::from_fasta(fasta_path, config.similarity.max_missed_cleavages)?;
+        Ok(Self {
+            config,
+            tagger,
+            index,
+        })
     }
 
     /// Classify a single PSM: tag its group and determine similarity level.
     pub fn classify(&self, psm: &UnifiedPsm) -> Result<ClassifiedPsm, EntrapmentError> {
         let group = self.tagger.tag(&psm.protein_ids)?;
-        Ok(classify_single(psm, group, &self.index, &self.config.similarity))
+        Ok(classify_single(
+            psm,
+            group,
+            &self.index,
+            &self.config.similarity,
+        ))
     }
 
     /// Classify a batch of PSMs.
@@ -70,10 +77,8 @@ impl EntrapmentAnalyzer {
         let mut ambiguous_psms = 0usize;
 
         // Track L0 razor families
-        let mut razor_families: std::collections::HashMap<
-            String,
-            (usize, String, String, String),
-        > = std::collections::HashMap::new();
+        let mut razor_families: std::collections::HashMap<String, (usize, String, String, String)> =
+            std::collections::HashMap::new();
 
         for cp in classified {
             match cp.group {

@@ -162,12 +162,11 @@ impl EntrapmentConfig {
     ///
     /// The file is read to a string, parsed, and then validated.
     pub fn from_yaml(path: &Path) -> Result<Self, EntrapmentError> {
-        let contents = std::fs::read_to_string(path).map_err(|e| {
-            EntrapmentError::ConfigIoError {
+        let contents =
+            std::fs::read_to_string(path).map_err(|e| EntrapmentError::ConfigIoError {
                 path: path.to_path_buf(),
                 detail: e.to_string(),
-            }
-        })?;
+            })?;
         let config: Self =
             serde_yaml::from_str(&contents).map_err(|e| EntrapmentError::ConfigError {
                 detail: format!("YAML parse error in {}: {e}", path.display()),
@@ -193,10 +192,7 @@ impl EntrapmentConfig {
     pub fn validate(&self) -> Result<(), EntrapmentError> {
         if self.version != 1 {
             return Err(EntrapmentError::ConfigError {
-                detail: format!(
-                    "unsupported config version {}, expected 1",
-                    self.version
-                ),
+                detail: format!("unsupported config version {}, expected 1", self.version),
             });
         }
         if self.target.rules.is_empty() {
@@ -252,8 +248,8 @@ similarity:
 
     #[test]
     fn test_parse_minimal_config() {
-        let cfg = EntrapmentConfig::from_yaml_str(MINIMAL_YAML)
-            .expect("minimal config should parse");
+        let cfg =
+            EntrapmentConfig::from_yaml_str(MINIMAL_YAML).expect("minimal config should parse");
 
         assert_eq!(cfg.version, 1);
         assert_eq!(cfg.target.rules.len(), 1);
@@ -270,8 +266,7 @@ similarity:
 
     #[test]
     fn test_parse_full_config() {
-        let cfg = EntrapmentConfig::from_yaml_str(FULL_YAML)
-            .expect("full config should parse");
+        let cfg = EntrapmentConfig::from_yaml_str(FULL_YAML).expect("full config should parse");
 
         assert_eq!(cfg.version, 1);
         assert_eq!(cfg.target.rules.len(), 2);
@@ -321,8 +316,7 @@ trap:
     - type: AccessionContains
       any_of: ["_YEAST"]
 "#;
-        let err = EntrapmentConfig::from_yaml_str(yaml)
-            .expect_err("version 2 should be rejected");
+        let err = EntrapmentConfig::from_yaml_str(yaml).expect_err("version 2 should be rejected");
         let msg = err.to_string();
         assert!(
             msg.contains("unsupported config version 2"),

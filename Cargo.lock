@@ -1669,6 +1669,7 @@ name = "protein-copilot-integration-tests"
 version = "0.1.0"
 dependencies = [
  "protein-copilot-core",
+ "protein-copilot-entrapment-analysis",
  "protein-copilot-fdr",
  "protein-copilot-param-recommend",
  "protein-copilot-report",

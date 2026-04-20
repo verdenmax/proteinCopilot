@@ -193,11 +193,7 @@ impl Tagger {
 /// Check whether `accession` is in the explicit accession set **or** matches
 /// any of the compiled matchers.  Accession-set lookup (exact match) is
 /// checked first for performance.
-fn matches_any(
-    accession: &str,
-    matchers: &[Matcher],
-    accession_set: &HashSet<String>,
-) -> bool {
+fn matches_any(accession: &str, matchers: &[Matcher], accession_set: &HashSet<String>) -> bool {
     // Exact accession set first
     if accession_set.contains(accession) {
         return true;
@@ -222,10 +218,7 @@ fn matches_any(
 }
 
 /// Load accessions from a FASTA file via the search-engine crate parser.
-fn load_fasta_accessions(
-    path: &Path,
-    set: &mut HashSet<String>,
-) -> Result<(), EntrapmentError> {
+fn load_fasta_accessions(path: &Path, set: &mut HashSet<String>) -> Result<(), EntrapmentError> {
     let entries = parse_fasta(path).map_err(|e| EntrapmentError::FastaError {
         path: path.to_path_buf(),
         detail: e.to_string(),
@@ -239,10 +232,7 @@ fn load_fasta_accessions(
 /// Load accessions from a plain-text file (one per line).
 ///
 /// Empty lines and lines starting with `#` are skipped.
-fn load_accession_list(
-    path: &Path,
-    set: &mut HashSet<String>,
-) -> Result<(), EntrapmentError> {
+fn load_accession_list(path: &Path, set: &mut HashSet<String>) -> Result<(), EntrapmentError> {
     let file = std::fs::File::open(path).map_err(|e| EntrapmentError::IoError {
         path: path.to_path_buf(),
         detail: e.to_string(),
@@ -313,15 +303,11 @@ mod tests {
         let tagger = Tagger::new(&config).expect("tagger should build");
 
         assert_eq!(
-            tagger
-                .tag("sp|P12345|EF1A_HUMAN")
-                .expect("should classify"),
+            tagger.tag("sp|P12345|EF1A_HUMAN").expect("should classify"),
             PsmGroup::Target
         );
         assert_eq!(
-            tagger
-                .tag("sp|P99999|FAKE_YEAST")
-                .expect("should classify"),
+            tagger.tag("sp|P99999|FAKE_YEAST").expect("should classify"),
             PsmGroup::Trap
         );
     }
@@ -444,15 +430,11 @@ mod tests {
         let tagger = Tagger::new(&config).expect("tagger should build");
 
         assert_eq!(
-            tagger
-                .tag("sp|P12345|EF1A_HUMAN")
-                .expect("should classify"),
+            tagger.tag("sp|P12345|EF1A_HUMAN").expect("should classify"),
             PsmGroup::Target
         );
         assert_eq!(
-            tagger
-                .tag("sp|P99999|FAKE_YEAST")
-                .expect("should classify"),
+            tagger.tag("sp|P99999|FAKE_YEAST").expect("should classify"),
             PsmGroup::Trap
         );
         // "tr|..." does not match "^sp\|" → unmatched → Target (Ignore policy)

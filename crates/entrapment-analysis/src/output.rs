@@ -62,10 +62,12 @@ pub fn file_sha256(path: &Path) -> Result<String, EntrapmentError> {
     let mut buf = [0u8; 8192];
 
     loop {
-        let n = reader.read(&mut buf).map_err(|e| EntrapmentError::IoError {
-            path: path.to_path_buf(),
-            detail: e.to_string(),
-        })?;
+        let n = reader
+            .read(&mut buf)
+            .map_err(|e| EntrapmentError::IoError {
+                path: path.to_path_buf(),
+                detail: e.to_string(),
+            })?;
         if n == 0 {
             break;
         }
@@ -73,10 +75,7 @@ pub fn file_sha256(path: &Path) -> Result<String, EntrapmentError> {
     }
 
     let hash = hasher.finalize();
-    let hex = hash
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect::<String>();
+    let hex = hash.iter().map(|b| format!("{b:02x}")).collect::<String>();
 
     Ok(hex)
 }
@@ -97,9 +96,7 @@ pub fn write_classified_tsv(psms: &[ClassifiedPsm], path: &Path) -> Result<(), E
         path: path.to_path_buf(),
         detail: e.to_string(),
     })?;
-    let mut wtr = csv::WriterBuilder::new()
-        .delimiter(b'\t')
-        .from_writer(file);
+    let mut wtr = csv::WriterBuilder::new().delimiter(b'\t').from_writer(file);
 
     // Header
     wtr.write_record([
@@ -159,22 +156,25 @@ pub fn write_classified_tsv(psms: &[ClassifiedPsm], path: &Path) -> Result<(), E
 /// Filters to only PSMs where `group == Trap` **and** `level == L0`.
 ///
 /// Headers: peptide, current_protein, suggested_target_protein, reason.
-pub fn write_razor_errors_tsv(
-    psms: &[ClassifiedPsm],
-    path: &Path,
-) -> Result<(), EntrapmentError> {
+pub fn write_razor_errors_tsv(psms: &[ClassifiedPsm], path: &Path) -> Result<(), EntrapmentError> {
     let file = File::create(path).map_err(|e| EntrapmentError::IoError {
         path: path.to_path_buf(),
         detail: e.to_string(),
     })?;
-    let mut wtr = csv::WriterBuilder::new()
-        .delimiter(b'\t')
-        .from_writer(file);
+    let mut wtr = csv::WriterBuilder::new().delimiter(b'\t').from_writer(file);
 
-    wtr.write_record(["peptide", "current_protein", "suggested_target_protein", "reason"])
-        .map_err(|e| EntrapmentError::OutputError {
-            detail: format!("failed to write razor TSV header to {}: {e}", path.display()),
-        })?;
+    wtr.write_record([
+        "peptide",
+        "current_protein",
+        "suggested_target_protein",
+        "reason",
+    ])
+    .map_err(|e| EntrapmentError::OutputError {
+        detail: format!(
+            "failed to write razor TSV header to {}: {e}",
+            path.display()
+        ),
+    })?;
 
     let mut count = 0usize;
     for cp in psms {
@@ -207,9 +207,10 @@ pub fn write_razor_errors_tsv(
 
 /// Write run metadata as pretty-printed JSON (2-space indent).
 pub fn write_run_metadata(metadata: &RunMetadata, path: &Path) -> Result<(), EntrapmentError> {
-    let json = serde_json::to_string_pretty(metadata).map_err(|e| EntrapmentError::OutputError {
-        detail: format!("failed to serialise run metadata: {e}"),
-    })?;
+    let json =
+        serde_json::to_string_pretty(metadata).map_err(|e| EntrapmentError::OutputError {
+            detail: format!("failed to serialise run metadata: {e}"),
+        })?;
 
     let mut file = File::create(path).map_err(|e| EntrapmentError::IoError {
         path: path.to_path_buf(),
@@ -245,7 +246,7 @@ fn opt_to_string<T: std::fmt::Display>(opt: &Option<T>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{UnifiedPsm, PsmGroup, DiscriminabilityLevel};
+    use crate::types::{DiscriminabilityLevel, PsmGroup, UnifiedPsm};
 
     fn make_classified_psm(
         peptide: &str,
@@ -305,7 +306,9 @@ mod tests {
         // sha256("hello world\n") = a948904f2f0f479b8f8564e9d7d5a26e6b1cd5ad9c8e4e3e3b1f2...
         // Verify it's a 64-char lowercase hex string
         assert_eq!(hash.len(), 64);
-        assert!(hash.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
+        assert!(hash
+            .chars()
+            .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
     }
 
     #[test]
@@ -320,8 +323,18 @@ mod tests {
         let path = dir.path().join("classified.tsv");
 
         let psms = vec![
-            make_classified_psm("PEPTIDEK", "sp|P001|TRAP_YEAST", PsmGroup::Trap, DiscriminabilityLevel::L0),
-            make_classified_psm("ANOTHERK", "sp|P002|TARGET_HUMAN", PsmGroup::Target, DiscriminabilityLevel::L4),
+            make_classified_psm(
+                "PEPTIDEK",
+                "sp|P001|TRAP_YEAST",
+                PsmGroup::Trap,
+                DiscriminabilityLevel::L0,
+            ),
+            make_classified_psm(
+                "ANOTHERK",
+                "sp|P002|TARGET_HUMAN",
+                PsmGroup::Target,
+                DiscriminabilityLevel::L4,
+            ),
         ];
 
         write_classified_tsv(&psms, &path).expect("write TSV");
@@ -386,11 +399,26 @@ mod tests {
 
         let psms = vec![
             // L0 trap — should be included
-            make_classified_psm("PEPTIDEK", "sp|P001|TRAP_YEAST", PsmGroup::Trap, DiscriminabilityLevel::L0),
+            make_classified_psm(
+                "PEPTIDEK",
+                "sp|P001|TRAP_YEAST",
+                PsmGroup::Trap,
+                DiscriminabilityLevel::L0,
+            ),
             // L4 trap — should NOT be included
-            make_classified_psm("ANOTHERK", "sp|P002|TRAP_YEAST", PsmGroup::Trap, DiscriminabilityLevel::L4),
+            make_classified_psm(
+                "ANOTHERK",
+                "sp|P002|TRAP_YEAST",
+                PsmGroup::Trap,
+                DiscriminabilityLevel::L4,
+            ),
             // L0 target — should NOT be included (wrong group)
-            make_classified_psm("TARGETPK", "sp|P003|TARGET_HUMAN", PsmGroup::Target, DiscriminabilityLevel::L0),
+            make_classified_psm(
+                "TARGETPK",
+                "sp|P003|TARGET_HUMAN",
+                PsmGroup::Target,
+                DiscriminabilityLevel::L0,
+            ),
         ];
 
         write_razor_errors_tsv(&psms, &path).expect("write razor TSV");
@@ -410,9 +438,12 @@ mod tests {
         let dir = tempfile::tempdir().expect("create temp dir");
         let path = dir.path().join("razor_empty.tsv");
 
-        let psms = vec![
-            make_classified_psm("PEPTIDEK", "sp|P001|TRAP_YEAST", PsmGroup::Trap, DiscriminabilityLevel::L4),
-        ];
+        let psms = vec![make_classified_psm(
+            "PEPTIDEK",
+            "sp|P001|TRAP_YEAST",
+            PsmGroup::Trap,
+            DiscriminabilityLevel::L4,
+        )];
 
         write_razor_errors_tsv(&psms, &path).expect("write razor TSV");
 
@@ -449,8 +480,7 @@ mod tests {
         write_run_metadata(&metadata, &path).expect("write metadata JSON");
 
         let content = std::fs::read_to_string(&path).expect("read JSON");
-        let parsed: serde_json::Value =
-            serde_json::from_str(&content).expect("parse JSON");
+        let parsed: serde_json::Value = serde_json::from_str(&content).expect("parse JSON");
 
         assert_eq!(parsed["tool_version"], "0.1.0");
         assert_eq!(parsed["total_psms"], 100);

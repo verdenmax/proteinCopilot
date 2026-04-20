@@ -188,8 +188,7 @@ fn run_analyze(
     // Build run metadata
     let summary = analyser.summary(&classified);
 
-    let config_snapshot =
-        serde_json::to_value(&config).unwrap_or(serde_json::Value::Null);
+    let config_snapshot = serde_json::to_value(&config).unwrap_or(serde_json::Value::Null);
 
     let metadata = RunMetadata {
         tool_version: env!("CARGO_PKG_VERSION").to_owned(),
@@ -257,8 +256,7 @@ fn run_inspect(
 
     // 2. Build TargetDigestIndex from FASTA
     info!(fasta = %fasta_path.display(), "building target digest index");
-    let index =
-        TargetDigestIndex::from_fasta(fasta_path, similarity_config.max_missed_cleavages)?;
+    let index = TargetDigestIndex::from_fasta(fasta_path, similarity_config.max_missed_cleavages)?;
     info!(peptides = index.len(), "target digest index ready");
 
     // 3. Create dummy UnifiedPsm with the peptide
@@ -282,17 +280,11 @@ fn run_inspect(
     println!("Level:             {}", result.level);
     println!(
         "Best target match: {}",
-        result
-            .best_target_peptide
-            .as_deref()
-            .unwrap_or("(none)")
+        result.best_target_peptide.as_deref().unwrap_or("(none)")
     );
     println!(
         "Best target prot:  {}",
-        result
-            .best_target_protein
-            .as_deref()
-            .unwrap_or("(none)")
+        result.best_target_protein.as_deref().unwrap_or("(none)")
     );
     println!(
         "Mismatches:        {}",
@@ -310,10 +302,7 @@ fn run_inspect(
     );
     println!(
         "Diff positions:    {}",
-        result
-            .diff_positions
-            .as_deref()
-            .unwrap_or("N/A")
+        result.diff_positions.as_deref().unwrap_or("N/A")
     );
 
     Ok(())

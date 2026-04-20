@@ -83,7 +83,10 @@ mod tests {
         // .parquet → DiannParquet
         let fmt = ResultFormat::from_path(Path::new("report.parquet"));
         assert!(fmt.is_ok());
-        assert!(matches!(fmt.as_ref().ok(), Some(ResultFormat::DiannParquet)));
+        assert!(matches!(
+            fmt.as_ref().ok(),
+            Some(ResultFormat::DiannParquet)
+        ));
 
         // .tsv → GenericTsv
         let fmt = ResultFormat::from_path(Path::new("results.tsv"));
@@ -105,7 +108,10 @@ mod tests {
 
         // Case-insensitive
         let fmt = ResultFormat::from_path(Path::new("report.PARQUET"));
-        assert!(matches!(fmt.as_ref().ok(), Some(ResultFormat::DiannParquet)));
+        assert!(matches!(
+            fmt.as_ref().ok(),
+            Some(ResultFormat::DiannParquet)
+        ));
     }
 
     #[test]
@@ -128,11 +134,13 @@ mod tests {
             writeln!(
                 f,
                 "PEPTIDEK\t2\t450.123\t12.5\t1001\trun1.raw\tP12345;P67890\t0.01"
-            ).unwrap();
+            )
+            .unwrap();
             writeln!(
                 f,
                 "ANOTHERPEPTIDE\t3\t600.789\t25.3\t2002\trun2.raw\tQ11111\t0.005"
-            ).unwrap();
+            )
+            .unwrap();
         }
 
         let map = TsvColumnMap::default();
