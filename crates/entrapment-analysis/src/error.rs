@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
+#[allow(clippy::enum_variant_names)]
 pub enum EntrapmentError {
     #[error("config error: {detail}")]
     ConfigError { detail: String },
@@ -26,4 +27,7 @@ pub enum EntrapmentError {
 
     #[error("report error: {detail}")]
     ReportError { detail: String },
+
+    #[error("tagging error: {detail}")]
+    TaggingError { detail: String },
 }
