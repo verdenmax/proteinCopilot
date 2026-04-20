@@ -651,6 +651,36 @@ struct ImportSearchResultsInput {
     run_filter: Option<String>,
 }
 
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct ClassifyEntrapmentHitsInput {
+    /// Path to search results file (.parquet for DIA-NN or .tsv)
+    results_file: String,
+    /// Result format override. Auto-detects from extension if omitted.
+    format: Option<String>,
+    /// Path to YAML config file defining target/trap rules
+    config_file: String,
+    /// Path to target FASTA database
+    target_fasta: String,
+    /// Output directory (default: ./output/entrapment/)
+    output_dir: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct AnalyzeEntrapmentStatsInput {
+    /// Path to classified TSV file (output from classify_entrapment_hits)
+    classified_file: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct FindSimilarTargetsInput {
+    /// Peptide sequence to look up
+    peptide: String,
+    /// Path to target FASTA database
+    target_fasta: String,
+    /// Maximum mismatches to consider (default: 2)
+    max_mismatches: Option<u16>,
+}
+
 fn default_import_format() -> String {
     "auto".to_string()
 }
@@ -3286,5 +3316,212 @@ impl ProteinCopilotServer {
             suggestions: diag.suggestions.clone(),
             total_elapsed_sec: diag.total_elapsed_sec,
         }))
+    }
+
+    // -----------------------------------------------------------------------
+    // Entrapment analysis tools
+    // -----------------------------------------------------------------------
+
+    #[rmcp::tool(
+        name = "classify_entrapment_hits",
+        description = "Classify trap-database PSM hits by homology to target proteome. Reads search results, applies target/trap rules from YAML config, digests target FASTA, and classifies each trap PSM as L0-L4. Outputs classified.tsv, razor_errors.tsv, run_metadata.json, and entrapment_report.html. Returns summary statistics."
+    )]
+    fn classify_entrapment_hits(
+        &self,
+        Parameters(input): Parameters<ClassifyEntrapmentHitsInput>,
+    ) -> Result<Json<serde_json::Value>, ErrorData> {
+        use protein_copilot_entrapment_analysis::{
+            config::EntrapmentConfig,
+            loader::{self, ResultFormat},
+            output::{self, RunMetadata},
+            EntrapmentAnalyzer,
+        };
+
+        let config = EntrapmentConfig::from_yaml(std::path::Path::new(&input.config_file))
+            .map_err(|e| ErrorData::new(ErrorCode::INVALID_PARAMS, format!("{e}"), None))?;
+
+        let format = match input.format.as_deref() {
+            Some("diann_parquet") => ResultFormat::DiannParquet,
+            Some("generic_tsv") => ResultFormat::GenericTsv,
+            _ => ResultFormat::from_path(std::path::Path::new(&input.results_file))
+                .map_err(|e| ErrorData::new(ErrorCode::INVALID_PARAMS, format!("{e}"), None))?,
+        };
+
+        let psms = loader::load_psms(std::path::Path::new(&input.results_file), &format, None)
+            .map_err(|e| ErrorData::new(ErrorCode::INTERNAL_ERROR, format!("{e}"), None))?;
+
+        let analyzer = EntrapmentAnalyzer::new(config.clone(), std::path::Path::new(&input.target_fasta))
+            .map_err(|e| ErrorData::new(ErrorCode::INTERNAL_ERROR, format!("{e}"), None))?;
+
+        let classified = analyzer.classify_all(&psms)
+            .map_err(|e| ErrorData::new(ErrorCode::INTERNAL_ERROR, format!("{e}"), None))?;
+
+        let summary = analyzer.summary(&classified);
+
+        let out_dir = std::path::PathBuf::from(input.output_dir.unwrap_or_else(|| "output/entrapment".to_string()));
+        std::fs::create_dir_all(&out_dir)
+            .map_err(|e| ErrorData::new(ErrorCode::INTERNAL_ERROR, format!("create output dir: {e}"), None))?;
+
+        output::write_classified_tsv(&classified, &out_dir.join("classified.tsv"))
+            .map_err(|e| ErrorData::new(ErrorCode::INTERNAL_ERROR, format!("{e}"), None))?;
+
+        output::write_razor_errors_tsv(&classified, &out_dir.join("razor_errors.tsv"))
+            .map_err(|e| ErrorData::new(ErrorCode::INTERNAL_ERROR, format!("{e}"), None))?;
+
+        let metadata = RunMetadata {
+            tool_version: env!("CARGO_PKG_VERSION").to_string(),
+            run_timestamp: chrono::Utc::now().to_rfc3339(),
+            input_file: input.results_file.clone(),
+            input_sha256: output::file_sha256(std::path::Path::new(&input.results_file))
+                .unwrap_or_else(|_| "unknown".to_string()),
+            fasta_file: input.target_fasta.clone(),
+            fasta_sha256: output::file_sha256(std::path::Path::new(&input.target_fasta))
+                .unwrap_or_else(|_| "unknown".to_string()),
+            config_snapshot: serde_json::to_value(&config).unwrap_or_default(),
+            total_psms: summary.total_psms,
+            trap_psms: summary.trap_psms,
+            level_counts: summary.level_counts.clone(),
+        };
+        output::write_run_metadata(&metadata, &out_dir.join("run_metadata.json"))
+            .map_err(|e| ErrorData::new(ErrorCode::INTERNAL_ERROR, format!("{e}"), None))?;
+
+        protein_copilot_entrapment_analysis::report::render_report(
+            &summary,
+            &classified,
+            &out_dir.join("entrapment_report.html"),
+        )
+        .map_err(|e| ErrorData::new(ErrorCode::INTERNAL_ERROR, format!("{e}"), None))?;
+
+        Ok(Json(serde_json::to_value(&summary).unwrap_or_default()))
+    }
+
+    #[rmcp::tool(
+        name = "analyze_entrapment_stats",
+        description = "Get detailed statistics from a classified entrapment TSV file. Returns level distribution, protein family clusters, and delta-mass analysis. Use after classify_entrapment_hits to interpret results."
+    )]
+    fn analyze_entrapment_stats(
+        &self,
+        Parameters(input): Parameters<AnalyzeEntrapmentStatsInput>,
+    ) -> Result<Json<serde_json::Value>, ErrorData> {
+        // Read the classified TSV and compute stats
+        let path = std::path::Path::new(&input.classified_file);
+        let mut rdr = csv::ReaderBuilder::new()
+            .delimiter(b'\t')
+            .from_path(path)
+            .map_err(|e| ErrorData::new(ErrorCode::INVALID_PARAMS, format!("cannot read file: {e}"), None))?;
+
+        let headers = rdr.headers()
+            .map_err(|e| ErrorData::new(ErrorCode::INVALID_PARAMS, format!("cannot read headers: {e}"), None))?
+            .clone();
+
+        let level_idx = headers.iter().position(|h| h == "level");
+        let delta_idx = headers.iter().position(|h| h == "delta_mass_da");
+        let target_protein_idx = headers.iter().position(|h| h == "best_target_protein");
+
+        let mut level_counts = std::collections::HashMap::<String, usize>::new();
+        let mut delta_masses: Vec<f64> = Vec::new();
+        let mut protein_families = std::collections::HashMap::<String, usize>::new();
+        let mut total = 0usize;
+
+        for result in rdr.records() {
+            let record = result
+                .map_err(|e| ErrorData::new(ErrorCode::INTERNAL_ERROR, format!("parse row: {e}"), None))?;
+            total += 1;
+
+            if let Some(idx) = level_idx {
+                if let Some(level) = record.get(idx) {
+                    *level_counts.entry(level.to_string()).or_insert(0) += 1;
+                }
+            }
+            if let Some(idx) = delta_idx {
+                if let Some(delta_str) = record.get(idx) {
+                    if let Ok(d) = delta_str.parse::<f64>() {
+                        delta_masses.push(d);
+                    }
+                }
+            }
+            if let Some(idx) = target_protein_idx {
+                if let Some(target_protein) = record.get(idx) {
+                    if !target_protein.is_empty() {
+                        let family = target_protein.split('|').nth(2)
+                            .and_then(|s| s.split('_').next())
+                            .unwrap_or(target_protein)
+                            .to_string();
+                        *protein_families.entry(family).or_insert(0) += 1;
+                    }
+                }
+            }
+        }
+
+        let mut top_families: Vec<_> = protein_families.into_iter().collect();
+        top_families.sort_by(|a, b| b.1.cmp(&a.1));
+        top_families.truncate(20);
+
+        let stats = serde_json::json!({
+            "total_classified": total,
+            "level_distribution": level_counts,
+            "delta_mass_stats": {
+                "count": delta_masses.len(),
+                "min": if delta_masses.is_empty() { 0.0 } else { delta_masses.iter().copied().fold(f64::INFINITY, f64::min) },
+                "max": if delta_masses.is_empty() { 0.0 } else { delta_masses.iter().copied().fold(f64::NEG_INFINITY, f64::max) },
+                "mean": if delta_masses.is_empty() { 0.0 } else { delta_masses.iter().sum::<f64>() / delta_masses.len() as f64 },
+            },
+            "top_protein_families": top_families,
+        });
+
+        Ok(Json(stats))
+    }
+
+    #[rmcp::tool(
+        name = "find_similar_targets",
+        description = "Find similar target peptides for a given sequence. Digests the target FASTA, compares the query peptide against all same-length target peptides using Hamming distance, and returns the closest matches with mass differences. Useful for investigating individual trap PSMs."
+    )]
+    fn find_similar_targets(
+        &self,
+        Parameters(input): Parameters<FindSimilarTargetsInput>,
+    ) -> Result<Json<serde_json::Value>, ErrorData> {
+        use protein_copilot_entrapment_analysis::{
+            config::SimilarityConfig,
+            digest::TargetDigestIndex,
+            similarity::classify_single,
+            types::{PsmGroup, UnifiedPsm},
+        };
+
+        let max_mm = input.max_mismatches.unwrap_or(2);
+        let sim_config = SimilarityConfig {
+            max_mismatches: max_mm,
+            ..SimilarityConfig::default()
+        };
+
+        let index = TargetDigestIndex::from_fasta(
+            std::path::Path::new(&input.target_fasta),
+            sim_config.max_missed_cleavages,
+        ).map_err(|e| ErrorData::new(ErrorCode::INTERNAL_ERROR, format!("{e}"), None))?;
+
+        let psm = UnifiedPsm {
+            peptide: input.peptide.clone(),
+            charge: None,
+            precursor_mz: None,
+            retention_time: None,
+            scan_number: None,
+            spectrum_file: None,
+            protein_ids: String::new(),
+            q_value: None,
+        };
+
+        let result = classify_single(&psm, PsmGroup::Trap, &index, &sim_config);
+
+        let output = serde_json::json!({
+            "peptide": input.peptide,
+            "level": result.level.as_str(),
+            "best_target_peptide": result.best_target_peptide,
+            "best_target_protein": result.best_target_protein,
+            "mismatches": result.mismatches,
+            "delta_mass_da": result.delta_mass_da,
+            "diff_positions": result.diff_positions,
+            "index_size": index.len(),
+        });
+
+        Ok(Json(output))
     }
 }

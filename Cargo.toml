@@ -56,3 +56,16 @@ sha2 = "0.10"
 
 # Internal
 protein-copilot-fasta-db = { path = "crates/fasta-db" }
+
+# Entrapment analysis
+protein-copilot-entrapment-analysis = { path = "crates/entrapment-analysis" }
+protein-copilot-entrapment-cli = { path = "crates/entrapment-cli" }
+
+# YAML config
+serde_yaml = "0.9"
+
+# CSV I/O
+csv = "1"
+
+# CLI
+clap = { version = "4", features = ["derive"] }
