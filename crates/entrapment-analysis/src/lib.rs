@@ -4,6 +4,11 @@
 //! razor attribution errors, L/I isomers, near-identical homologs, and true trap hits.
 
 pub mod config;
+pub mod digest;
 pub mod error;
+pub mod types;
 
 pub use error::EntrapmentError;
+pub use types::{
+    ClassifiedPsm, DiscriminabilityLevel, EntrapmentSummary, LevelCounts, PsmGroup, UnifiedPsm,
+};
