@@ -8,6 +8,7 @@ pub mod digest;
 pub mod error;
 pub mod loader;
 pub mod output;
+pub mod report;
 pub mod similarity;
 pub mod tagger;
 pub mod types;
