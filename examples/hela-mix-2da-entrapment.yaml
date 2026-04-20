@@ -1,0 +1,26 @@
+# Entrapment analysis config for HeLa + mixed-species trap experiment
+# Target: Human SwissProt proteins
+# Trap: everything else (non-human entrapment database)
+
+version: 1
+
+target:
+  rules:
+    - type: Fasta
+      path: .proteincopilot/databases/human_swissprot.fasta
+
+trap:
+  rules:
+    - type: AccessionRegex
+      pattern: ".*"
+
+# Proteins not in human FASTA → trap
+unmatched: trap
+
+# If a protein matches both target and trap, prefer target
+conflict_resolution: prefer_target
+
+similarity:
+  max_mismatches: 2
+  delta_mz_threshold_da: 1.0
+  max_missed_cleavages: 2

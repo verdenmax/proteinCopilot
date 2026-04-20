@@ -18,6 +18,7 @@ use protein_copilot_entrapment_analysis::loader::{self, ResultFormat};
 use protein_copilot_entrapment_analysis::output::{
     file_sha256, write_classified_tsv, write_razor_errors_tsv, write_run_metadata, RunMetadata,
 };
+use protein_copilot_entrapment_analysis::report;
 use protein_copilot_entrapment_analysis::similarity::classify_single;
 use protein_copilot_entrapment_analysis::{EntrapmentAnalyzer, PsmGroup, UnifiedPsm};
 
@@ -206,7 +207,12 @@ fn run_analyze(
     let metadata_path = out_dir.join("run_metadata.json");
     write_run_metadata(&metadata, &metadata_path)?;
 
-    // 8. Print summary to stdout
+    // 8. Generate HTML report
+    let report_path = out_dir.join("entrapment_report.html");
+    report::render_report(&summary, &classified, &report_path)?;
+    info!(path = %report_path.display(), "HTML report generated");
+
+    // 9. Print summary to stdout
     println!("=== Entrapment Analysis Summary ===");
     println!("Total PSMs:     {}", summary.total_psms);
     println!("  Target:       {}", summary.target_psms);

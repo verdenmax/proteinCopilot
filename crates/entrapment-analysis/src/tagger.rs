@@ -218,15 +218,39 @@ fn matches_any(accession: &str, matchers: &[Matcher], accession_set: &HashSet<St
 }
 
 /// Load accessions from a FASTA file via the search-engine crate parser.
+///
+/// For UniProt-format headers like `sp|P12345|ALBU_HUMAN`, inserts both
+/// the full accession (`sp|P12345|ALBU_HUMAN`) and the bare UniProt ID
+/// (`P12345`) so that either format in search results will match.
 fn load_fasta_accessions(path: &Path, set: &mut HashSet<String>) -> Result<(), EntrapmentError> {
     let entries = parse_fasta(path).map_err(|e| EntrapmentError::FastaError {
         path: path.to_path_buf(),
         detail: e.to_string(),
     })?;
     for entry in entries {
+        // Extract bare UniProt ID from "sp|P12345|NAME_SPECIES" or "tr|P12345|..."
+        if let Some(bare_id) = extract_uniprot_id(&entry.accession) {
+            set.insert(bare_id.to_string());
+        }
         set.insert(entry.accession);
     }
     Ok(())
+}
+
+/// Extract the bare UniProt accession from a `db|ACCESSION|ENTRY_NAME` string.
+///
+/// Returns `Some("P12345")` for `"sp|P12345|ALBU_HUMAN"`, `None` for
+/// accessions that don't follow this format.
+fn extract_uniprot_id(accession: &str) -> Option<&str> {
+    let parts: Vec<&str> = accession.split('|').collect();
+    if parts.len() >= 2
+        && (parts[0] == "sp" || parts[0] == "tr")
+        && !parts[1].is_empty()
+    {
+        Some(parts[1])
+    } else {
+        None
+    }
 }
 
 /// Load accessions from a plain-text file (one per line).
