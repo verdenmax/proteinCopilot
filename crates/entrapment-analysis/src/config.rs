@@ -118,7 +118,7 @@ pub struct SimilarityConfig {
     /// Maximum number of amino-acid mismatches allowed before considering
     /// two peptides distinct.
     #[serde(default = "default_max_mismatches")]
-    pub max_mismatches: u8,
+    pub max_mismatches: u16,
 
     /// Precursor m/z tolerance (Da) for linking similar peptides.
     #[serde(default = "default_delta_mz_threshold_da")]
@@ -133,7 +133,7 @@ pub struct SimilarityConfig {
     pub max_missed_cleavages: u32,
 }
 
-fn default_max_mismatches() -> u8 {
+fn default_max_mismatches() -> u16 {
     2
 }
 fn default_delta_mz_threshold_da() -> f64 {

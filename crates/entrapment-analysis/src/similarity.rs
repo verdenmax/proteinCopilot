@@ -22,12 +22,12 @@ use crate::types::{ClassifiedPsm, DiscriminabilityLevel, PsmGroup, UnifiedPsm};
 ///   for that position is 0.0.
 /// - `diff_positions_string`: formatted as `"[pos:X->Y,pos2:A->B]"` (0-indexed).
 ///   Empty string `""` when there are no mismatches.
-pub fn hamming_diff(a: &str, b: &str) -> Option<(u8, f64, String)> {
+pub fn hamming_diff(a: &str, b: &str) -> Option<(u16, f64, String)> {
     if a.len() != b.len() {
         return None;
     }
 
-    let mut mismatches: u8 = 0;
+    let mut mismatches: u16 = 0;
     let mut delta_mass: f64 = 0.0;
     let mut diffs: Vec<String> = Vec::new();
 
@@ -108,6 +108,20 @@ pub fn classify_single(
     // --- L1: L/I-normalized match (but NOT exact) -------------------------
     if index.has_normalized(&psm.peptide) {
         if let Some((orig, prot)) = index.normalized_match(&psm.peptide) {
+            // Defensive: if the original target == trap peptide, this is actually L0
+            // (should have been caught above, but guard against index inconsistencies)
+            if orig == psm.peptide {
+                return ClassifiedPsm {
+                    psm: psm.clone(),
+                    group,
+                    level: DiscriminabilityLevel::L0,
+                    best_target_peptide: Some(psm.peptide.clone()),
+                    best_target_protein: Some(prot.to_owned()),
+                    mismatches: Some(0),
+                    delta_mass_da: Some(0.0),
+                    diff_positions: Some(String::new()),
+                };
+            }
             let (mm, dm, dp) = hamming_diff(&psm.peptide, orig).unwrap_or((0, 0.0, String::new()));
             return ClassifiedPsm {
                 psm: psm.clone(),
@@ -125,7 +139,7 @@ pub fn classify_single(
     // --- L2/L3/L4: brute-force hamming scan -------------------------------
     let candidates = index.peptides_of_length(psm.peptide.len());
 
-    let mut best_mm: u8 = u8::MAX;
+    let mut best_mm: u16 = u16::MAX;
     let mut best_dm: f64 = f64::MAX;
     let mut best_dp = String::new();
     let mut best_seq: Option<&str> = None;
@@ -160,7 +174,7 @@ pub fn classify_single(
     }
 
     // Decide level from best match
-    if best_mm == u8::MAX {
+    if best_mm == u16::MAX {
         // No close match found → L4
         return ClassifiedPsm {
             psm: psm.clone(),

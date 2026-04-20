@@ -238,9 +238,7 @@ fn run_report(
     _classified_path: &str,
     _out_path: Option<&str>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    println!("Report regeneration not yet implemented (see Task 10).");
-    println!("The HTML report module will be added in a future update.");
-    Ok(())
+    Err("Report regeneration not yet implemented (see Task 10). Use 'analyze' subcommand which generates the HTML report automatically.".into())
 }
 
 /// Inspect a single peptide's similarity to the target database.

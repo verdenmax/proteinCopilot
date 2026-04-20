@@ -122,7 +122,9 @@ pub fn render_report(
         detail: format!("JSON serialization failed: {e}"),
     })?;
 
-    let html = TEMPLATE.replace(DATA_PLACEHOLDER, &json);
+    // Escape "</script>" sequences in JSON to prevent HTML injection (I5)
+    let safe_json = json.replace("</", "<\\/");
+    let html = TEMPLATE.replace(DATA_PLACEHOLDER, &safe_json);
 
     if let Some(parent) = output_path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| EntrapmentError::ReportError {

@@ -678,7 +678,7 @@ struct FindSimilarTargetsInput {
     /// Path to target FASTA database
     target_fasta: String,
     /// Maximum mismatches to consider (default: 2)
-    max_mismatches: Option<u8>,
+    max_mismatches: Option<u16>,
 }
 
 fn default_import_format() -> String {
@@ -3462,8 +3462,8 @@ impl ProteinCopilotServer {
             "level_distribution": level_counts,
             "delta_mass_stats": {
                 "count": delta_masses.len(),
-                "min": delta_masses.iter().copied().fold(f64::INFINITY, f64::min),
-                "max": delta_masses.iter().copied().fold(f64::NEG_INFINITY, f64::max),
+                "min": if delta_masses.is_empty() { 0.0 } else { delta_masses.iter().copied().fold(f64::INFINITY, f64::min) },
+                "max": if delta_masses.is_empty() { 0.0 } else { delta_masses.iter().copied().fold(f64::NEG_INFINITY, f64::max) },
                 "mean": if delta_masses.is_empty() { 0.0 } else { delta_masses.iter().sum::<f64>() / delta_masses.len() as f64 },
             },
             "top_protein_families": top_families,

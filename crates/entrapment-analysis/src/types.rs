@@ -109,7 +109,7 @@ pub struct ClassifiedPsm {
     /// Protein accession of the best target match.
     pub best_target_protein: Option<String>,
     /// Hamming distance (number of mismatched positions) to the best target peptide.
-    pub mismatches: Option<u8>,
+    pub mismatches: Option<u16>,
     /// Mass difference to the best target peptide in Da.
     pub delta_mass_da: Option<f64>,
     /// Human-readable diff positions, e.g. `"[2:D->N,5:G->A]"`.
