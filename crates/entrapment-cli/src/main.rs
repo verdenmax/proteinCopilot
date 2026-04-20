@@ -52,8 +52,8 @@ enum Commands {
         /// Result format (auto-detect from extension if omitted)
         #[arg(short, long)]
         format: Option<FormatArg>,
-        /// Output directory (default: ./output)
-        #[arg(short, long, default_value = "output")]
+        /// Output directory (default: ./output/entrapment)
+        #[arg(short, long, default_value = "output/entrapment")]
         out: String,
     },
     /// Regenerate HTML report from classified TSV
