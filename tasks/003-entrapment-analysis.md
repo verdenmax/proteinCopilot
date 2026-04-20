@@ -32,11 +32,11 @@
 
 ### 1.3 非目标（v2 或更后）
 
+- **不等长序列比对**：v1 的 L2/L3 仅比较等长肽段（Hamming distance），遗漏了不等长的同源物。v2 应升级为 edit distance（Levenshtein）或序列比对算法，使 L2/L3 能检测 indel 导致的不等长同源 → v2
 - **Q/K 近等质量检测**：Q↔K 替换 Δm=36.4 mDa，MS1 在高电荷态（z≥3）时难以区分；需在 L1 中增加 near-isobaric 子类 → v2
 - **等质量二肽替换**：GG↔N (114.043 Da)、AG↔Q (128.059 Da)、AD↔EG (186.064 Da) 等不等长但等质量的替换，MS2 理论可分但实际困难 → v2
 - 共洗脱碎片溯源可视化（需 mzML，复杂度高）→ v2
 - 修饰感知的序列比对 → v2
-- Indel（插入/删除）比对 → v2
 - ML 模型训练与特征提取 → 独立模块
 - 定量层面分析（L/H ratio 提取等）→ 独立模块
 
@@ -61,9 +61,10 @@
 fn classify(trap_pep, target_peptides, config):
     1. L0: exact string match in target digest
     2. L1: L/I-normalized match (replace L↔I then compare)
-    3. Scan all target peptides of same length:
+    3. [v1: 等长 only] Scan all target peptides of same length:
        - compute hamming distance + delta_mass
        - best = min by hamming
+       [v2: 升级为 edit distance，扫描 len±2 范围的 target 肽段]
     4. if best.hamming == 1 && |delta_mass| < threshold → L2
     5. if best.hamming in {1,2} → L3
     6. else → L4
@@ -316,13 +317,29 @@ find_similar_targets(peptide, target_fasta, max_mismatches?)
 | **P5 · HTML 报告** | 交互式 Plotly 报告 + 可筛选表格 + `report` 子命令 | 完整分析流程 |
 | **P6 · MCP Tools** | 3 个 MCP tool 集成到 mcp-server | LLM 可调用 |
 | **P7 · 扩展 Loader** | pFind / MSFragger 适配器（按需） | 多引擎支持 |
-| **[v2]** | Q/K 近等质量检测 · 等质量二肽替换 (GG↔N, AG↔Q, AD↔EG) · L1.5 子级实现 · 共洗脱溯源可视化 · 修饰感知比对 · indel 支持 | — |
+| **[v2]** | 不等长序列比对（edit distance）· Q/K 近等质量检测 · 等质量二肽替换 (GG↔N, AG↔Q, AD↔EG) · L1.5 子级实现 · 共洗脱溯源可视化 · 修饰感知比对 | — |
 
 ---
 
-## 10. v2 扩展：近等质量与等质量二肽替换
+## 10. v2 扩展
 
-### 10.1 Q/K 近等质量替换
+### 10.1 不等长序列比对（L2/L3 升级）
+
+**问题**：v1 的 L2/L3 仅使用 Hamming distance 比较等长肽段，遗漏了因 indel（插入/删除）导致长度不同但高度同源的 target 肽段。
+
+**现状（v1）**：
+- 数据结构：`by_length: HashMap<usize, Vec<TargetPeptide>>` —— 按长度分桶
+- 查询：只搜索 `peptides_of_length(trap_peptide.len())`
+- 不等长同源物直接落入 L4（误判为"真陷阱"）
+
+**升级方案（v2）**：
+- 将 Hamming distance 替换为 **Levenshtein edit distance**，支持插入/删除/替换操作
+- 扩展查询范围：搜索 `len-2..=len+2` 的 target 肽段
+- edit distance ≤ max_mismatches 的匹配进入 L2/L3 判定
+- 需要计算对齐后的 Δm（考虑插入/删除残基的质量）
+- 性能考虑：edit distance O(mn) 比 hamming O(n) 慢，可能需要预筛（如 k-mer 过滤）
+
+### 10.2 Q/K 近等质量替换
 
 **问题**：Q (Gln, 128.0586 Da) 和 K (Lys, 128.0950 Da) 差异仅 36.4 mDa。
 
@@ -338,7 +355,7 @@ find_similar_targets(peptide, target_fasta, max_mismatches?)
 - 条件：hamming==1 且差异位是 Q↔K 替换 → 归入 L1.5
 - 可选：结合 PSM 的 charge 信息判断实际可分性
 
-### 10.2 等质量二肽替换
+### 10.3 等质量二肽替换
 
 **问题**：某些单氨基酸与二肽组合具有完全相同的残基质量：
 

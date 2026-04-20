@@ -3385,6 +3385,13 @@ impl ProteinCopilotServer {
         output::write_run_metadata(&metadata, &out_dir.join("run_metadata.json"))
             .map_err(|e| ErrorData::new(ErrorCode::INTERNAL_ERROR, format!("{e}"), None))?;
 
+        protein_copilot_entrapment_analysis::report::render_report(
+            &summary,
+            &classified,
+            &out_dir.join("entrapment_report.html"),
+        )
+        .map_err(|e| ErrorData::new(ErrorCode::INTERNAL_ERROR, format!("{e}"), None))?;
+
         Ok(Json(serde_json::to_value(&summary).unwrap_or_default()))
     }
 
@@ -3403,6 +3410,14 @@ impl ProteinCopilotServer {
             .from_path(path)
             .map_err(|e| ErrorData::new(ErrorCode::INVALID_PARAMS, format!("cannot read file: {e}"), None))?;
 
+        let headers = rdr.headers()
+            .map_err(|e| ErrorData::new(ErrorCode::INVALID_PARAMS, format!("cannot read headers: {e}"), None))?
+            .clone();
+
+        let level_idx = headers.iter().position(|h| h == "level");
+        let delta_idx = headers.iter().position(|h| h == "delta_mass_da");
+        let target_protein_idx = headers.iter().position(|h| h == "best_target_protein");
+
         let mut level_counts = std::collections::HashMap::<String, usize>::new();
         let mut delta_masses: Vec<f64> = Vec::new();
         let mut protein_families = std::collections::HashMap::<String, usize>::new();
@@ -3413,26 +3428,27 @@ impl ProteinCopilotServer {
                 .map_err(|e| ErrorData::new(ErrorCode::INTERNAL_ERROR, format!("parse row: {e}"), None))?;
             total += 1;
 
-            // level is column index 9 (0-indexed) in the classified TSV
-            // Headers: peptide, charge, precursor_mz, retention_time, scan_number,
-            //          spectrum_file, protein_ids, q_value, group, level,
-            //          best_target_peptide, best_target_protein, mismatches,
-            //          delta_mass_da, diff_positions
-            if let Some(level) = record.get(9) {
-                *level_counts.entry(level.to_string()).or_insert(0) += 1;
-            }
-            if let Some(delta_str) = record.get(13) {
-                if let Ok(d) = delta_str.parse::<f64>() {
-                    delta_masses.push(d);
+            if let Some(idx) = level_idx {
+                if let Some(level) = record.get(idx) {
+                    *level_counts.entry(level.to_string()).or_insert(0) += 1;
                 }
             }
-            if let Some(target_protein) = record.get(11) {
-                if !target_protein.is_empty() {
-                    let family = target_protein.split('|').nth(2)
-                        .and_then(|s| s.split('_').next())
-                        .unwrap_or(target_protein)
-                        .to_string();
-                    *protein_families.entry(family).or_insert(0) += 1;
+            if let Some(idx) = delta_idx {
+                if let Some(delta_str) = record.get(idx) {
+                    if let Ok(d) = delta_str.parse::<f64>() {
+                        delta_masses.push(d);
+                    }
+                }
+            }
+            if let Some(idx) = target_protein_idx {
+                if let Some(target_protein) = record.get(idx) {
+                    if !target_protein.is_empty() {
+                        let family = target_protein.split('|').nth(2)
+                            .and_then(|s| s.split('_').next())
+                            .unwrap_or(target_protein)
+                            .to_string();
+                        *protein_families.entry(family).or_insert(0) += 1;
+                    }
                 }
             }
         }

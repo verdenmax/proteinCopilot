@@ -175,10 +175,10 @@ fn get_i32(col: &Arc<dyn Array>, row: usize) -> Option<i32> {
         return Some(a.value(row));
     }
     if let Some(a) = col.as_any().downcast_ref::<arrow::array::Int64Array>() {
-        return Some(a.value(row) as i32);
+        return i32::try_from(a.value(row)).ok();
     }
     if let Some(a) = col.as_any().downcast_ref::<arrow::array::Int16Array>() {
-        return Some(a.value(row) as i32);
+        return Some(i32::from(a.value(row)));
     }
     None
 }
