@@ -15,7 +15,7 @@ use crate::types::{ClassifiedPsm, EntrapmentSummary, PsmGroup};
 const TEMPLATE: &str = include_str!("../templates/entrapment_report.html");
 
 /// Placeholder token inside the template that is replaced with JSON data.
-const DATA_PLACEHOLDER: &str = "/*__REPORT_DATA__*/";
+const DATA_PLACEHOLDER: &str = "/*__REPORT_DATA__*/{}";
 
 /// Top-level JSON structure embedded into the HTML template.
 #[derive(Debug, Serialize)]
