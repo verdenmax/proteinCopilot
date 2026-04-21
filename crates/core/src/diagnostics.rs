@@ -311,7 +311,9 @@ impl SearchDiagnostics {
                 self.suggestions.push(DiagnosticSuggestion {
                     priority: 3,
                     action: "Widen precursor mass tolerance to 10-20 ppm".to_string(),
-                    reason: "Narrow tolerance may exclude correct matches on uncalibrated instruments".to_string(),
+                    reason:
+                        "Narrow tolerance may exclude correct matches on uncalibrated instruments"
+                            .to_string(),
                     param_changes: Some(HashMap::from([(
                         "precursor_tolerance".to_string(),
                         serde_json::json!({"value": 20.0, "unit": "ppm"}),
@@ -376,8 +378,12 @@ impl SearchDiagnostics {
                     });
                     self.suggestions.push(DiagnosticSuggestion {
                         priority: 4,
-                        action: "Use Sage engine for parallel matching or reduce variable modifications".to_string(),
-                        reason: "Matching is the bottleneck; parallelism or smaller search space helps".to_string(),
+                        action:
+                            "Use Sage engine for parallel matching or reduce variable modifications"
+                                .to_string(),
+                        reason:
+                            "Matching is the bottleneck; parallelism or smaller search space helps"
+                                .to_string(),
                         param_changes: Some(HashMap::from([(
                             "engine".to_string(),
                             serde_json::json!("Sage"),
@@ -486,7 +492,10 @@ mod tests {
         // 5% identification rate
         d.finalize(Some(0.05), Some(500), Some(50), 10.0, None);
 
-        assert!(d.anomalies.iter().any(|a| a.category == AnomalyCategory::LowIdentificationRate));
+        assert!(d
+            .anomalies
+            .iter()
+            .any(|a| a.category == AnomalyCategory::LowIdentificationRate));
         assert!(!d.suggestions.is_empty());
     }
 
@@ -498,7 +507,10 @@ mod tests {
         // 0 decoy hits
         d.finalize(Some(0.30), Some(3000), Some(0), 5.0, None);
 
-        assert!(d.anomalies.iter().any(|a| a.category == AnomalyCategory::NoDecoyHits));
+        assert!(d
+            .anomalies
+            .iter()
+            .any(|a| a.category == AnomalyCategory::NoDecoyHits));
     }
 
     #[test]
@@ -509,7 +521,10 @@ mod tests {
         // 3 ppm + low rate
         d.finalize(Some(0.02), Some(100), Some(10), 8.0, Some(3.0));
 
-        assert!(d.anomalies.iter().any(|a| a.category == AnomalyCategory::NarrowTolerance));
+        assert!(d
+            .anomalies
+            .iter()
+            .any(|a| a.category == AnomalyCategory::NarrowTolerance));
     }
 
     #[test]
@@ -547,6 +562,9 @@ mod tests {
         d.total_elapsed_sec = 100.0;
         d.finalize(Some(0.25), Some(250), Some(30), 100.0, Some(10.0));
 
-        assert!(d.anomalies.iter().any(|a| a.category == AnomalyCategory::SlowSearch));
+        assert!(d
+            .anomalies
+            .iter()
+            .any(|a| a.category == AnomalyCategory::SlowSearch));
     }
 }

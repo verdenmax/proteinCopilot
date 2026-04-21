@@ -42,6 +42,9 @@ struct PsmRow {
     spectrum_file: String,
     protein_ids: String,
     q_value: String,
+    substitution_type: String,
+    edit_distance: String,
+    alignment_detail: String,
 }
 
 impl PsmRow {
@@ -82,6 +85,9 @@ impl PsmRow {
                 .q_value
                 .map(|q| format!("{:.6}", q))
                 .unwrap_or_default(),
+            substitution_type: cp.substitution_type.to_string(),
+            edit_distance: cp.edit_distance.map(|d| d.to_string()).unwrap_or_default(),
+            alignment_detail: cp.alignment_detail.clone().unwrap_or_default(),
         }
     }
 }
@@ -149,7 +155,7 @@ mod tests {
     use super::*;
     use crate::types::{
         ClassifiedPsm, DiscriminabilityLevel, EntrapmentSummary, LevelCounts, PsmGroup,
-        RazorFamily, UnifiedPsm,
+        RazorFamily, SubstitutionType, UnifiedPsm,
     };
 
     fn make_psm(peptide: &str, group: PsmGroup, level: DiscriminabilityLevel) -> ClassifiedPsm {
@@ -171,6 +177,9 @@ mod tests {
             mismatches: Some(1),
             delta_mass_da: Some(0.0364),
             diff_positions: Some("[3:A->G]".to_string()),
+            substitution_type: SubstitutionType::None,
+            edit_distance: None,
+            alignment_detail: None,
         }
     }
 
@@ -282,5 +291,17 @@ mod tests {
         let summary = make_summary();
         render_report(&summary, &[], &out).expect("render_report");
         assert!(out.exists());
+    }
+
+    #[test]
+    fn test_psm_row_includes_substitution_type() {
+        let mut cp = make_psm("PEPQDEK", PsmGroup::Trap, DiscriminabilityLevel::L2);
+        cp.substitution_type = SubstitutionType::QKSubstitution;
+        cp.edit_distance = Some(1);
+        cp.alignment_detail = Some("Q3→K".to_string());
+        let row = PsmRow::from_classified(&cp);
+        assert_eq!(row.substitution_type, "QKSubstitution");
+        assert_eq!(row.edit_distance, "1");
+        assert_eq!(row.alignment_detail, "Q3→K");
     }
 }

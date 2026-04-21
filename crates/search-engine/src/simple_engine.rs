@@ -279,21 +279,21 @@ impl SimpleSearchEngine {
                 SearchEngineError::IoError { detail }
             })?;
             let reader = protein_copilot_spectrum_io::create_reader(&info);
-            let summary =
-                reader
-                    .read_summary(file_path)
-                    .map_err(|e| {
-                        let detail = e.to_string();
-                        diagnostics.fail_stage(&detail);
-                        diagnostics.set_error(ErrorCategory::InputData, &detail);
-                        SearchEngineError::IoError { detail }
-                    })?;
+            let summary = reader.read_summary(file_path).map_err(|e| {
+                let detail = e.to_string();
+                diagnostics.fail_stage(&detail);
+                diagnostics.set_error(ErrorCategory::InputData, &detail);
+                SearchEngineError::IoError { detail }
+            })?;
             total_ms2_spectra += summary.ms2_count;
         }
 
         if total_ms2_spectra == 0 {
             diagnostics.fail_stage("No MS2 spectra found in input files");
-            diagnostics.set_error(ErrorCategory::InputData, "No MS2 spectra found in input files");
+            diagnostics.set_error(
+                ErrorCategory::InputData,
+                "No MS2 spectra found in input files",
+            );
             return Err(SearchEngineError::NoInputSpectra);
         }
 
@@ -898,7 +898,9 @@ mod tests {
 
         let engine = SimpleSearchEngine::new();
         let mut diag = SearchDiagnostics::new();
-        let result = engine.run_search(&params, &[fixture], &|_| {}, &mut diag).unwrap();
+        let result = engine
+            .run_search(&params, &[fixture], &|_| {}, &mut diag)
+            .unwrap();
 
         // Basic structural checks
         assert_eq!(result.engine_info.name, "SimpleSearch");
@@ -929,7 +931,12 @@ mod tests {
 
         let engine = SimpleSearchEngine::new();
         let result = engine
-            .search(&params, &[fixture], noop_progress(), &mut protein_copilot_core::diagnostics::SearchDiagnostics::new())
+            .search(
+                &params,
+                &[fixture],
+                noop_progress(),
+                &mut protein_copilot_core::diagnostics::SearchDiagnostics::new(),
+            )
             .await
             .unwrap();
         assert_eq!(result.engine_info.name, "SimpleSearch");
@@ -999,7 +1006,12 @@ mod tests {
 
         let engine = SimpleSearchEngine::new();
         let _result = engine
-            .search(&params, &[fixture], on_progress, &mut protein_copilot_core::diagnostics::SearchDiagnostics::new())
+            .search(
+                &params,
+                &[fixture],
+                on_progress,
+                &mut protein_copilot_core::diagnostics::SearchDiagnostics::new(),
+            )
             .await
             .unwrap();
 

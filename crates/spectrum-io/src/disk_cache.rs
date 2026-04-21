@@ -149,24 +149,20 @@ pub fn load_index(
     }
 
     // Source file size
-    let stored_size = u64::from_le_bytes(
-        data[5..13]
-            .try_into()
-            .map_err(|_| SpectrumIoError::DiskCacheError {
-                path: mzml_path.to_path_buf(),
-                detail: "failed to parse source_file_size".to_string(),
-            })?,
-    );
+    let stored_size = u64::from_le_bytes(data[5..13].try_into().map_err(|_| {
+        SpectrumIoError::DiskCacheError {
+            path: mzml_path.to_path_buf(),
+            detail: "failed to parse source_file_size".to_string(),
+        }
+    })?);
 
     // Source file mtime
-    let stored_mtime = u64::from_le_bytes(
-        data[13..21]
-            .try_into()
-            .map_err(|_| SpectrumIoError::DiskCacheError {
-                path: mzml_path.to_path_buf(),
-                detail: "failed to parse source_file_mtime".to_string(),
-            })?,
-    );
+    let stored_mtime = u64::from_le_bytes(data[13..21].try_into().map_err(|_| {
+        SpectrumIoError::DiskCacheError {
+            path: mzml_path.to_path_buf(),
+            detail: "failed to parse source_file_mtime".to_string(),
+        }
+    })?);
 
     // Staleness check
     if stored_size != expected_size {
@@ -190,14 +186,12 @@ pub fn load_index(
     }
 
     // Entry count
-    let entry_count = u32::from_le_bytes(
-        data[21..25]
-            .try_into()
-            .map_err(|_| SpectrumIoError::DiskCacheError {
-                path: mzml_path.to_path_buf(),
-                detail: "failed to parse entry_count".to_string(),
-            })?,
-    ) as usize;
+    let entry_count = u32::from_le_bytes(data[21..25].try_into().map_err(|_| {
+        SpectrumIoError::DiskCacheError {
+            path: mzml_path.to_path_buf(),
+            detail: "failed to parse entry_count".to_string(),
+        }
+    })?) as usize;
 
     // Validate total size
     let expected_total = HEADER_SIZE + entry_count * ENTRY_SIZE;
@@ -225,12 +219,15 @@ pub fn load_index(
         let mut lower_buf = [0u8; 8];
         let mut upper_buf = [0u8; 8];
 
-        let read = |cursor: &mut &[u8], buf: &mut [u8], field: &str| -> Result<(), SpectrumIoError> {
-            cursor.read_exact(buf).map_err(|e| SpectrumIoError::DiskCacheError {
-                path: mzml_path.to_path_buf(),
-                detail: format!("failed to read {field}: {e}"),
-            })
-        };
+        let read =
+            |cursor: &mut &[u8], buf: &mut [u8], field: &str| -> Result<(), SpectrumIoError> {
+                cursor
+                    .read_exact(buf)
+                    .map_err(|e| SpectrumIoError::DiskCacheError {
+                        path: mzml_path.to_path_buf(),
+                        detail: format!("failed to read {field}: {e}"),
+                    })
+            };
 
         read(&mut cursor, &mut scan_buf, "scan_number")?;
         read(&mut cursor, &mut offset_buf, "byte_offset")?;
@@ -252,12 +249,15 @@ pub fn load_index(
             None
         };
 
-        entries.insert(scan, ScanMeta {
-            offset: u64::from_le_bytes(offset_buf),
-            rt_seconds: f64::from_le_bytes(rt_buf),
-            ms_level: ms_level_buf[0],
-            isolation_window,
-        });
+        entries.insert(
+            scan,
+            ScanMeta {
+                offset: u64::from_le_bytes(offset_buf),
+                rt_seconds: f64::from_le_bytes(rt_buf),
+                ms_level: ms_level_buf[0],
+                isolation_window,
+            },
+        );
     }
 
     tracing::info!(
@@ -266,7 +266,10 @@ pub fn load_index(
         "disk cache hit: loaded scan index v2 from .idx file"
     );
 
-    Ok(Some(ScanIndex::from_meta(entries, IndexSource::NativeIndex)))
+    Ok(Some(ScanIndex::from_meta(
+        entries,
+        IndexSource::NativeIndex,
+    )))
 }
 
 /// Saves a [`ScanIndex`] to the sidecar `.idx` file.
@@ -508,24 +511,33 @@ mod tests {
         let mzml = fake_mzml(dir.path());
 
         let index = build_meta_index(&[
-            (1, ScanMeta {
-                offset: 100,
-                rt_seconds: 120.5,
-                ms_level: 2,
-                isolation_window: Some((500.0, 1.0, 1.0)),
-            }),
-            (5, ScanMeta {
-                offset: 5000,
-                rt_seconds: 300.0,
-                ms_level: 1,
-                isolation_window: None,
-            }),
-            (10, ScanMeta {
-                offset: 99999,
-                rt_seconds: 600.0,
-                ms_level: 2,
-                isolation_window: Some((750.5, 12.5, 12.5)),
-            }),
+            (
+                1,
+                ScanMeta {
+                    offset: 100,
+                    rt_seconds: 120.5,
+                    ms_level: 2,
+                    isolation_window: Some((500.0, 1.0, 1.0)),
+                },
+            ),
+            (
+                5,
+                ScanMeta {
+                    offset: 5000,
+                    rt_seconds: 300.0,
+                    ms_level: 1,
+                    isolation_window: None,
+                },
+            ),
+            (
+                10,
+                ScanMeta {
+                    offset: 99999,
+                    rt_seconds: 600.0,
+                    ms_level: 2,
+                    isolation_window: Some((750.5, 12.5, 12.5)),
+                },
+            ),
         ]);
         let size = 123456u64;
         let mtime = 1700000000u64;

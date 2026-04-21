@@ -164,7 +164,9 @@ impl SpectrumReader for IndexedMzMLReader {
         precursor_mz: f64,
         rt_tolerance_min: f64,
     ) -> Result<Option<(u32, f64)>, SpectrumIoError> {
-        Ok(self.index.find_by_rt(rt_min, precursor_mz, rt_tolerance_min))
+        Ok(self
+            .index
+            .find_by_rt(rt_min, precursor_mz, rt_tolerance_min))
     }
 
     fn list_ms2_meta(

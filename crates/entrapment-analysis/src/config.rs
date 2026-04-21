@@ -115,14 +115,17 @@ pub enum UnmatchedPolicy {
 /// Parameters controlling sequence-similarity / homology scoring.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SimilarityConfig {
-    /// Maximum number of amino-acid mismatches allowed before considering
-    /// two peptides distinct.
+    /// Maximum edit distance (substitutions + insertions + deletions).
+    /// Semantically replaces "mismatches" for v2 but field name kept for YAML compat.
     #[serde(default = "default_max_mismatches")]
     pub max_mismatches: u16,
 
-    /// Precursor m/z tolerance (Da) for linking similar peptides.
-    #[serde(default = "default_delta_mz_threshold_da")]
-    pub delta_mz_threshold_da: f64,
+    /// Mass-difference threshold (Da) separating L2 (near-isobaric) from L3.
+    #[serde(
+        default = "default_delta_mass_threshold_da",
+        alias = "delta_mz_threshold_da"
+    )]
+    pub delta_mass_threshold_da: f64,
 
     /// Whether both ends of a peptide must be tryptic.
     #[serde(default = "default_require_tryptic_ends")]
@@ -131,12 +134,24 @@ pub struct SimilarityConfig {
     /// Maximum number of missed cleavages to allow.
     #[serde(default = "default_max_missed_cleavages")]
     pub max_missed_cleavages: u32,
+
+    /// Length tolerance: search target peptides within len ± len_tolerance.
+    #[serde(default = "default_len_tolerance")]
+    pub len_tolerance: usize,
+
+    /// Enable isobaric dipeptide detection (N↔GG, Q↔AG).
+    #[serde(default = "default_true")]
+    pub enable_dipeptide_check: bool,
+
+    /// Enable Q/K near-isobaric substitution detection.
+    #[serde(default = "default_true")]
+    pub enable_qk_detection: bool,
 }
 
 fn default_max_mismatches() -> u16 {
     2
 }
-fn default_delta_mz_threshold_da() -> f64 {
+fn default_delta_mass_threshold_da() -> f64 {
     1.0
 }
 fn default_require_tryptic_ends() -> bool {
@@ -145,14 +160,23 @@ fn default_require_tryptic_ends() -> bool {
 fn default_max_missed_cleavages() -> u32 {
     2
 }
+fn default_len_tolerance() -> usize {
+    2
+}
+fn default_true() -> bool {
+    true
+}
 
 impl Default for SimilarityConfig {
     fn default() -> Self {
         Self {
             max_mismatches: default_max_mismatches(),
-            delta_mz_threshold_da: default_delta_mz_threshold_da(),
+            delta_mass_threshold_da: default_delta_mass_threshold_da(),
             require_tryptic_ends: default_require_tryptic_ends(),
             max_missed_cleavages: default_max_missed_cleavages(),
+            len_tolerance: default_len_tolerance(),
+            enable_dipeptide_check: default_true(),
+            enable_qk_detection: default_true(),
         }
     }
 }
@@ -259,7 +283,7 @@ similarity:
         assert_eq!(cfg.conflict_resolution, ConflictResolution::PreferTarget);
         assert_eq!(cfg.unmatched, UnmatchedPolicy::Ignore);
         assert_eq!(cfg.similarity.max_mismatches, 2);
-        assert!((cfg.similarity.delta_mz_threshold_da - 1.0).abs() < f64::EPSILON);
+        assert!((cfg.similarity.delta_mass_threshold_da - 1.0).abs() < f64::EPSILON);
         assert!(cfg.similarity.require_tryptic_ends);
         assert_eq!(cfg.similarity.max_missed_cleavages, 2);
     }
@@ -298,7 +322,7 @@ similarity:
         assert_eq!(cfg.conflict_resolution, ConflictResolution::MarkAmbiguous);
         assert_eq!(cfg.unmatched, UnmatchedPolicy::Trap);
         assert_eq!(cfg.similarity.max_mismatches, 3);
-        assert!((cfg.similarity.delta_mz_threshold_da - 0.5).abs() < f64::EPSILON);
+        assert!((cfg.similarity.delta_mass_threshold_da - 0.5).abs() < f64::EPSILON);
         assert!(!cfg.similarity.require_tryptic_ends);
         assert_eq!(cfg.similarity.max_missed_cleavages, 1);
     }
@@ -342,5 +366,60 @@ trap:
             msg.contains("target group must have at least one rule"),
             "unexpected error message: {msg}"
         );
+    }
+
+    #[test]
+    fn test_v2_defaults() {
+        let cfg = EntrapmentConfig::from_yaml_str(MINIMAL_YAML).expect("parse");
+        assert_eq!(cfg.similarity.len_tolerance, 2);
+        assert!(cfg.similarity.enable_dipeptide_check);
+        assert!(cfg.similarity.enable_qk_detection);
+        assert!((cfg.similarity.delta_mass_threshold_da - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_delta_mz_alias_still_works() {
+        let yaml = r#"
+version: 1
+target:
+  rules:
+    - type: AccessionContains
+      any_of: ["_HUMAN"]
+trap:
+  rules:
+    - type: AccessionContains
+      any_of: ["_YEAST"]
+similarity:
+  delta_mz_threshold_da: 0.5
+"#;
+        let cfg = EntrapmentConfig::from_yaml_str(yaml).expect("parse with alias");
+        assert!((cfg.similarity.delta_mass_threshold_da - 0.5).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_v2_explicit_overrides() {
+        let yaml = r#"
+version: 1
+target:
+  rules:
+    - type: AccessionContains
+      any_of: ["_HUMAN"]
+trap:
+  rules:
+    - type: AccessionContains
+      any_of: ["_YEAST"]
+similarity:
+  max_mismatches: 3
+  delta_mass_threshold_da: 0.8
+  len_tolerance: 3
+  enable_dipeptide_check: false
+  enable_qk_detection: false
+"#;
+        let cfg = EntrapmentConfig::from_yaml_str(yaml).expect("parse");
+        assert_eq!(cfg.similarity.max_mismatches, 3);
+        assert!((cfg.similarity.delta_mass_threshold_da - 0.8).abs() < f64::EPSILON);
+        assert_eq!(cfg.similarity.len_tolerance, 3);
+        assert!(!cfg.similarity.enable_dipeptide_check);
+        assert!(!cfg.similarity.enable_qk_detection);
     }
 }

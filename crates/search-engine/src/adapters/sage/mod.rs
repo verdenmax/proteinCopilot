@@ -134,10 +134,7 @@ impl SearchEngineAdapter for SageAdapter {
 
         if ms2_spectra.is_empty() {
             diagnostics.fail_stage("No MS2 spectra found in input");
-            diagnostics.set_error(
-                ErrorCategory::InputData,
-                "No MS2 spectra found",
-            );
+            diagnostics.set_error(ErrorCategory::InputData, "No MS2 spectra found");
             return Err(CoreError::SearchEngineError {
                 engine: "Sage".into(),
                 detail: "No MS2 spectra found in input".into(),
@@ -706,7 +703,12 @@ mod tests {
         };
         let on_progress: ProgressCallback = Box::new(|_| {});
         let result = adapter
-            .search_with_spectra(&params, vec![], on_progress, &mut protein_copilot_core::diagnostics::SearchDiagnostics::new())
+            .search_with_spectra(
+                &params,
+                vec![],
+                on_progress,
+                &mut protein_copilot_core::diagnostics::SearchDiagnostics::new(),
+            )
             .await;
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();

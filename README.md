@@ -33,7 +33,7 @@ AI 驱动的蛋白质组学质谱搜索与结果解释平台。
 **Sage 搜索引擎**：在 `run_search` 中指定 `engine: "Sage"` 即可使用 sage-core 进行生产级蛋白组学搜索（rayon 并行打分 + LDA rescoring）
 **FASTA 管理**：`list_databases` / `download_database` → 内置 UniProt 数据库注册表 + 自动缓存
 **搜索诊断**：`diagnose_search(run_id)` → 阶段耗时 + 7 条异常检测规则 + 分级修复建议
-**陷阱库分析**：`classify_entrapment_hits` → L0-L4 同源性分级 + HTML 交互报告 + CLI 独立工具
+**陷阱库分析**：`classify_entrapment_hits` → L0-L4 同源性分级 + Levenshtein edit distance 跨长匹配 + SubstitutionType 注释（Q/K、等质量二肽等）+ HTML 交互报告 + CLI 独立工具
 
 ## 快速测试
 
@@ -121,7 +121,7 @@ crates/
 - **DDA + DIA 支持**：自动检测采集模式，DIA 数据通过 MS1 同位素模式提取前体离子后搜索
 - **外部结果导入**：DIA-NN parquet / 自定义 JSON → RT 匹配 mzML 扫描号 → 标准 SearchResult
 - **搜索诊断**：结构化错误分类 + 7 条异常检测规则 + 分级修复建议（确定性，不依赖 LLM）
-- **可测试**：756 个单元/集成测试，0 clippy warnings
+- **可测试**：795 个单元/集成测试，0 clippy warnings
 - **可审计**：每次搜索生成 run_id + 完整参数 + 引擎版本 + 诊断报告
 
 ## 当前进度
@@ -148,6 +148,7 @@ crates/
 | **搜索诊断** | ✅ **错误分类 + 阶段指标 + 7 条异常检测 + 修复建议 + diagnose_search tool** |
 | **RT 二分查找** | ✅ **ScanIndex + PCIX v2 缓存 + O(log N) find_by_rt + collect_ms2_info 零 I/O** |
 | **陷阱库分析** | ✅ **L0-L4 同源性分级 + DIA-NN parquet 加载 + FASTA 酶切索引 + HTML 报告 + CLI** |
+| **陷阱库 v2** | ✅ **Levenshtein edit distance + k-mer 预筛 + SubstitutionType 注释 + 3 新输出列 + mDa 显示** |
 
 详细计划：`tasks/001-mvp-proteomics-search-platform.md`
 Phase 2 计划：`tasks/002-phase2-production-platform.md`

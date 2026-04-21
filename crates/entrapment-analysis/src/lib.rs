@@ -6,6 +6,7 @@
 pub mod config;
 pub mod digest;
 pub mod error;
+pub mod levenshtein;
 pub mod loader;
 pub mod output;
 pub mod report;
@@ -15,7 +16,8 @@ pub mod types;
 
 pub use error::EntrapmentError;
 pub use types::{
-    ClassifiedPsm, DiscriminabilityLevel, EntrapmentSummary, LevelCounts, PsmGroup, UnifiedPsm,
+    ClassifiedPsm, DiscriminabilityLevel, EntrapmentSummary, LevelCounts, PsmGroup,
+    SubstitutionType, UnifiedPsm,
 };
 
 use std::path::Path;
@@ -44,8 +46,11 @@ impl EntrapmentAnalyzer {
     /// index from the FASTA file.
     pub fn new(config: EntrapmentConfig, fasta_path: &Path) -> Result<Self, EntrapmentError> {
         let tagger = Tagger::new(&config)?;
-        let index =
-            TargetDigestIndex::from_fasta(fasta_path, config.similarity.max_missed_cleavages)?;
+        let index = TargetDigestIndex::from_fasta(
+            fasta_path,
+            config.similarity.max_missed_cleavages,
+            config.similarity.max_mismatches,
+        )?;
         Ok(Self {
             config,
             tagger,

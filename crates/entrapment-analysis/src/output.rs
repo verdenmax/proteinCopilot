@@ -88,9 +88,12 @@ pub fn file_sha256(path: &Path) -> Result<String, EntrapmentError> {
 ///
 /// Headers: peptide, charge, precursor_mz, retention_time, scan_number,
 /// spectrum_file, protein_ids, q_value, group, level, best_target_peptide,
-/// best_target_protein, mismatches, delta_mass_da, diff_positions.
+/// best_target_protein, mismatches, delta_mass_da, diff_positions,
+/// substitution_type, edit_distance, alignment_detail.
 ///
-/// `None` fields are written as empty strings.
+/// Optional fields (`best_target_peptide`, `edit_distance`, `alignment_detail`,
+/// `diff_positions`) are written as empty strings when `None`.
+/// `substitution_type` is always present (defaults to `None` variant).
 pub fn write_classified_tsv(psms: &[ClassifiedPsm], path: &Path) -> Result<(), EntrapmentError> {
     let file = File::create(path).map_err(|e| EntrapmentError::IoError {
         path: path.to_path_buf(),
@@ -115,6 +118,9 @@ pub fn write_classified_tsv(psms: &[ClassifiedPsm], path: &Path) -> Result<(), E
         "mismatches",
         "delta_mass_da",
         "diff_positions",
+        "substitution_type",
+        "edit_distance",
+        "alignment_detail",
     ])
     .map_err(|e| EntrapmentError::OutputError {
         detail: format!("failed to write TSV header to {}: {e}", path.display()),
@@ -137,6 +143,9 @@ pub fn write_classified_tsv(psms: &[ClassifiedPsm], path: &Path) -> Result<(), E
             &opt_to_string(&cp.mismatches),
             &opt_to_string(&cp.delta_mass_da),
             &opt_to_string(&cp.diff_positions),
+            &cp.substitution_type.to_string(),
+            &opt_to_string(&cp.edit_distance),
+            &opt_to_string(&cp.alignment_detail),
         ])
         .map_err(|e| EntrapmentError::OutputError {
             detail: format!("failed to write TSV row to {}: {e}", path.display()),
@@ -246,7 +255,7 @@ fn opt_to_string<T: std::fmt::Display>(opt: &Option<T>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{DiscriminabilityLevel, PsmGroup, UnifiedPsm};
+    use crate::types::{DiscriminabilityLevel, PsmGroup, SubstitutionType, UnifiedPsm};
 
     fn make_classified_psm(
         peptide: &str,
@@ -292,6 +301,9 @@ mod tests {
             } else {
                 None
             },
+            substitution_type: SubstitutionType::None,
+            edit_distance: None,
+            alignment_detail: None,
         }
     }
 
@@ -378,6 +390,9 @@ mod tests {
             mismatches: None,
             delta_mass_da: None,
             diff_positions: None,
+            substitution_type: SubstitutionType::None,
+            edit_distance: None,
+            alignment_detail: None,
         };
 
         write_classified_tsv(&[psm], &path).expect("write TSV");
@@ -497,5 +512,44 @@ mod tests {
         assert_eq!(opt_to_string(&Some(3.14)), "3.14");
         assert_eq!(opt_to_string(&Some("hello".to_owned())), "hello");
         assert_eq!(opt_to_string::<i32>(&None), "");
+    }
+
+    #[test]
+    fn test_write_classified_tsv_v2_columns() {
+        use crate::types::SubstitutionType;
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let path = dir.path().join("classified_v2.tsv");
+
+        let psm = ClassifiedPsm {
+            psm: UnifiedPsm {
+                peptide: "PEPQDEK".to_owned(),
+                charge: Some(2),
+                precursor_mz: Some(500.0),
+                retention_time: Some(10.0),
+                scan_number: Some(100),
+                spectrum_file: Some("test.raw".to_owned()),
+                protein_ids: "sp|P001|TRAP_YEAST".to_owned(),
+                q_value: Some(0.01),
+            },
+            group: PsmGroup::Trap,
+            level: DiscriminabilityLevel::L2,
+            best_target_peptide: Some("PEPKDEK".to_owned()),
+            best_target_protein: Some("sp|P002|TARGET_HUMAN".to_owned()),
+            mismatches: Some(1),
+            delta_mass_da: Some(0.036385),
+            diff_positions: Some("[3:Q->K]".to_owned()),
+            substitution_type: SubstitutionType::QKSubstitution,
+            edit_distance: Some(1),
+            alignment_detail: Some("Q3→K".to_owned()),
+        };
+
+        write_classified_tsv(&[psm], &path).expect("write TSV");
+
+        let content = std::fs::read_to_string(&path).expect("read TSV");
+        let lines: Vec<&str> = content.lines().collect();
+        assert!(lines[0].contains("substitution_type"));
+        assert!(lines[0].contains("edit_distance"));
+        assert!(lines[0].contains("alignment_detail"));
+        assert!(lines[1].contains("QKSubstitution"));
     }
 }

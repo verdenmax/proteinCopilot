@@ -243,10 +243,7 @@ fn load_fasta_accessions(path: &Path, set: &mut HashSet<String>) -> Result<(), E
 /// accessions that don't follow this format.
 fn extract_uniprot_id(accession: &str) -> Option<&str> {
     let parts: Vec<&str> = accession.split('|').collect();
-    if parts.len() >= 2
-        && (parts[0] == "sp" || parts[0] == "tr")
-        && !parts[1].is_empty()
-    {
+    if parts.len() >= 2 && (parts[0] == "sp" || parts[0] == "tr") && !parts[1].is_empty() {
         Some(parts[1])
     } else {
         None
