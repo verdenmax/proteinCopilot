@@ -91,7 +91,9 @@ pub fn file_sha256(path: &Path) -> Result<String, EntrapmentError> {
 /// best_target_protein, mismatches, delta_mass_da, diff_positions,
 /// substitution_type, edit_distance, alignment_detail.
 ///
-/// `None` fields are written as empty strings.
+/// Optional fields (`best_target_peptide`, `edit_distance`, `alignment_detail`,
+/// `diff_positions`) are written as empty strings when `None`.
+/// `substitution_type` is always present (defaults to `None` variant).
 pub fn write_classified_tsv(psms: &[ClassifiedPsm], path: &Path) -> Result<(), EntrapmentError> {
     let file = File::create(path).map_err(|e| EntrapmentError::IoError {
         path: path.to_path_buf(),

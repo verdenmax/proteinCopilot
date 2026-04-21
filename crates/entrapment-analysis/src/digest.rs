@@ -113,6 +113,10 @@ impl TargetDigestIndex {
             detail: e.to_string(),
         })?;
 
+        if entries.is_empty() {
+            info!(path = %path.display(), "FASTA file contains no protein sequences");
+        }
+
         let mut exact_set = HashSet::new();
         let mut normalized_set = HashSet::new();
         let mut exact_to_protein = HashMap::new();
@@ -284,6 +288,10 @@ impl TargetDigestIndex {
         // Filter and compute edit distance
         let mut results = Vec::new();
         for &pid in &candidate_ids {
+            debug_assert!(
+                (pid as usize) < self.all_peptides.len(),
+                "kmer_index contains out-of-bounds peptide ID {pid}"
+            );
             let tp = &self.all_peptides[pid as usize];
 
             // Length filter
