@@ -305,6 +305,7 @@ mod tests {
             substitution_type: SubstitutionType::None,
             edit_distance: None,
             alignment_detail: None,
+            provenance: None,
         }
     }
 
@@ -395,6 +396,7 @@ mod tests {
             substitution_type: SubstitutionType::None,
             edit_distance: None,
             alignment_detail: None,
+            provenance: None,
         };
 
         write_classified_tsv(&[psm], &path).expect("write TSV");
@@ -544,6 +546,7 @@ mod tests {
             substitution_type: SubstitutionType::QKSubstitution,
             edit_distance: Some(1),
             alignment_detail: Some("Q3→K".to_owned()),
+            provenance: None,
         };
 
         write_classified_tsv(&[psm], &path).expect("write TSV");

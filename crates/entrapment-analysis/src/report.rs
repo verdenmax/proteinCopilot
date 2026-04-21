@@ -181,6 +181,7 @@ mod tests {
             substitution_type: SubstitutionType::None,
             edit_distance: None,
             alignment_detail: None,
+            provenance: None,
         }
     }
 

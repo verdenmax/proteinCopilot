@@ -229,6 +229,7 @@ pub fn classify_single(
             substitution_type: SubstitutionType::None,
             edit_distance: None,
             alignment_detail: None,
+            provenance: None,
         };
     }
 
@@ -247,6 +248,7 @@ pub fn classify_single(
             substitution_type: SubstitutionType::None,
             edit_distance: None,
             alignment_detail: None,
+            provenance: None,
         };
     }
 
@@ -268,6 +270,7 @@ pub fn classify_single(
                     substitution_type: SubstitutionType::None,
                     edit_distance: None,
                     alignment_detail: None,
+                    provenance: None,
                 };
             }
             let (mm, dm, dp) = hamming_diff(&psm.peptide, orig).unwrap_or((0, 0.0, String::new()));
@@ -283,6 +286,7 @@ pub fn classify_single(
                 substitution_type: SubstitutionType::LIIsomer,
                 edit_distance: None,
                 alignment_detail: None,
+                provenance: None,
             };
         }
     }
@@ -400,6 +404,7 @@ pub fn classify_single(
             substitution_type: SubstitutionType::None,
             edit_distance: None,
             alignment_detail: None,
+            provenance: None,
         },
         BestMatch::Hamming {
             mm,
@@ -436,6 +441,7 @@ pub fn classify_single(
                 substitution_type: sub_type,
                 edit_distance: Some(mm as u32),
                 alignment_detail: Some(alignment.alignment_detail),
+                provenance: None,
             }
         }
         BestMatch::CrossLength(cross) => {
@@ -469,6 +475,7 @@ pub fn classify_single(
                 substitution_type: sub_type,
                 edit_distance: Some(cross.edit_distance),
                 alignment_detail: Some(cross.alignment_detail),
+                provenance: None,
             }
         }
     }
