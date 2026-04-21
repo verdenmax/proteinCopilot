@@ -264,7 +264,8 @@ pub fn classify_single(
     // Phase A: same-length Hamming scan (fast path, backward compatible)
     let candidates = index.peptides_of_length(psm.peptide.len());
     let mut best_mm: u16 = u16::MAX;
-    let mut best_dm: f64 = f64::MAX;
+    let mut best_dm: f64 = f64::MAX; // absolute value, for comparison only
+    let mut best_signed_dm: f64 = 0.0; // signed value, for storage
     let mut best_dp = String::new();
     let mut best_seq: Option<&str> = None;
     let mut best_prot: Option<&str> = None;
@@ -288,6 +289,7 @@ pub fn classify_single(
         if mm < best_mm || (mm == best_mm && abs_dm < best_dm) {
             best_mm = mm;
             best_dm = abs_dm;
+            best_signed_dm = dm;
             best_dp = dp;
             best_seq = Some(&target.sequence);
             best_prot = Some(&target.protein_accession);
@@ -319,7 +321,8 @@ pub fn classify_single(
     enum BestMatch<'a> {
         Hamming {
             mm: u16,
-            dm: f64,
+            abs_dm: f64,
+            signed_dm: f64,
             dp: String,
             seq: &'a str,
             prot: &'a str,
@@ -330,12 +333,15 @@ pub fn classify_single(
 
     let overall_best = match (best_mm < u16::MAX, best_cross) {
         (true, Some(cross)) => {
-            if (best_mm as u32) <= cross.edit_distance
-                || ((best_mm as u32) == cross.edit_distance && best_dm <= cross.delta_mass_da.abs())
+            // P1 fix: use strict `<` so delta_mass tiebreaker actually fires
+            if (best_mm as u32) < cross.edit_distance
+                || ((best_mm as u32) == cross.edit_distance
+                    && best_dm <= cross.delta_mass_da.abs())
             {
                 BestMatch::Hamming {
                     mm: best_mm,
-                    dm: best_dm,
+                    abs_dm: best_dm,
+                    signed_dm: best_signed_dm,
                     dp: best_dp,
                     seq: best_seq.unwrap_or_default(),
                     prot: best_prot.unwrap_or_default(),
@@ -346,7 +352,8 @@ pub fn classify_single(
         }
         (true, None) => BestMatch::Hamming {
             mm: best_mm,
-            dm: best_dm,
+            abs_dm: best_dm,
+            signed_dm: best_signed_dm,
             dp: best_dp,
             seq: best_seq.unwrap_or_default(),
             prot: best_prot.unwrap_or_default(),
@@ -371,14 +378,16 @@ pub fn classify_single(
         },
         BestMatch::Hamming {
             mm,
-            dm,
+            abs_dm,
+            signed_dm,
             dp,
             seq,
             prot,
         } => {
-            let sub_type = categorize_substitution(&psm.peptide, seq, mm as u32, dm, &dp, config);
+            let sub_type =
+                categorize_substitution(&psm.peptide, seq, mm as u32, abs_dm, &dp, config);
             let alignment = levenshtein::align(&psm.peptide, seq);
-            let level = if dm < config.delta_mass_threshold_da {
+            let level = if abs_dm < config.delta_mass_threshold_da {
                 DiscriminabilityLevel::L2
             } else {
                 DiscriminabilityLevel::L3
@@ -390,7 +399,7 @@ pub fn classify_single(
                 best_target_peptide: Some(seq.to_owned()),
                 best_target_protein: Some(prot.to_owned()),
                 mismatches: Some(mm),
-                delta_mass_da: Some(dm),
+                delta_mass_da: Some(signed_dm),
                 diff_positions: Some(dp),
                 substitution_type: sub_type,
                 edit_distance: Some(mm as u32),
