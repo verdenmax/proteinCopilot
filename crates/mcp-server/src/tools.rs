@@ -681,6 +681,66 @@ struct FindSimilarTargetsInput {
     max_mismatches: Option<u16>,
 }
 
+// --- Entrapment analysis output schemas ---
+// rmcp requires outputSchema with root type "object", so we define typed
+// output structs instead of using Json<serde_json::Value>.
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct ClassifyEntrapmentOutput {
+    total_psms: usize,
+    target_psms: usize,
+    trap_psms: usize,
+    ambiguous_psms: usize,
+    level_counts: EntrapmentLevelCountsOutput,
+    top_razor_families: Vec<EntrapmentRazorFamilyOutput>,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct EntrapmentLevelCountsOutput {
+    l0: usize,
+    l1: usize,
+    l2: usize,
+    l3: usize,
+    l4: usize,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct EntrapmentRazorFamilyOutput {
+    family: String,
+    count: usize,
+    example_peptide: String,
+    example_trap_protein: String,
+    example_target_protein: String,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct AnalyzeEntrapmentStatsOutput {
+    total_classified: usize,
+    level_distribution: std::collections::HashMap<String, usize>,
+    delta_mass_stats: DeltaMassStats,
+    top_protein_families: Vec<(String, usize)>,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct DeltaMassStats {
+    count: usize,
+    min: f64,
+    max: f64,
+    mean: f64,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct FindSimilarTargetsOutput {
+    peptide: String,
+    level: String,
+    best_target_peptide: Option<String>,
+    best_target_protein: Option<String>,
+    mismatches: Option<u16>,
+    delta_mass_da: Option<f64>,
+    diff_positions: Option<String>,
+    index_size: usize,
+}
+
 fn default_import_format() -> String {
     "auto".to_string()
 }
@@ -3329,7 +3389,7 @@ impl ProteinCopilotServer {
     fn classify_entrapment_hits(
         &self,
         Parameters(input): Parameters<ClassifyEntrapmentHitsInput>,
-    ) -> Result<Json<serde_json::Value>, ErrorData> {
+    ) -> Result<Json<ClassifyEntrapmentOutput>, ErrorData> {
         use protein_copilot_entrapment_analysis::{
             config::EntrapmentConfig,
             loader::{self, ResultFormat},
@@ -3392,7 +3452,28 @@ impl ProteinCopilotServer {
         )
         .map_err(|e| ErrorData::new(ErrorCode::INTERNAL_ERROR, format!("{e}"), None))?;
 
-        Ok(Json(serde_json::to_value(&summary).unwrap_or_default()))
+        let output = ClassifyEntrapmentOutput {
+            total_psms: summary.total_psms,
+            target_psms: summary.target_psms,
+            trap_psms: summary.trap_psms,
+            ambiguous_psms: summary.ambiguous_psms,
+            level_counts: EntrapmentLevelCountsOutput {
+                l0: summary.level_counts.l0,
+                l1: summary.level_counts.l1,
+                l2: summary.level_counts.l2,
+                l3: summary.level_counts.l3,
+                l4: summary.level_counts.l4,
+            },
+            top_razor_families: summary.top_razor_families.iter().map(|f| EntrapmentRazorFamilyOutput {
+                family: f.family.clone(),
+                count: f.count,
+                example_peptide: f.example_peptide.clone(),
+                example_trap_protein: f.example_trap_protein.clone(),
+                example_target_protein: f.example_target_protein.clone(),
+            }).collect(),
+        };
+
+        Ok(Json(output))
     }
 
     #[rmcp::tool(
@@ -3402,8 +3483,7 @@ impl ProteinCopilotServer {
     fn analyze_entrapment_stats(
         &self,
         Parameters(input): Parameters<AnalyzeEntrapmentStatsInput>,
-    ) -> Result<Json<serde_json::Value>, ErrorData> {
-        // Read the classified TSV and compute stats
+    ) -> Result<Json<AnalyzeEntrapmentStatsOutput>, ErrorData> {
         let path = std::path::Path::new(&input.classified_file);
         let mut rdr = csv::ReaderBuilder::new()
             .delimiter(b'\t')
@@ -3457,17 +3537,17 @@ impl ProteinCopilotServer {
         top_families.sort_by(|a, b| b.1.cmp(&a.1));
         top_families.truncate(20);
 
-        let stats = serde_json::json!({
-            "total_classified": total,
-            "level_distribution": level_counts,
-            "delta_mass_stats": {
-                "count": delta_masses.len(),
-                "min": if delta_masses.is_empty() { 0.0 } else { delta_masses.iter().copied().fold(f64::INFINITY, f64::min) },
-                "max": if delta_masses.is_empty() { 0.0 } else { delta_masses.iter().copied().fold(f64::NEG_INFINITY, f64::max) },
-                "mean": if delta_masses.is_empty() { 0.0 } else { delta_masses.iter().sum::<f64>() / delta_masses.len() as f64 },
+        let stats = AnalyzeEntrapmentStatsOutput {
+            total_classified: total,
+            level_distribution: level_counts,
+            delta_mass_stats: DeltaMassStats {
+                count: delta_masses.len(),
+                min: if delta_masses.is_empty() { 0.0 } else { delta_masses.iter().copied().fold(f64::INFINITY, f64::min) },
+                max: if delta_masses.is_empty() { 0.0 } else { delta_masses.iter().copied().fold(f64::NEG_INFINITY, f64::max) },
+                mean: if delta_masses.is_empty() { 0.0 } else { delta_masses.iter().sum::<f64>() / delta_masses.len() as f64 },
             },
-            "top_protein_families": top_families,
-        });
+            top_protein_families: top_families,
+        };
 
         Ok(Json(stats))
     }
@@ -3479,7 +3559,7 @@ impl ProteinCopilotServer {
     fn find_similar_targets(
         &self,
         Parameters(input): Parameters<FindSimilarTargetsInput>,
-    ) -> Result<Json<serde_json::Value>, ErrorData> {
+    ) -> Result<Json<FindSimilarTargetsOutput>, ErrorData> {
         use protein_copilot_entrapment_analysis::{
             config::SimilarityConfig,
             digest::TargetDigestIndex,
@@ -3511,16 +3591,16 @@ impl ProteinCopilotServer {
 
         let result = classify_single(&psm, PsmGroup::Trap, &index, &sim_config);
 
-        let output = serde_json::json!({
-            "peptide": input.peptide,
-            "level": result.level.as_str(),
-            "best_target_peptide": result.best_target_peptide,
-            "best_target_protein": result.best_target_protein,
-            "mismatches": result.mismatches,
-            "delta_mass_da": result.delta_mass_da,
-            "diff_positions": result.diff_positions,
-            "index_size": index.len(),
-        });
+        let output = FindSimilarTargetsOutput {
+            peptide: input.peptide,
+            level: result.level.as_str().to_string(),
+            best_target_peptide: result.best_target_peptide,
+            best_target_protein: result.best_target_protein,
+            mismatches: result.mismatches,
+            delta_mass_da: result.delta_mass_da,
+            diff_positions: result.diff_positions,
+            index_size: index.len(),
+        };
 
         Ok(Json(output))
     }
