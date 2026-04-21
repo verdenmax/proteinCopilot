@@ -6,6 +6,7 @@
 pub mod config;
 pub mod digest;
 pub mod error;
+pub mod levenshtein;
 pub mod loader;
 pub mod output;
 pub mod report;
