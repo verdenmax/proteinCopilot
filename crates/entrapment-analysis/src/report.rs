@@ -169,6 +169,7 @@ mod tests {
                 spectrum_file: Some("test.raw".to_string()),
                 protein_ids: "sp|P12345|TEST_HUMAN".to_string(),
                 q_value: Some(0.01),
+                modifications: Vec::new(),
             },
             group,
             level,

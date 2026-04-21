@@ -3647,6 +3647,7 @@ impl ProteinCopilotServer {
             spectrum_file: None,
             protein_ids: String::new(),
             q_value: None,
+            modifications: Vec::new(),
         };
 
         let result = classify_single(&psm, PsmGroup::Trap, &index, &sim_config);

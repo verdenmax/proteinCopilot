@@ -277,6 +277,7 @@ fn run_inspect(
         spectrum_file: None,
         protein_ids: String::new(),
         q_value: None,
+        modifications: Vec::new(),
     };
 
     // 4. Classify the single peptide (always as Trap to trigger similarity checks)

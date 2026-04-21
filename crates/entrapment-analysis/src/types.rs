@@ -139,6 +139,9 @@ pub struct UnifiedPsm {
     pub protein_ids: String,
     /// False-discovery-rate q-value.
     pub q_value: Option<f64>,
+    /// Parsed modifications: (0-based position, delta_mass_da).
+    #[serde(default)]
+    pub modifications: Vec<(usize, f64)>,
 }
 
 /// A PSM that has been classified with group and discriminability information.
@@ -316,5 +319,32 @@ mod tests {
             dipeptide: "GG".to_string(),
         };
         assert_eq!(idb.as_str(), "IsobaricDipeptide");
+    }
+
+    #[test]
+    fn unified_psm_modifications_default() {
+        let json = r#"{"peptide":"PEP","charge":2,"precursor_mz":300.0,"retention_time":null,"scan_number":null,"spectrum_file":null,"protein_ids":"P1","q_value":0.01}"#;
+        let psm: UnifiedPsm = serde_json::from_str(json).unwrap();
+        assert!(psm.modifications.is_empty());
+    }
+
+    #[test]
+    fn unified_psm_modifications_roundtrip() {
+        let psm = UnifiedPsm {
+            peptide: "ACDFK".into(),
+            charge: Some(2),
+            precursor_mz: Some(300.0),
+            retention_time: None,
+            scan_number: None,
+            spectrum_file: None,
+            protein_ids: "P1".into(),
+            q_value: Some(0.01),
+            modifications: vec![(1, 57.021464)],
+        };
+        let json = serde_json::to_string(&psm).unwrap();
+        let deser: UnifiedPsm = serde_json::from_str(&json).unwrap();
+        assert_eq!(deser.modifications.len(), 1);
+        assert_eq!(deser.modifications[0].0, 1);
+        assert!((deser.modifications[0].1 - 57.021464).abs() < 1e-6);
     }
 }

@@ -184,6 +184,7 @@ pub fn load_generic_tsv(
             spectrum_file,
             protein_ids,
             q_value,
+            modifications: Vec::new(),
         });
     }
 

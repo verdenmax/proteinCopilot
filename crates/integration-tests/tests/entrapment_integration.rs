@@ -33,6 +33,7 @@ fn make_psm(peptide: &str, protein_ids: &str) -> UnifiedPsm {
         spectrum_file: None,
         protein_ids: protein_ids.to_string(),
         q_value: Some(0.01),
+        modifications: Vec::new(),
     }
 }
 

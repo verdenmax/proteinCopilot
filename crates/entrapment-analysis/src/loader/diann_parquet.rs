@@ -92,6 +92,7 @@ pub fn load_diann_parquet(path: &Path) -> Result<Vec<UnifiedPsm>, EntrapmentErro
                 spectrum_file,
                 protein_ids,
                 q_value,
+                modifications: Vec::new(),
             });
         }
     }

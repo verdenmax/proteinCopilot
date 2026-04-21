@@ -457,6 +457,7 @@ mod tests {
             spectrum_file: None,
             protein_ids: String::new(),
             q_value: None,
+            modifications: Vec::new(),
         }
     }
 
