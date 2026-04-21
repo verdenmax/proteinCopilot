@@ -8,6 +8,7 @@ pub mod digest;
 pub mod error;
 pub mod levenshtein;
 pub mod loader;
+pub mod mirror_plot;
 pub mod output;
 pub mod mod_parser;
 pub mod provenance;
