@@ -177,6 +177,34 @@ fn check_isobaric_dipeptide(shorter: &str, longer: &str) -> Option<(char, String
     None
 }
 
+/// Extract 0-based positions of substitutions between two sequences.
+///
+/// Compares characters pairwise (up to the shorter length) and returns the
+/// indices where the characters differ.
+fn extract_diff_positions(trap_seq: &str, target_seq: &str) -> Vec<usize> {
+    trap_seq
+        .chars()
+        .zip(target_seq.chars())
+        .enumerate()
+        .filter(|(_, (a, b))| a != b)
+        .map(|(i, _)| i)
+        .collect()
+}
+
+/// Calculate mass adjustment for modifications at substitution positions.
+///
+/// When a trap peptide has modifications and differs from the target at certain
+/// positions, the modification mass at substitution positions should be
+/// accounted for in the delta mass.  Returns the total modification mass that
+/// should be subtracted from `delta_mass_da`.
+fn mod_mass_adjustment(modifications: &[(usize, f64)], diff_positions: &[usize]) -> f64 {
+    modifications
+        .iter()
+        .filter(|(pos, _)| diff_positions.contains(pos))
+        .map(|(_, delta)| delta)
+        .sum()
+}
+
 /// Classify a single PSM against the target digest index.
 ///
 /// Non-`Trap` PSMs are returned unchanged with level L4 and no match info.
@@ -321,7 +349,6 @@ pub fn classify_single(
     enum BestMatch<'a> {
         Hamming {
             mm: u16,
-            abs_dm: f64,
             signed_dm: f64,
             dp: String,
             seq: &'a str,
@@ -340,7 +367,6 @@ pub fn classify_single(
             {
                 BestMatch::Hamming {
                     mm: best_mm,
-                    abs_dm: best_dm,
                     signed_dm: best_signed_dm,
                     dp: best_dp,
                     seq: best_seq.unwrap_or_default(),
@@ -352,7 +378,6 @@ pub fn classify_single(
         }
         (true, None) => BestMatch::Hamming {
             mm: best_mm,
-            abs_dm: best_dm,
             signed_dm: best_signed_dm,
             dp: best_dp,
             seq: best_seq.unwrap_or_default(),
@@ -378,16 +403,23 @@ pub fn classify_single(
         },
         BestMatch::Hamming {
             mm,
-            abs_dm,
             signed_dm,
             dp,
             seq,
             prot,
         } => {
+            // Modification-aware delta mass adjustment: subtract modification
+            // masses at substitution positions so the stored delta_mass_da
+            // reflects residue-only mass difference.
+            let diff_pos = extract_diff_positions(&psm.peptide, seq);
+            let mod_adj = mod_mass_adjustment(&psm.modifications, &diff_pos);
+            let adjusted_signed_dm = signed_dm - mod_adj;
+            let adjusted_abs_dm = adjusted_signed_dm.abs();
+
             let sub_type =
-                categorize_substitution(&psm.peptide, seq, mm as u32, abs_dm, &dp, config);
+                categorize_substitution(&psm.peptide, seq, mm as u32, adjusted_abs_dm, &dp, config);
             let alignment = levenshtein::align(&psm.peptide, seq);
-            let level = if abs_dm < config.delta_mass_threshold_da {
+            let level = if adjusted_abs_dm < config.delta_mass_threshold_da {
                 DiscriminabilityLevel::L2
             } else {
                 DiscriminabilityLevel::L3
@@ -399,7 +431,7 @@ pub fn classify_single(
                 best_target_peptide: Some(seq.to_owned()),
                 best_target_protein: Some(prot.to_owned()),
                 mismatches: Some(mm),
-                delta_mass_da: Some(signed_dm),
+                delta_mass_da: Some(adjusted_signed_dm),
                 diff_positions: Some(dp),
                 substitution_type: sub_type,
                 edit_distance: Some(mm as u32),
@@ -407,15 +439,20 @@ pub fn classify_single(
             }
         }
         BestMatch::CrossLength(cross) => {
+            // Modification-aware delta mass adjustment for cross-length matches.
+            let diff_pos = extract_diff_positions(&psm.peptide, &cross.target_peptide);
+            let mod_adj = mod_mass_adjustment(&psm.modifications, &diff_pos);
+            let adjusted_dm = cross.delta_mass_da - mod_adj;
+
             let sub_type = categorize_substitution(
                 &psm.peptide,
                 &cross.target_peptide,
                 cross.edit_distance,
-                cross.delta_mass_da,
+                adjusted_dm.abs(),
                 &cross.alignment_detail,
                 config,
             );
-            let level = if cross.delta_mass_da.abs() < config.delta_mass_threshold_da {
+            let level = if adjusted_dm.abs() < config.delta_mass_threshold_da {
                 DiscriminabilityLevel::L2
             } else {
                 DiscriminabilityLevel::L3
@@ -427,7 +464,7 @@ pub fn classify_single(
                 best_target_peptide: Some(cross.target_peptide),
                 best_target_protein: Some(cross.target_protein),
                 mismatches: None,
-                delta_mass_da: Some(cross.delta_mass_da),
+                delta_mass_da: Some(adjusted_dm),
                 diff_positions: None,
                 substitution_type: sub_type,
                 edit_distance: Some(cross.edit_distance),
@@ -698,5 +735,50 @@ mod tests {
         let result = classify_single(&psm, PsmGroup::Trap, &index, &config);
         assert_eq!(result.level, DiscriminabilityLevel::L4);
         assert_eq!(result.substitution_type, SubstitutionType::None);
+    }
+
+    // --- mod_mass_adjustment tests ----------------------------------------
+
+    #[test]
+    fn test_mod_mass_adjustment_no_mods() {
+        let mods: Vec<(usize, f64)> = vec![];
+        let diff_pos = vec![2, 5];
+        assert!((mod_mass_adjustment(&mods, &diff_pos) - 0.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_mod_mass_adjustment_mod_at_diff_position() {
+        let mods = vec![(3, 57.021464)]; // Carbamidomethyl at pos 3
+        let diff_pos = vec![3, 5]; // pos 3 is a substitution
+        assert!((mod_mass_adjustment(&mods, &diff_pos) - 57.021464).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_mod_mass_adjustment_mod_not_at_diff_position() {
+        let mods = vec![(3, 57.021464)]; // Carbamidomethyl at pos 3
+        let diff_pos = vec![1, 5]; // pos 3 is NOT a substitution
+        assert!((mod_mass_adjustment(&mods, &diff_pos) - 0.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_mod_mass_adjustment_multiple_mods() {
+        let mods = vec![(1, 57.021464), (4, 15.994915)]; // CAM at 1, Ox at 4
+        let diff_pos = vec![1, 4]; // both are substitutions
+        let expected = 57.021464 + 15.994915;
+        assert!((mod_mass_adjustment(&mods, &diff_pos) - expected).abs() < 1e-6);
+    }
+
+    // --- extract_diff_positions tests -------------------------------------
+
+    #[test]
+    fn test_extract_diff_positions() {
+        let positions = extract_diff_positions("ABCDEF", "AXCDYF");
+        assert_eq!(positions, vec![1, 4]);
+    }
+
+    #[test]
+    fn test_extract_diff_positions_identical() {
+        let positions = extract_diff_positions("ABCDEF", "ABCDEF");
+        assert!(positions.is_empty());
     }
 }
