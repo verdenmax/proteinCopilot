@@ -79,6 +79,9 @@
                     <th onclick="sortTable(5)">Δ Mass (Da) ⇅</th>
                     <th onclick="sortTable(6)">Target Protein ⇅</th>
                     <th onclick="sortTable(7)">Diff Positions ⇅</th>
+                    <th onclick="sortTable(8)">Sub Type ⇅</th>
+                    <th onclick="sortTable(9)">Edit Dist ⇅</th>
+                    <th onclick="sortTable(10)">Alignment ⇅</th>
                 </tr></thead>
                 <tbody id="psm-tbody"></tbody>
             </table>
@@ -189,6 +192,14 @@
     var sortCol = -1;
     var sortAsc = true;
 
+    function formatDeltaMass(val) {
+        if (!val || val === '') return '';
+        var num = parseFloat(val);
+        if (isNaN(num)) return val;
+        if (Math.abs(num) < 0.1) return (num * 1000).toFixed(1) + ' mDa';
+        return num.toFixed(4) + ' Da';
+    }
+
     function renderTable() {
         var psms = DATA.psms || [];
         allRows = psms.map(function(p) {
@@ -200,7 +211,10 @@
                 p.mismatches || '',
                 p.delta_mass_da || '',
                 p.best_target_protein || '',
-                p.diff_positions || ''
+                p.diff_positions || '',
+                p.substitution_type || '',
+                p.edit_distance || '',
+                p.alignment_detail || ''
             ];
         });
         populateTable(allRows);
@@ -218,9 +232,12 @@
                 '<td class="' + lvlClass + '">' + escHtml(r[2]) + '</td>' +
                 '<td style="font-family:monospace">' + escHtml(r[3]) + '</td>' +
                 '<td>' + escHtml(r[4]) + '</td>' +
-                '<td>' + escHtml(r[5]) + '</td>' +
+                '<td>' + formatDeltaMass(r[5]) + '</td>' +
                 '<td style="font-size:0.85em">' + escHtml(r[6]) + '</td>' +
                 '<td style="font-size:0.85em">' + escHtml(r[7]) + '</td>' +
+                '<td>' + escHtml(r[8]) + '</td>' +
+                '<td>' + escHtml(r[9]) + '</td>' +
+                '<td style="font-size:0.85em">' + escHtml(r[10]) + '</td>' +
                 '</tr>';
         }
         tbody.innerHTML = html;
