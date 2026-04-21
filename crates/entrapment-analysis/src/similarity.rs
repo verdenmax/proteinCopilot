@@ -8,7 +8,8 @@
 use protein_copilot_search_engine::digest::residue_mass;
 
 use crate::config::SimilarityConfig;
-use crate::digest::TargetDigestIndex;
+use crate::digest::{SimilarityMatch, TargetDigestIndex};
+use crate::levenshtein;
 use crate::types::{ClassifiedPsm, DiscriminabilityLevel, PsmGroup, SubstitutionType, UnifiedPsm};
 
 /// Compute Hamming-style character differences between two equal-length sequences.
@@ -64,6 +65,116 @@ fn is_only_li_substitution(a: &str, b: &str) -> bool {
             pair == ('L', 'I') || pair == ('I', 'L')
         }
     })
+}
+
+/// Known isobaric dipeptide pairs: (single_residue, dipeptide).
+const ISOBARIC_DIPEPTIDES: &[(char, &str)] = &[
+    ('N', "GG"), // 114.04293 Da
+    ('Q', "AG"), // 128.05858 Da
+];
+
+/// Categorize the type of substitution between trap and best target match.
+fn categorize_substitution(
+    trap: &str,
+    best_target: &str,
+    edit_dist: u32,
+    delta_mass: f64,
+    _alignment_detail: &str,
+    config: &SimilarityConfig,
+) -> SubstitutionType {
+    let len_diff = (trap.len() as i64 - best_target.len() as i64).unsigned_abs() as usize;
+
+    // Equal length, single substitution → check Q↔K
+    if len_diff == 0
+        && edit_dist == 1
+        && config.enable_qk_detection
+        && is_qk_substitution(trap, best_target)
+    {
+        return SubstitutionType::QKSubstitution;
+    }
+
+    // Length diff of 1, edit distance ≤ 2 → check isobaric dipeptide (N↔GG, Q↔AG)
+    if len_diff == 1 && config.enable_dipeptide_check {
+        if let Some((single, dipeptide)) = check_isobaric_dipeptide(trap, best_target) {
+            return SubstitutionType::IsobaricDipeptide {
+                single_residue: single,
+                dipeptide,
+            };
+        }
+    }
+
+    // General categorization by delta mass
+    if delta_mass.abs() < config.delta_mass_threshold_da {
+        SubstitutionType::NearIsobaric
+    } else {
+        SubstitutionType::Distinguishable
+    }
+}
+
+/// Check if the single differing position is a Q↔K swap.
+fn is_qk_substitution(a: &str, b: &str) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let diffs: Vec<(char, char)> = a
+        .chars()
+        .zip(b.chars())
+        .filter(|(ca, cb)| ca != cb)
+        .collect();
+    if diffs.len() != 1 {
+        return false;
+    }
+    let (ca, cb) = diffs[0];
+    (ca == 'Q' && cb == 'K') || (ca == 'K' && cb == 'Q')
+}
+
+/// Check if the alignment represents an isobaric dipeptide substitution.
+///
+/// Looks for N↔GG or Q↔AG patterns where one sequence has the single residue
+/// and the other has the dipeptide at the same position.
+fn check_isobaric_dipeptide(shorter: &str, longer: &str) -> Option<(char, String)> {
+    let (s, l) = if shorter.len() < longer.len() {
+        (shorter, longer)
+    } else if shorter.len() > longer.len() {
+        (longer, shorter)
+    } else {
+        return None; // same length, not a dipeptide substitution
+    };
+
+    if l.len() != s.len() + 1 {
+        return None;
+    }
+
+    // Find the position where they diverge
+    let s_chars: Vec<char> = s.chars().collect();
+    let l_chars: Vec<char> = l.chars().collect();
+
+    for i in 0..s_chars.len() {
+        if s_chars[i] != l_chars[i] {
+            // Check if s[i] maps to l[i..i+2]
+            if i + 1 < l_chars.len() {
+                let single = s_chars[i];
+                let dipeptide: String = l_chars[i..=i + 1].iter().collect();
+                // Check if the rest matches (shifted by 1)
+                let rest_matches = s_chars[i + 1..]
+                    .iter()
+                    .zip(l_chars[i + 2..].iter())
+                    .all(|(a, b)| a == b);
+                if rest_matches {
+                    // Check against known isobaric pairs
+                    for &(known_single, known_di) in ISOBARIC_DIPEPTIDES {
+                        if single == known_single && dipeptide == known_di {
+                            return Some((known_single, known_di.to_string()));
+                        }
+                    }
+                }
+            }
+            return None;
+        }
+    }
+
+    // Divergence at the very end: s is a prefix of l, extra char at end
+    None
 }
 
 /// Classify a single PSM against the target digest index.
@@ -148,9 +259,10 @@ pub fn classify_single(
         }
     }
 
-    // --- L2/L3/L4: brute-force hamming scan -------------------------------
-    let candidates = index.peptides_of_length(psm.peptide.len());
+    // --- L2/L3/L4: edit-distance scan (v2) --------------------------------
 
+    // Phase A: same-length Hamming scan (fast path, backward compatible)
+    let candidates = index.peptides_of_length(psm.peptide.len());
     let mut best_mm: u16 = u16::MAX;
     let mut best_dm: f64 = f64::MAX;
     let mut best_dp = String::new();
@@ -160,17 +272,14 @@ pub fn classify_single(
     for target in candidates {
         let (mm, dm, dp) = match hamming_diff(&psm.peptide, &target.sequence) {
             Some(v) => v,
-            None => continue, // shouldn't happen – same length
+            None => continue,
         };
-
         if mm == 0 {
-            // exact match already handled above
             continue;
         }
         if mm > config.max_mismatches {
             continue;
         }
-        // Skip pure L/I substitutions – those are L1 territory.
         if is_only_li_substitution(&psm.peptide, &target.sequence) {
             continue;
         }
@@ -185,10 +294,69 @@ pub fn classify_single(
         }
     }
 
-    // Decide level from best match
-    if best_mm == u16::MAX {
-        // No close match found → L4
-        return ClassifiedPsm {
+    // Phase B: cross-length edit distance scan (v2 upgrade)
+    let cross_matches = index.find_similar(
+        &psm.peptide,
+        config.max_mismatches,
+        config.len_tolerance,
+        config,
+    );
+
+    // Find best cross-length match (only consider matches with different length)
+    let best_cross = cross_matches
+        .iter()
+        .filter(|m| m.target_peptide.len() != psm.peptide.len())
+        .min_by(|a, b| {
+            a.edit_distance.cmp(&b.edit_distance).then_with(|| {
+                a.delta_mass_da
+                    .abs()
+                    .partial_cmp(&b.delta_mass_da.abs())
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+        });
+
+    // Determine overall best: compare Hamming best vs cross-length best
+    enum BestMatch<'a> {
+        Hamming {
+            mm: u16,
+            dm: f64,
+            dp: String,
+            seq: &'a str,
+            prot: &'a str,
+        },
+        CrossLength(SimilarityMatch),
+        None,
+    }
+
+    let overall_best = match (best_mm < u16::MAX, best_cross) {
+        (true, Some(cross)) => {
+            if (best_mm as u32) <= cross.edit_distance
+                || ((best_mm as u32) == cross.edit_distance && best_dm <= cross.delta_mass_da.abs())
+            {
+                BestMatch::Hamming {
+                    mm: best_mm,
+                    dm: best_dm,
+                    dp: best_dp,
+                    seq: best_seq.unwrap_or_default(),
+                    prot: best_prot.unwrap_or_default(),
+                }
+            } else {
+                BestMatch::CrossLength(cross.clone())
+            }
+        }
+        (true, None) => BestMatch::Hamming {
+            mm: best_mm,
+            dm: best_dm,
+            dp: best_dp,
+            seq: best_seq.unwrap_or_default(),
+            prot: best_prot.unwrap_or_default(),
+        },
+        (false, Some(cross)) => BestMatch::CrossLength(cross.clone()),
+        (false, None) => BestMatch::None,
+    };
+
+    match overall_best {
+        BestMatch::None => ClassifiedPsm {
             psm: psm.clone(),
             group,
             level: DiscriminabilityLevel::L4,
@@ -200,27 +368,63 @@ pub fn classify_single(
             substitution_type: SubstitutionType::None,
             edit_distance: None,
             alignment_detail: None,
-        };
-    }
-
-    let level = if best_mm == 1 && best_dm < config.delta_mass_threshold_da {
-        DiscriminabilityLevel::L2
-    } else {
-        DiscriminabilityLevel::L3
-    };
-
-    ClassifiedPsm {
-        psm: psm.clone(),
-        group,
-        level,
-        best_target_peptide: best_seq.map(|s| s.to_owned()),
-        best_target_protein: best_prot.map(|s| s.to_owned()),
-        mismatches: Some(best_mm),
-        delta_mass_da: Some(best_dm),
-        diff_positions: Some(best_dp),
-        substitution_type: SubstitutionType::None,
-        edit_distance: None,
-        alignment_detail: None,
+        },
+        BestMatch::Hamming {
+            mm,
+            dm,
+            dp,
+            seq,
+            prot,
+        } => {
+            let sub_type = categorize_substitution(&psm.peptide, seq, mm as u32, dm, &dp, config);
+            let alignment = levenshtein::align(&psm.peptide, seq);
+            let level = if dm < config.delta_mass_threshold_da {
+                DiscriminabilityLevel::L2
+            } else {
+                DiscriminabilityLevel::L3
+            };
+            ClassifiedPsm {
+                psm: psm.clone(),
+                group,
+                level,
+                best_target_peptide: Some(seq.to_owned()),
+                best_target_protein: Some(prot.to_owned()),
+                mismatches: Some(mm),
+                delta_mass_da: Some(dm),
+                diff_positions: Some(dp),
+                substitution_type: sub_type,
+                edit_distance: Some(mm as u32),
+                alignment_detail: Some(alignment.alignment_detail),
+            }
+        }
+        BestMatch::CrossLength(cross) => {
+            let sub_type = categorize_substitution(
+                &psm.peptide,
+                &cross.target_peptide,
+                cross.edit_distance,
+                cross.delta_mass_da,
+                &cross.alignment_detail,
+                config,
+            );
+            let level = if cross.delta_mass_da.abs() < config.delta_mass_threshold_da {
+                DiscriminabilityLevel::L2
+            } else {
+                DiscriminabilityLevel::L3
+            };
+            ClassifiedPsm {
+                psm: psm.clone(),
+                group,
+                level,
+                best_target_peptide: Some(cross.target_peptide),
+                best_target_protein: Some(cross.target_protein),
+                mismatches: None,
+                delta_mass_da: Some(cross.delta_mass_da),
+                diff_positions: None,
+                substitution_type: sub_type,
+                edit_distance: Some(cross.edit_distance),
+                alignment_detail: Some(cross.alignment_detail),
+            }
+        }
     }
 }
 
@@ -425,5 +629,64 @@ mod tests {
         let result = classify_single(&psm, PsmGroup::Trap, &index, &config);
         // Pure L/I substitution is skipped in hamming scan, no L1 set up → L4
         assert_eq!(result.level, DiscriminabilityLevel::L4);
+    }
+
+    #[test]
+    fn test_classify_trap_l1_gets_li_isomer_type() {
+        let psm = make_psm("PEPTIDEK");
+        let mut index = TargetDigestIndex::empty_for_test();
+        let norm = "PEPTLDEK";
+        index.normalized_set.insert(norm.to_owned());
+        index.normalized_to_original.insert(
+            norm.to_owned(),
+            ("PEPTLDEK".to_owned(), "P00002".to_owned()),
+        );
+        let config = SimilarityConfig::default();
+        let result = classify_single(&psm, PsmGroup::Trap, &index, &config);
+        assert_eq!(result.level, DiscriminabilityLevel::L1);
+        assert_eq!(result.substitution_type, SubstitutionType::LIIsomer);
+    }
+
+    #[test]
+    fn test_classify_l2_near_isobaric_has_edit_distance() {
+        let psm = make_psm("DGFLLDGFPR");
+        let mut index = TargetDigestIndex::empty_for_test();
+        index.by_length.insert(
+            10,
+            vec![TargetPeptide {
+                sequence: "NGFLLDGFPR".to_owned(),
+                protein_accession: "P00003".to_owned(),
+                neutral_mass: 0.0,
+            }],
+        );
+        let config = SimilarityConfig::default();
+        let result = classify_single(&psm, PsmGroup::Trap, &index, &config);
+        assert_eq!(result.level, DiscriminabilityLevel::L2);
+        assert_eq!(result.edit_distance, Some(1));
+        assert!(result.alignment_detail.is_some());
+    }
+
+    #[test]
+    fn test_classify_l0_has_none_substitution_type() {
+        let psm = make_psm("PEPTIDEK");
+        let mut index = TargetDigestIndex::empty_for_test();
+        index.exact_set.insert("PEPTIDEK".to_owned());
+        index
+            .exact_to_protein
+            .insert("PEPTIDEK".to_owned(), "P00001".to_owned());
+        let config = SimilarityConfig::default();
+        let result = classify_single(&psm, PsmGroup::Trap, &index, &config);
+        assert_eq!(result.level, DiscriminabilityLevel::L0);
+        assert_eq!(result.substitution_type, SubstitutionType::None);
+    }
+
+    #[test]
+    fn test_classify_l4_has_none_substitution_type() {
+        let psm = make_psm("DGFLLDGFPR");
+        let index = TargetDigestIndex::empty_for_test();
+        let config = SimilarityConfig::default();
+        let result = classify_single(&psm, PsmGroup::Trap, &index, &config);
+        assert_eq!(result.level, DiscriminabilityLevel::L4);
+        assert_eq!(result.substitution_type, SubstitutionType::None);
     }
 }
