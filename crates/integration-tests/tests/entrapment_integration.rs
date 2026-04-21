@@ -247,9 +247,11 @@ similarity:
         .find(|l| l.contains("DGFLLDGFPR"))
         .expect("should find DGFLLDGFPR row");
     let cols: Vec<&str> = l2_row.split('\t').collect();
-    // substitution_type is second-to-last-2, edit_distance is second-to-last-1
-    let sub_type_col = cols.iter().rev().nth(2).unwrap();
-    let edit_dist_col = cols.iter().rev().nth(1).unwrap();
+    let header_cols: Vec<&str> = content.lines().next().unwrap().split('\t').collect();
+    let sub_type_idx = header_cols.iter().position(|&h| h == "substitution_type").unwrap();
+    let edit_dist_idx = header_cols.iter().position(|&h| h == "edit_distance").unwrap();
+    let sub_type_col = cols[sub_type_idx];
+    let edit_dist_col = cols[edit_dist_idx];
     assert!(
         !sub_type_col.is_empty(),
         "L2 row substitution_type should not be empty"
