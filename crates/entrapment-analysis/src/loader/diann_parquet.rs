@@ -3,6 +3,7 @@
 //! Reads the following columns:
 //! - `Stripped.Sequence` — stripped peptide sequence (essential)
 //! - `Protein.Ids` — semicolon-separated protein accessions (essential)
+//! - `Modified.Sequence` — modified sequence with UniMod annotations (optional)
 //! - `Precursor.Charge` — charge state (optional)
 //! - `Precursor.Mz` — precursor m/z (optional)
 //! - `RT` — retention time in minutes (optional)
@@ -17,6 +18,7 @@ use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use tracing;
 
 use crate::error::EntrapmentError;
+use crate::mod_parser::parse_modified_sequence;
 use crate::types::UnifiedPsm;
 
 /// Load DIA-NN parquet results into a vector of [`UnifiedPsm`].
@@ -64,6 +66,8 @@ pub fn load_diann_parquet(path: &Path) -> Result<Vec<UnifiedPsm>, EntrapmentErro
         let rt_col = get_float_column_optional(&batch, &schema, "RT");
         let qvalue_col = get_float_column_optional(&batch, &schema, "Q.Value");
         let run_col = get_string_column_optional(&batch, &schema, "Run");
+        let modified_seq_col =
+            get_string_column_optional(&batch, &schema, "Modified.Sequence");
 
         for row in 0..batch.num_rows() {
             let peptide = get_str(&peptide_col, row).to_string();
@@ -83,6 +87,19 @@ pub fn load_diann_parquet(path: &Path) -> Result<Vec<UnifiedPsm>, EntrapmentErro
                 .filter(|s| !s.is_empty())
                 .map(|s| s.to_string());
 
+            // Parse modifications from Modified.Sequence (if present)
+            let modifications = modified_seq_col
+                .as_ref()
+                .map(|c| get_str(c, row))
+                .filter(|s| !s.is_empty())
+                .map(|s| {
+                    let (_stripped, mods) = parse_modified_sequence(s);
+                    mods.iter()
+                        .map(|m| (m.position, m.delta_mass))
+                        .collect::<Vec<(usize, f64)>>()
+                })
+                .unwrap_or_default();
+
             psms.push(UnifiedPsm {
                 peptide,
                 charge,
@@ -92,7 +109,7 @@ pub fn load_diann_parquet(path: &Path) -> Result<Vec<UnifiedPsm>, EntrapmentErro
                 spectrum_file,
                 protein_ids,
                 q_value,
-                modifications: Vec::new(),
+                modifications,
             });
         }
     }
@@ -195,4 +212,42 @@ fn get_f64(col: &Arc<dyn Array>, row: usize) -> Option<f64> {
         return Some(a.value(row) as f64);
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::mod_parser::parse_modified_sequence;
+
+    #[test]
+    fn test_modifications_from_parsed() {
+        let (stripped, mods) = parse_modified_sequence("AAAC(UniMod:4)DFK");
+        assert_eq!(stripped, "AAACDFK");
+        let modifications: Vec<(usize, f64)> =
+            mods.iter().map(|m| (m.position, m.delta_mass)).collect();
+        assert_eq!(modifications.len(), 1);
+        assert_eq!(modifications[0].0, 3);
+        assert!((modifications[0].1 - 57.021464).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_modifications_empty_when_unmodified() {
+        let (stripped, mods) = parse_modified_sequence("PEPTIDE");
+        assert_eq!(stripped, "PEPTIDE");
+        let modifications: Vec<(usize, f64)> =
+            mods.iter().map(|m| (m.position, m.delta_mass)).collect();
+        assert!(modifications.is_empty());
+    }
+
+    #[test]
+    fn test_modifications_multiple_mods() {
+        let (stripped, mods) = parse_modified_sequence("AC(UniMod:4)DEFM(UniMod:35)GK");
+        assert_eq!(stripped, "ACDEFMGK");
+        let modifications: Vec<(usize, f64)> =
+            mods.iter().map(|m| (m.position, m.delta_mass)).collect();
+        assert_eq!(modifications.len(), 2);
+        assert_eq!(modifications[0].0, 1); // C at position 1
+        assert!((modifications[0].1 - 57.021464).abs() < 1e-6);
+        assert_eq!(modifications[1].0, 5); // M at position 5
+        assert!((modifications[1].1 - 15.994915).abs() < 1e-6);
+    }
 }
