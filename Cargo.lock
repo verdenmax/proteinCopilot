@@ -1615,6 +1615,7 @@ dependencies = [
  "parquet",
  "protein-copilot-core",
  "protein-copilot-search-engine",
+ "protein-copilot-spectrum-io",
  "regex",
  "serde",
  "serde_json",

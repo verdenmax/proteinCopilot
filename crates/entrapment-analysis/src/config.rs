@@ -29,6 +29,10 @@ pub struct EntrapmentConfig {
     /// Parameters governing sequence-similarity / homology scoring.
     #[serde(default)]
     pub similarity: SimilarityConfig,
+
+    /// Parameters for fragment ion provenance analysis (v3).
+    #[serde(default)]
+    pub provenance: ProvenanceConfig,
 }
 
 /// Configuration for a single classification group (target **or** trap).
@@ -146,6 +150,58 @@ pub struct SimilarityConfig {
     /// Enable Q/K near-isobaric substitution detection.
     #[serde(default = "default_true")]
     pub enable_qk_detection: bool,
+}
+
+/// Configuration for fragment ion provenance analysis (v3).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProvenanceConfig {
+    /// Fragment-ion mass tolerance in ppm.
+    #[serde(default = "default_fragment_tolerance_ppm")]
+    pub fragment_tolerance_ppm: f64,
+
+    /// Maximum charge state to consider for fragment ions.
+    #[serde(default = "default_max_fragment_charge")]
+    pub max_fragment_charge: i32,
+
+    /// Fraction of explained intensity above which a spectrum is flagged as chimeric.
+    #[serde(default = "default_chimera_threshold")]
+    pub chimera_threshold: f64,
+
+    /// Minimum number of peaks required to run provenance analysis on a spectrum.
+    #[serde(default = "default_min_peaks_for_analysis")]
+    pub min_peaks_for_analysis: u32,
+
+    /// Which similarity levels to include in the provenance trace.
+    #[serde(default = "default_levels_to_trace")]
+    pub levels_to_trace: Vec<String>,
+}
+
+impl Default for ProvenanceConfig {
+    fn default() -> Self {
+        Self {
+            fragment_tolerance_ppm: default_fragment_tolerance_ppm(),
+            max_fragment_charge: default_max_fragment_charge(),
+            chimera_threshold: default_chimera_threshold(),
+            min_peaks_for_analysis: default_min_peaks_for_analysis(),
+            levels_to_trace: default_levels_to_trace(),
+        }
+    }
+}
+
+fn default_fragment_tolerance_ppm() -> f64 {
+    20.0
+}
+fn default_max_fragment_charge() -> i32 {
+    2
+}
+fn default_chimera_threshold() -> f64 {
+    0.3
+}
+fn default_min_peaks_for_analysis() -> u32 {
+    6
+}
+fn default_levels_to_trace() -> Vec<String> {
+    vec!["L2".to_string(), "L3".to_string(), "L4".to_string()]
 }
 
 fn default_max_mismatches() -> u16 {
@@ -394,6 +450,28 @@ similarity:
 "#;
         let cfg = EntrapmentConfig::from_yaml_str(yaml).expect("parse with alias");
         assert!((cfg.similarity.delta_mass_threshold_da - 0.5).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn provenance_config_defaults() {
+        let yaml = "version: 1\ntarget:\n  rules: []\ntrap:\n  rules: []\n";
+        let config: EntrapmentConfig = serde_yaml::from_str(yaml).unwrap();
+        assert!((config.provenance.fragment_tolerance_ppm - 20.0).abs() < 1e-6);
+        assert_eq!(config.provenance.max_fragment_charge, 2);
+        assert!((config.provenance.chimera_threshold - 0.3).abs() < 1e-6);
+        assert_eq!(config.provenance.min_peaks_for_analysis, 6);
+        assert_eq!(config.provenance.levels_to_trace, vec!["L2", "L3", "L4"]);
+    }
+
+    #[test]
+    fn provenance_config_custom_values() {
+        let yaml = "version: 1\ntarget:\n  rules: []\ntrap:\n  rules: []\nprovenance:\n  fragment_tolerance_ppm: 10.0\n  max_fragment_charge: 3\n  chimera_threshold: 0.5\n  min_peaks_for_analysis: 10\n  levels_to_trace: [\"L3\", \"L4\"]\n";
+        let config: EntrapmentConfig = serde_yaml::from_str(yaml).unwrap();
+        assert!((config.provenance.fragment_tolerance_ppm - 10.0).abs() < 1e-6);
+        assert_eq!(config.provenance.max_fragment_charge, 3);
+        assert!((config.provenance.chimera_threshold - 0.5).abs() < 1e-6);
+        assert_eq!(config.provenance.min_peaks_for_analysis, 10);
+        assert_eq!(config.provenance.levels_to_trace, vec!["L3", "L4"]);
     }
 
     #[test]

@@ -30,4 +30,10 @@ pub enum EntrapmentError {
 
     #[error("tagging error: {detail}")]
     TaggingError { detail: String },
+
+    #[error("provenance error: {detail}")]
+    ProvenanceError { detail: String },
+
+    #[error("spectrum read error for {path}: {detail}")]
+    SpectrumError { path: PathBuf, detail: String },
 }
