@@ -68,11 +68,11 @@ pub fn align(a: &str, b: &str) -> AlignmentResult {
 
     // Build full DP matrix for backtracking
     let mut dp = vec![vec![0u32; n + 1]; m + 1];
-    for i in 0..=m {
-        dp[i][0] = i as u32;
+    for (i, row) in dp.iter_mut().enumerate().take(m + 1) {
+        row[0] = i as u32;
     }
-    for j in 0..=n {
-        dp[0][j] = j as u32;
+    for (j, val) in dp[0].iter_mut().enumerate().take(n + 1) {
+        *val = j as u32;
     }
     for i in 1..=m {
         for j in 1..=n {

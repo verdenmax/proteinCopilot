@@ -203,7 +203,7 @@ pub fn classify_single(
         };
     }
 
-    let level = if best_mm == 1 && best_dm < config.delta_mz_threshold_da {
+    let level = if best_mm == 1 && best_dm < config.delta_mass_threshold_da {
         DiscriminabilityLevel::L2
     } else {
         DiscriminabilityLevel::L3
