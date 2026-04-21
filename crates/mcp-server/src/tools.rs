@@ -3634,6 +3634,7 @@ impl ProteinCopilotServer {
         let index = TargetDigestIndex::from_fasta(
             std::path::Path::new(&input.target_fasta),
             sim_config.max_missed_cleavages,
+            sim_config.max_mismatches,
         )
         .map_err(|e| ErrorData::new(ErrorCode::INTERNAL_ERROR, format!("{e}"), None))?;
 

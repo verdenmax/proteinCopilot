@@ -46,8 +46,11 @@ impl EntrapmentAnalyzer {
     /// index from the FASTA file.
     pub fn new(config: EntrapmentConfig, fasta_path: &Path) -> Result<Self, EntrapmentError> {
         let tagger = Tagger::new(&config)?;
-        let index =
-            TargetDigestIndex::from_fasta(fasta_path, config.similarity.max_missed_cleavages)?;
+        let index = TargetDigestIndex::from_fasta(
+            fasta_path,
+            config.similarity.max_missed_cleavages,
+            config.similarity.max_mismatches,
+        )?;
         Ok(Self {
             config,
             tagger,

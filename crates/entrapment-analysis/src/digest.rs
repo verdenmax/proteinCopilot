@@ -103,7 +103,11 @@ impl TargetDigestIndex {
     /// Parses the FASTA, performs tryptic digestion with the given number of
     /// missed cleavages (length range 6–50), filters to standard-residue
     /// peptides, and constructs all lookup structures.
-    pub fn from_fasta(path: &Path, max_missed_cleavages: u32) -> Result<Self, EntrapmentError> {
+    pub fn from_fasta(
+        path: &Path,
+        max_missed_cleavages: u32,
+        max_edit_distance: u16,
+    ) -> Result<Self, EntrapmentError> {
         let entries = parse_fasta(path).map_err(|e| EntrapmentError::FastaError {
             path: path.to_path_buf(),
             detail: e.to_string(),
@@ -165,9 +169,9 @@ impl TargetDigestIndex {
         );
 
         // Determine k for pigeonhole guarantee: k = min_len / (max_edit + 1)
+        // Must use the actual configured max_edit_distance to ensure no false negatives.
         let min_peptide_len = 6usize; // our min digest length
-        let max_edit = 2u16; // default max_mismatches
-        let kmer_k = (min_peptide_len / (max_edit as usize + 1)).max(2); // at least 2
+        let kmer_k = (min_peptide_len / (max_edit_distance as usize + 1)).max(1);
 
         // Build flat peptide array and k-mer inverted index
         let mut all_peptides: Vec<TargetPeptide> = Vec::new();
@@ -381,7 +385,7 @@ mod tests {
         )
         .expect("write fasta");
 
-        let idx = TargetDigestIndex::from_fasta(f.path(), 0).expect("build index");
+        let idx = TargetDigestIndex::from_fasta(f.path(), 0, 2).expect("build index");
 
         // Should contain the tryptic peptides >= 6 aa
         assert!(idx.has_exact("PEPTIDEK"));
@@ -412,7 +416,7 @@ mod tests {
         )
         .expect("write fasta");
 
-        let idx = TargetDigestIndex::from_fasta(f.path(), 0).expect("build index");
+        let idx = TargetDigestIndex::from_fasta(f.path(), 0, 2).expect("build index");
 
         // "ELVISLSK" should be in the index (8 chars, ends with K)
         assert!(idx.has_exact("ELVISLSK"));
@@ -428,7 +432,7 @@ mod tests {
 
     #[test]
     fn test_from_fasta_error_on_missing_file() {
-        let result = TargetDigestIndex::from_fasta(Path::new("/nonexistent/db.fasta"), 0);
+        let result = TargetDigestIndex::from_fasta(Path::new("/nonexistent/db.fasta"), 0, 2);
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(
@@ -450,7 +454,7 @@ mod tests {
             ">sp|P001|TEST_HUMAN Test\nPEPTIDEKANSTHERPEPTIDERLASTPART\n"
         )
         .unwrap();
-        let idx = TargetDigestIndex::from_fasta(f.path(), 2).expect("build index");
+        let idx = TargetDigestIndex::from_fasta(f.path(), 2, 2).expect("build index");
         // k-mer index should be populated
         assert!(!idx.kmer_index.is_empty());
         assert!(!idx.all_peptides.is_empty());
@@ -463,7 +467,12 @@ mod tests {
         let mut f = tempfile::NamedTempFile::new().expect("create temp file");
         write!(f, ">sp|P001|TEST_HUMAN Test\nPEPTIDEKANSTHERR\n").unwrap();
         let config = SimilarityConfig::default();
-        let idx = TargetDigestIndex::from_fasta(f.path(), config.max_missed_cleavages).unwrap();
+        let idx = TargetDigestIndex::from_fasta(
+            f.path(),
+            config.max_missed_cleavages,
+            config.max_mismatches,
+        )
+        .unwrap();
         // "PEPTIDEK" is in the index; find_similar should not return exact matches
         let matches = idx.find_similar("PEPTIDEK", 2, 2, &config);
         for m in &matches {
@@ -478,7 +487,12 @@ mod tests {
         // Target has "NGFLLDGFPR", query is "DGFLLDGFPR" (D→N, edit=1)
         write!(f, ">sp|P001|TEST_HUMAN Test\nNGFLLDGFPR\n").unwrap();
         let config = SimilarityConfig::default();
-        let idx = TargetDigestIndex::from_fasta(f.path(), config.max_missed_cleavages).unwrap();
+        let idx = TargetDigestIndex::from_fasta(
+            f.path(),
+            config.max_missed_cleavages,
+            config.max_mismatches,
+        )
+        .unwrap();
         let matches = idx.find_similar("DGFLLDGFPR", 2, 2, &config);
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].target_peptide, "NGFLLDGFPR");
@@ -497,7 +511,12 @@ mod tests {
         // Target: "PEPGGDEK" (8 chars), Query: "PEPNDEK" (7 chars)
         write!(f, ">sp|P001|TEST_HUMAN Test\nPEPGGDEKKAAAAAR\n").unwrap();
         let config = SimilarityConfig::default();
-        let idx = TargetDigestIndex::from_fasta(f.path(), config.max_missed_cleavages).unwrap();
+        let idx = TargetDigestIndex::from_fasta(
+            f.path(),
+            config.max_missed_cleavages,
+            config.max_mismatches,
+        )
+        .unwrap();
         let matches = idx.find_similar("PEPNDEK", 2, 2, &config);
         // Should find "PEPGGDEK" as a candidate (len 8 is within len_tolerance=2 of len 7)
         let found = matches.iter().any(|m| m.target_peptide == "PEPGGDEK");
@@ -514,7 +533,12 @@ mod tests {
         let mut f = tempfile::NamedTempFile::new().expect("create temp file");
         write!(f, ">sp|P001|TEST_HUMAN Test\nWWWWWWWWR\n").unwrap();
         let config = SimilarityConfig::default();
-        let idx = TargetDigestIndex::from_fasta(f.path(), config.max_missed_cleavages).unwrap();
+        let idx = TargetDigestIndex::from_fasta(
+            f.path(),
+            config.max_missed_cleavages,
+            config.max_mismatches,
+        )
+        .unwrap();
         // Completely different peptide
         let matches = idx.find_similar("PEPTIDEK", 2, 2, &config);
         assert!(matches.is_empty());
