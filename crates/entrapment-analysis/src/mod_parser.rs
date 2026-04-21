@@ -19,15 +19,15 @@ pub struct ParsedModification {
 ///
 /// Returns `None` for unknown IDs. Covers the 13 most common accessions
 /// encountered in DIA-NN / pFind / MaxQuant output.
-fn unimod_delta_mass(id: u32) -> Option<f64> {
+pub fn unimod_delta_mass(id: u32) -> Option<f64> {
     match id {
         1 => Some(42.010565),    // Acetyl (N-term)
         4 => Some(57.021464),    // Carbamidomethyl (C)
         5 => Some(43.005814),    // Carbamyl
         7 => Some(0.984016),     // Deamidated (N, Q)
         21 => Some(79.966331),   // Phospho (S, T, Y)
-        27 => Some(-17.026549),  // Glu->pyro-Glu
-        28 => Some(-18.010565),  // Gln->pyro-Glu
+        27 => Some(-18.010565),  // Glu->pyro-Glu (loss of H₂O)
+        28 => Some(-17.026549),  // Gln->pyro-Glu (loss of NH₃)
         34 => Some(14.015650),   // Methyl
         35 => Some(15.994915),   // Oxidation (M)
         121 => Some(114.042927), // GG (ubiquitin remnant, K)
