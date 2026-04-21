@@ -739,6 +739,9 @@ struct FindSimilarTargetsOutput {
     delta_mass_da: Option<f64>,
     diff_positions: Option<String>,
     index_size: usize,
+    substitution_type: Option<String>,
+    edit_distance: Option<u32>,
+    alignment_detail: Option<String>,
 }
 
 fn default_import_format() -> String {
@@ -798,17 +801,12 @@ fn organism_to_database_id(organism: &str) -> Option<&'static str> {
         || lower.contains("escherichia")
     {
         Some("ecoli_swissprot")
-    } else if lower.contains("yeast")
-        || lower.contains("酵母")
-        || lower.contains("saccharomyces")
+    } else if lower.contains("yeast") || lower.contains("酵母") || lower.contains("saccharomyces")
     {
         Some("yeast_swissprot")
     } else if lower.contains("arabidopsis") || lower.contains("拟南芥") {
         Some("arabidopsis_swissprot")
-    } else if lower.contains("contaminant")
-        || lower.contains("污染")
-        || lower.contains("crap")
-    {
+    } else if lower.contains("contaminant") || lower.contains("污染") || lower.contains("crap") {
         Some("crap")
     } else {
         None
@@ -1488,12 +1486,15 @@ impl ProteinCopilotServer {
                                     // Populate input_files for DIA results
                                     result.metadata.input_files = dia_source.clone();
                                     // Run anomaly detection
-                                    let tol_ppm = if params.precursor_tolerance.unit == protein_copilot_core::search_params::ToleranceUnit::Ppm {
+                                    let tol_ppm = if params.precursor_tolerance.unit
+                                        == protein_copilot_core::search_params::ToleranceUnit::Ppm
+                                    {
                                         Some(params.precursor_tolerance.value)
                                     } else {
                                         None
                                     };
-                                    let decoy_count = result.psms.iter().filter(|p| p.is_decoy).count() as u64;
+                                    let decoy_count =
+                                        result.psms.iter().filter(|p| p.is_decoy).count() as u64;
                                     diagnostics.finalize(
                                         Some(result.summary.identification_rate),
                                         Some(result.summary.psms_at_1pct_fdr),
@@ -1530,7 +1531,8 @@ impl ProteinCopilotServer {
                                     Some(entry)
                                 }
                                 Err(e) => {
-                                    state.progress.error_category = diagnostics.error_category.clone();
+                                    state.progress.error_category =
+                                        diagnostics.error_category.clone();
                                     state.diagnostics = Some(diagnostics);
                                     state.params_used = Some(params.clone());
                                     state.progress.has_diagnostics = true;
@@ -1738,7 +1740,9 @@ impl ProteinCopilotServer {
             };
 
             let mut diagnostics = protein_copilot_core::diagnostics::SearchDiagnostics::new();
-            let search_result = engine.search(&params, &files, on_progress, &mut diagnostics).await;
+            let search_result = engine
+                .search(&params, &files, on_progress, &mut diagnostics)
+                .await;
             let duration = start.elapsed().as_secs_f64();
 
             // Single lock — update progress + result atomically
@@ -1755,12 +1759,15 @@ impl ProteinCopilotServer {
                                 result.run_id = run_id;
                                 result.metadata.run_id = run_id;
                                 // Run anomaly detection
-                                let tol_ppm = if params.precursor_tolerance.unit == protein_copilot_core::search_params::ToleranceUnit::Ppm {
+                                let tol_ppm = if params.precursor_tolerance.unit
+                                    == protein_copilot_core::search_params::ToleranceUnit::Ppm
+                                {
                                     Some(params.precursor_tolerance.value)
                                 } else {
                                     None
                                 };
-                                let decoy_count = result.psms.iter().filter(|p| p.is_decoy).count() as u64;
+                                let decoy_count =
+                                    result.psms.iter().filter(|p| p.is_decoy).count() as u64;
                                 diagnostics.finalize(
                                     Some(result.summary.identification_rate),
                                     Some(result.summary.psms_at_1pct_fdr),
@@ -2180,9 +2187,7 @@ impl ProteinCopilotServer {
                     .ok_or_else(|| {
                         mcp_err(
                             ErrorCode::INVALID_PARAMS,
-                            format!(
-                                "No MS2 scan near RT={rt:.2}min mz={precursor_mz:.4}"
-                            ),
+                            format!("No MS2 scan near RT={rt:.2}min mz={precursor_mz:.4}"),
                         )
                     })?
             } else {
@@ -2259,20 +2264,29 @@ impl ProteinCopilotServer {
                 let heavy_scan_result = if is_dia {
                     // DIA: binary search finds scan whose isolation window contains heavy m/z
                     reader
-                        .find_by_rt(&spectrum_file, spectrum.retention_time_min, heavy_prec_mz, 0.5)
+                        .find_by_rt(
+                            &spectrum_file,
+                            spectrum.retention_time_min,
+                            heavy_prec_mz,
+                            0.5,
+                        )
                         .unwrap_or(None)
                 } else {
                     // DDA: binary search finds RT-nearest MS2 scan, then verify precursor m/z
                     // We use a wider RT tolerance since DDA heavy scans can be several scans away
                     let candidates = reader
-                        .find_by_rt(&spectrum_file, spectrum.retention_time_min, heavy_prec_mz, 0.5)
+                        .find_by_rt(
+                            &spectrum_file,
+                            spectrum.retention_time_min,
+                            heavy_prec_mz,
+                            0.5,
+                        )
                         .unwrap_or(None);
                     // Verify precursor m/z match at 20 ppm for DDA
                     if let Some((scan, delta)) = candidates {
                         match reader.read_spectrum(&spectrum_file, scan) {
                             Ok(spec) => {
-                                let prec_mz =
-                                    spec.precursors.first().map(|p| p.mz).unwrap_or(0.0);
+                                let prec_mz = spec.precursors.first().map(|p| p.mz).unwrap_or(0.0);
                                 let ppm_err =
                                     ((prec_mz - heavy_prec_mz) / heavy_prec_mz * 1e6).abs();
                                 if ppm_err < 20.0 {
@@ -2767,9 +2781,7 @@ impl ProteinCopilotServer {
                     .ok_or_else(|| {
                         mcp_err(
                             ErrorCode::INVALID_PARAMS,
-                            format!(
-                                "No MS2 scan near RT={rt:.2}min mz={precursor_mz:.4}"
-                            ),
+                            format!("No MS2 scan near RT={rt:.2}min mz={precursor_mz:.4}"),
                         )
                     })?
             } else {
@@ -3222,10 +3234,9 @@ impl ProteinCopilotServer {
                     )
             });
 
-            let dl_result =
-                protein_copilot_fasta_db::download_database(db_id, &cache_dir, false)
-                    .await
-                    .map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, e))?;
+            let dl_result = protein_copilot_fasta_db::download_database(db_id, &cache_dir, false)
+                .await
+                .map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, e))?;
 
             params.database_path = dl_result.path.clone();
 
@@ -3340,9 +3351,10 @@ impl ProteinCopilotServer {
             )
         })?;
 
-        let cache = self.run_cache.lock().map_err(|_| {
-            mcp_err(ErrorCode::INTERNAL_ERROR, "run cache lock is poisoned")
-        })?;
+        let cache = self
+            .run_cache
+            .lock()
+            .map_err(|_| mcp_err(ErrorCode::INTERNAL_ERROR, "run cache lock is poisoned"))?;
 
         let state = cache.get(&id).ok_or_else(|| {
             mcp_err(
@@ -3410,17 +3422,28 @@ impl ProteinCopilotServer {
         let psms = loader::load_psms(std::path::Path::new(&input.results_file), &format, None)
             .map_err(|e| ErrorData::new(ErrorCode::INTERNAL_ERROR, format!("{e}"), None))?;
 
-        let analyzer = EntrapmentAnalyzer::new(config.clone(), std::path::Path::new(&input.target_fasta))
-            .map_err(|e| ErrorData::new(ErrorCode::INTERNAL_ERROR, format!("{e}"), None))?;
+        let analyzer =
+            EntrapmentAnalyzer::new(config.clone(), std::path::Path::new(&input.target_fasta))
+                .map_err(|e| ErrorData::new(ErrorCode::INTERNAL_ERROR, format!("{e}"), None))?;
 
-        let classified = analyzer.classify_all(&psms)
+        let classified = analyzer
+            .classify_all(&psms)
             .map_err(|e| ErrorData::new(ErrorCode::INTERNAL_ERROR, format!("{e}"), None))?;
 
         let summary = analyzer.summary(&classified);
 
-        let out_dir = std::path::PathBuf::from(input.output_dir.unwrap_or_else(|| "output/entrapment".to_string()));
-        std::fs::create_dir_all(&out_dir)
-            .map_err(|e| ErrorData::new(ErrorCode::INTERNAL_ERROR, format!("create output dir: {e}"), None))?;
+        let out_dir = std::path::PathBuf::from(
+            input
+                .output_dir
+                .unwrap_or_else(|| "output/entrapment".to_string()),
+        );
+        std::fs::create_dir_all(&out_dir).map_err(|e| {
+            ErrorData::new(
+                ErrorCode::INTERNAL_ERROR,
+                format!("create output dir: {e}"),
+                None,
+            )
+        })?;
 
         output::write_classified_tsv(&classified, &out_dir.join("classified.tsv"))
             .map_err(|e| ErrorData::new(ErrorCode::INTERNAL_ERROR, format!("{e}"), None))?;
@@ -3464,13 +3487,17 @@ impl ProteinCopilotServer {
                 l3: summary.level_counts.l3,
                 l4: summary.level_counts.l4,
             },
-            top_razor_families: summary.top_razor_families.iter().map(|f| EntrapmentRazorFamilyOutput {
-                family: f.family.clone(),
-                count: f.count,
-                example_peptide: f.example_peptide.clone(),
-                example_trap_protein: f.example_trap_protein.clone(),
-                example_target_protein: f.example_target_protein.clone(),
-            }).collect(),
+            top_razor_families: summary
+                .top_razor_families
+                .iter()
+                .map(|f| EntrapmentRazorFamilyOutput {
+                    family: f.family.clone(),
+                    count: f.count,
+                    example_peptide: f.example_peptide.clone(),
+                    example_trap_protein: f.example_trap_protein.clone(),
+                    example_target_protein: f.example_target_protein.clone(),
+                })
+                .collect(),
         };
 
         Ok(Json(output))
@@ -3488,10 +3515,23 @@ impl ProteinCopilotServer {
         let mut rdr = csv::ReaderBuilder::new()
             .delimiter(b'\t')
             .from_path(path)
-            .map_err(|e| ErrorData::new(ErrorCode::INVALID_PARAMS, format!("cannot read file: {e}"), None))?;
+            .map_err(|e| {
+                ErrorData::new(
+                    ErrorCode::INVALID_PARAMS,
+                    format!("cannot read file: {e}"),
+                    None,
+                )
+            })?;
 
-        let headers = rdr.headers()
-            .map_err(|e| ErrorData::new(ErrorCode::INVALID_PARAMS, format!("cannot read headers: {e}"), None))?
+        let headers = rdr
+            .headers()
+            .map_err(|e| {
+                ErrorData::new(
+                    ErrorCode::INVALID_PARAMS,
+                    format!("cannot read headers: {e}"),
+                    None,
+                )
+            })?
             .clone();
 
         let level_idx = headers.iter().position(|h| h == "level");
@@ -3504,8 +3544,9 @@ impl ProteinCopilotServer {
         let mut total = 0usize;
 
         for result in rdr.records() {
-            let record = result
-                .map_err(|e| ErrorData::new(ErrorCode::INTERNAL_ERROR, format!("parse row: {e}"), None))?;
+            let record = result.map_err(|e| {
+                ErrorData::new(ErrorCode::INTERNAL_ERROR, format!("parse row: {e}"), None)
+            })?;
             total += 1;
 
             if let Some(idx) = level_idx {
@@ -3523,7 +3564,9 @@ impl ProteinCopilotServer {
             if let Some(idx) = target_protein_idx {
                 if let Some(target_protein) = record.get(idx) {
                     if !target_protein.is_empty() {
-                        let family = target_protein.split('|').nth(2)
+                        let family = target_protein
+                            .split('|')
+                            .nth(2)
                             .and_then(|s| s.split('_').next())
                             .unwrap_or(target_protein)
                             .to_string();
@@ -3542,9 +3585,24 @@ impl ProteinCopilotServer {
             level_distribution: level_counts,
             delta_mass_stats: DeltaMassStats {
                 count: delta_masses.len(),
-                min: if delta_masses.is_empty() { 0.0 } else { delta_masses.iter().copied().fold(f64::INFINITY, f64::min) },
-                max: if delta_masses.is_empty() { 0.0 } else { delta_masses.iter().copied().fold(f64::NEG_INFINITY, f64::max) },
-                mean: if delta_masses.is_empty() { 0.0 } else { delta_masses.iter().sum::<f64>() / delta_masses.len() as f64 },
+                min: if delta_masses.is_empty() {
+                    0.0
+                } else {
+                    delta_masses.iter().copied().fold(f64::INFINITY, f64::min)
+                },
+                max: if delta_masses.is_empty() {
+                    0.0
+                } else {
+                    delta_masses
+                        .iter()
+                        .copied()
+                        .fold(f64::NEG_INFINITY, f64::max)
+                },
+                mean: if delta_masses.is_empty() {
+                    0.0
+                } else {
+                    delta_masses.iter().sum::<f64>() / delta_masses.len() as f64
+                },
             },
             top_protein_families: top_families,
         };
@@ -3554,7 +3612,7 @@ impl ProteinCopilotServer {
 
     #[rmcp::tool(
         name = "find_similar_targets",
-        description = "Find similar target peptides for a given sequence. Digests the target FASTA, compares the query peptide against all same-length target peptides using Hamming distance, and returns the closest matches with mass differences. Useful for investigating individual trap PSMs."
+        description = "Find similar target peptides for a given sequence. Digests the target FASTA, compares the query peptide against target peptides using edit distance (Hamming for same-length, Levenshtein for cross-length). Returns closest matches with mass differences and substitution type annotations. Useful for investigating individual trap PSMs."
     )]
     fn find_similar_targets(
         &self,
@@ -3576,7 +3634,8 @@ impl ProteinCopilotServer {
         let index = TargetDigestIndex::from_fasta(
             std::path::Path::new(&input.target_fasta),
             sim_config.max_missed_cleavages,
-        ).map_err(|e| ErrorData::new(ErrorCode::INTERNAL_ERROR, format!("{e}"), None))?;
+        )
+        .map_err(|e| ErrorData::new(ErrorCode::INTERNAL_ERROR, format!("{e}"), None))?;
 
         let psm = UnifiedPsm {
             peptide: input.peptide.clone(),
@@ -3600,6 +3659,9 @@ impl ProteinCopilotServer {
             delta_mass_da: result.delta_mass_da,
             diff_positions: result.diff_positions,
             index_size: index.len(),
+            substitution_type: Some(result.substitution_type.to_string()),
+            edit_distance: result.edit_distance,
+            alignment_detail: result.alignment_detail,
         };
 
         Ok(Json(output))
