@@ -10,6 +10,7 @@ pub mod levenshtein;
 pub mod loader;
 pub mod output;
 pub mod mod_parser;
+pub mod provenance;
 pub mod report;
 pub mod similarity;
 pub mod tagger;
