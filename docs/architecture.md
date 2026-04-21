@@ -139,6 +139,8 @@ proteinCopilot/
 │   ├── result-import/                 ← [lib] 外部搜索结果导入（DIA-NN / custom JSON）
 │   ├── fasta-db/                      ← [lib] FASTA 数据库管理（注册表 + 下载 + 缓存）
 │   ├── integration-tests/             ← [lib] 集成测试
+│   ├── entrapment-analysis/           ← [lib] 陷阱库分析（L0-L4 分级 + edit distance + 报告）
+│   ├── entrapment-cli/                ← [bin] 陷阱库分析 CLI 工具
 │   └── mcp-server/                    ← [bin] MCP Server（组装所有 tool）
 ```
 
@@ -551,7 +553,7 @@ fdr::
 
 **职责**：唯一的二进制入口。组装所有 library，注册为 MCP Tools，启动 stdio server。
 
-**注册的 16 个 MCP Tools**：
+**注册的 19 个 MCP Tools**：
 
 | Tool | 功能 | 对应 Library |
 |------|------|-------------|
@@ -576,7 +578,7 @@ fdr::
 ```text
 mcp-server/src/
 ├── main.rs       ← 入口：tracing 初始化 + ProteinCopilotServer + serve(stdio)
-├── tools.rs      ← 16 个 tool 定义 + EngineRegistry 初始化
+├── tools.rs      ← 19 个 tool 定义 + EngineRegistry 初始化
 │                    使用 #[rmcp::tool_router] + #[rmcp::tool_handler] 宏
 └── history.rs    ← 搜索历史持久化（磁盘 JSON）
 ```
@@ -687,6 +689,42 @@ result-import::
 - 缓存查询（已下载、大小、路径）
 
 **依赖**：`reqwest`, `serde`, `tracing`
+
+### 3.13 `entrapment-analysis`（lib crate）
+
+**职责**：陷阱库命中分类与同源性分析。对搜索结果中的 trap PSM 进行 L0-L4 同源性分级，识别 razor 归属错误，生成 HTML 交互报告。
+
+**核心模块**：
+
+| 模块 | 功能 |
+|------|------|
+| `config.rs` | YAML 配置解析（SimilarityConfig + target/trap 规则） |
+| `loader/` | 搜索结果加载（DIA-NN parquet + 通用 TSV） |
+| `tagger.rs` | target/trap 标记（accession 规则匹配） |
+| `digest.rs` | tryptic in-silico digest + k-mer 倒排索引（`find_similar()` 跨长搜索） |
+| `similarity.rs` | L0-L4 分级（Phase A 等长 Hamming + Phase B 跨长 Levenshtein） |
+| `levenshtein.rs` | Levenshtein edit distance + alignment（v2 新增） |
+| `types.rs` | `ClassifiedPsm` + `SubstitutionType` 枚举（6 种变体） |
+| `output.rs` | TSV 输出（含 substitution_type / edit_distance / alignment_detail） |
+| `report.rs` | HTML 交互报告（Plotly.js + mDa 显示） |
+
+**v2 关键特性**：
+- **Levenshtein edit distance**：替代 Hamming-only，支持 indel 跨长比较
+- **k-mer 倒排索引**：pigeonhole 原理预筛，过滤 >99% 候选，加速跨长搜索
+- **SubstitutionType 注释**：QKSubstitution、IsobaricDipeptideSingle/Dipeptide、NearIsobaric、Distinguishable、LengthMismatch
+- **delta_mass 有符号化**：修复 v1 Hamming 路径中使用绝对值的问题
+- **BestMatch tiebreaker**：使用 `<` 确保 delta_mass 比较可达
+
+**依赖**：`core`, `serde`, `serde_yaml`, `arrow`, `parquet`, `tracing`
+**不依赖**：`rmcp`, `spectrum-io`（v1 不需要 mzML）
+
+### 3.14 `entrapment-cli`（bin crate）
+
+**职责**：陷阱库分析的独立 CLI 工具（薄壳）。
+
+**子命令**：`analyze` / `report` / `inspect`
+
+**依赖**：`entrapment-analysis`, `clap`, `tracing`
 
 ### 3.13 `fdr` 扩展（三级 FDR）
 
@@ -1017,25 +1055,26 @@ Layer 0: 用户
                           ┌──────────┐
                           │   core   │  (serde, schemars, thiserror, uuid, chrono)
                           └────┬─────┘
-              ┌──────────┬─────┼──────────┬──────────┐
-              ▼          ▼     ▼          ▼          ▼
-        ┌───────────┐ ┌──────────┐ ┌────────┐ ┌────────┐ ┌───────────┐
-        │spectrum-io│ │  param-  │ │search- │ │ report │ │   dia-    │
-        │           │ │recommend │ │ engine │ │        │ │extraction │
-        │(quick-xml │ │          │ │(tokio) │ │ (csv)  │ │           │
-        │ base64    │ │          │ │        │ │        │ │           │
-        │ flate2)   │ │          │ │        │ │        │ │           │
-        └─────┬─────┘ └────┬─────┘ └───┬────┘ └───┬────┘ └─────┬─────┘
-              │            │           │           │            │
-              └────────────┴───────┬───┴───────────┴────────────┘
-                                   ▼
-                            ┌────────────┐
-                            │ mcp-server │  (rmcp, tokio, tracing, clap)
-                            │   [bin]    │
-                            └────────────┘
+              ┌──────────┬─────┼──────────┬──────────┬──────────────┐
+              ▼          ▼     ▼          ▼          ▼              ▼
+        ┌───────────┐ ┌──────────┐ ┌────────┐ ┌────────┐ ┌───────────┐ ┌─────────────────┐
+        │spectrum-io│ │  param-  │ │search- │ │ report │ │   dia-    │ │  entrapment-    │
+        │           │ │recommend │ │ engine │ │        │ │extraction │ │   analysis      │
+        │(quick-xml │ │          │ │(tokio) │ │ (csv)  │ │           │ │(levenshtein,    │
+        │ base64    │ │          │ │        │ │        │ │           │ │ k-mer index)    │
+        │ flate2)   │ │          │ │        │ │        │ │           │ │                 │
+        └─────┬─────┘ └────┬─────┘ └───┬────┘ └───┬────┘ └─────┬─────┘ └────────┬────────┘
+              │            │           │           │            │                │
+              └────────────┴───────┬───┴───────────┴────────────┘                │
+                                   ▼                                             │
+                            ┌────────────┐    ┌────────────────┐                 │
+                            │ mcp-server │◀───│ entrapment-cli │◀────────────────┘
+                            │   [bin]    │    │     [bin]       │
+                            └────────────┘    └────────────────┘
 ```
 
 依赖方向始终向上（library → core），mcp-server 在最底层聚合所有 library。
+entrapment-cli 是独立二进制，仅依赖 entrapment-analysis。
 **禁止**：library 之间相互依赖（spectrum-io 不依赖 param-recommend）。
 
 ---
@@ -1057,6 +1096,9 @@ Layer 0: 用户
 | `extract_spectrum_precursors` | dia-extraction | file_path, scan_number | SingleSpectrumExtractionResult | 单谱图母离子提取 |
 | `extract_xic` | xic | run_id?, file_path?, scan_number, peptide?, charge? | HTML file path | XIC 碎片离子色谱图（支持 SILAC 轻重标记） |
 | `import_search_results` | result-import | result_path, mzml_files, format? | RunId + ImportSummary | 导入外部搜索结果（DIA-NN / custom JSON） |
+| `classify_entrapment_hits` | entrapment-analysis | results_file, config_file, target_fasta, output_dir? | EntrapmentSummary | 运行陷阱库分类流程（L0-L4 + HTML 报告） |
+| `analyze_entrapment_stats` | entrapment-analysis | classified_file | DetailedStats | 从已分类 TSV 生成统计分析 |
+| `find_similar_targets` | entrapment-analysis | peptide, target_fasta, max_mismatches? | Vec\<SimilarityHit\> | 查找肽段在 target 库中最相似序列 |
 | `list_searches` | mcp-server | status_filter?, limit? | Vec\<SearchHistoryEntry\> | 搜索历史 |
 | `get_search_status` | mcp-server | run_id | SearchProgress | 查询搜索进度 |
 | `cancel_search` | mcp-server | run_id | SearchProgress | 取消搜索 |
@@ -1113,6 +1155,7 @@ Layer 0: 用户
 
 > MVP 已完成，BUG-1（碎片离子固定修饰）已修复。
 > Post-MVP 功能已完成：异步搜索、索引访问、DIA 支持、XIC、外部结果导入、Biology Audit。
+> 陷阱库分析 v1+v2 已完成：L0-L4 分级 + Levenshtein edit distance + k-mer 预筛 + SubstitutionType 注释 + HTML 报告 + CLI + 3 MCP tools。
 > 统一标注+XIC 视图已完成：
 > - 文件名 + Scan/RT 显示
 > - DDA 自动跳过 XIC（基于 fragment trace 数据点判断，非窗口宽度阈值）
