@@ -88,10 +88,7 @@ impl SearchEngineAdapter for PFindAdapter {
         _on_progress: ProgressCallback,
         diagnostics: &mut SearchDiagnostics,
     ) -> Result<SearchResult, CoreError> {
-        diagnostics.set_error(
-            ErrorCategory::Engine,
-            "pFind adapter not yet implemented",
-        );
+        diagnostics.set_error(ErrorCategory::Engine, "pFind adapter not yet implemented");
         Err(CoreError::SearchEngineError {
             engine: "pFind".to_string(),
             detail: "pFind adapter not yet implemented".to_string(),
@@ -176,7 +173,14 @@ mod tests {
             max_peptide_length: 50,
             engine: None,
         };
-        let result = adapter.search(&params, &[], noop_progress(), &mut protein_copilot_core::diagnostics::SearchDiagnostics::new()).await;
+        let result = adapter
+            .search(
+                &params,
+                &[],
+                noop_progress(),
+                &mut protein_copilot_core::diagnostics::SearchDiagnostics::new(),
+            )
+            .await;
         assert!(result.is_err());
         assert!(result
             .unwrap_err()

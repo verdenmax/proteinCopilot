@@ -11,9 +11,9 @@
 //! - Run metadata and error types
 
 pub mod ai_decision;
+pub mod diagnostics;
 pub mod engine;
 pub mod error;
-pub mod diagnostics;
 pub mod label;
 pub mod progress;
 pub mod protein_group;

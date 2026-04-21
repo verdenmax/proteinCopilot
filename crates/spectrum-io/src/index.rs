@@ -495,14 +495,13 @@ fn extract_scan_from_tag_bytes(tag_bytes: &[u8], fallback_scan: u32) -> u32 {
     let region = &tag_bytes[..limit];
 
     // Try double-quote first, then single-quote
-    let (after_id, closing_quote) =
-        if let Some(pos) = memchr::memmem::find(region, b" id=\"") {
-            (&region[pos + 5..], b'"')
-        } else if let Some(pos) = memchr::memmem::find(region, b" id='") {
-            (&region[pos + 5..], b'\'')
-        } else {
-            return fallback_scan;
-        };
+    let (after_id, closing_quote) = if let Some(pos) = memchr::memmem::find(region, b" id=\"") {
+        (&region[pos + 5..], b'"')
+    } else if let Some(pos) = memchr::memmem::find(region, b" id='") {
+        (&region[pos + 5..], b'\'')
+    } else {
+        return fallback_scan;
+    };
 
     // Find the closing quote to delimit the attribute value
     let end = match memchr::memchr(closing_quote, after_id) {
@@ -559,8 +558,7 @@ fn extract_meta_from_region(region: &[u8]) -> (f64, u8, Option<(f64, f64, f64)>)
     let mut iso_upper: Option<f64> = None;
 
     // Stop scanning if we hit binaryDataArrayList (no metadata after this)
-    let limit = memchr::memmem::find(region, b"<binaryDataArrayList")
-        .unwrap_or(region.len());
+    let limit = memchr::memmem::find(region, b"<binaryDataArrayList").unwrap_or(region.len());
     let region = &region[..limit];
 
     // MS:1000016 — scan start time (RT)
@@ -965,43 +963,61 @@ mod tests {
     fn make_rt_index() -> ScanIndex {
         let mut meta = HashMap::new();
         // MS1 scans (should be skipped by find_by_rt)
-        meta.insert(1, ScanMeta {
-            offset: 100,
-            rt_seconds: 100.0 * 60.0,
-            ms_level: 1,
-            isolation_window: None,
-        });
-        meta.insert(3, ScanMeta {
-            offset: 300,
-            rt_seconds: 200.0 * 60.0,
-            ms_level: 1,
-            isolation_window: None,
-        });
+        meta.insert(
+            1,
+            ScanMeta {
+                offset: 100,
+                rt_seconds: 100.0 * 60.0,
+                ms_level: 1,
+                isolation_window: None,
+            },
+        );
+        meta.insert(
+            3,
+            ScanMeta {
+                offset: 300,
+                rt_seconds: 200.0 * 60.0,
+                ms_level: 1,
+                isolation_window: None,
+            },
+        );
         // MS2 scans
-        meta.insert(2, ScanMeta {
-            offset: 200,
-            rt_seconds: 100.0 * 60.0,
-            ms_level: 2,
-            isolation_window: Some((500.0, 12.5, 12.5)),
-        });
-        meta.insert(4, ScanMeta {
-            offset: 400,
-            rt_seconds: 200.0 * 60.0,
-            ms_level: 2,
-            isolation_window: Some((600.0, 12.5, 12.5)),
-        });
-        meta.insert(5, ScanMeta {
-            offset: 500,
-            rt_seconds: 300.0 * 60.0,
-            ms_level: 2,
-            isolation_window: Some((500.0, 25.0, 25.0)),
-        });
-        meta.insert(6, ScanMeta {
-            offset: 600,
-            rt_seconds: 400.0 * 60.0,
-            ms_level: 2,
-            isolation_window: None,
-        });
+        meta.insert(
+            2,
+            ScanMeta {
+                offset: 200,
+                rt_seconds: 100.0 * 60.0,
+                ms_level: 2,
+                isolation_window: Some((500.0, 12.5, 12.5)),
+            },
+        );
+        meta.insert(
+            4,
+            ScanMeta {
+                offset: 400,
+                rt_seconds: 200.0 * 60.0,
+                ms_level: 2,
+                isolation_window: Some((600.0, 12.5, 12.5)),
+            },
+        );
+        meta.insert(
+            5,
+            ScanMeta {
+                offset: 500,
+                rt_seconds: 300.0 * 60.0,
+                ms_level: 2,
+                isolation_window: Some((500.0, 25.0, 25.0)),
+            },
+        );
+        meta.insert(
+            6,
+            ScanMeta {
+                offset: 600,
+                rt_seconds: 400.0 * 60.0,
+                ms_level: 2,
+                isolation_window: None,
+            },
+        );
         ScanIndex::from_meta(meta, IndexSource::BuiltFromScan)
     }
 
@@ -1043,18 +1059,24 @@ mod tests {
     #[test]
     fn find_by_rt_picks_closest() {
         let mut meta = HashMap::new();
-        meta.insert(1, ScanMeta {
-            offset: 100,
-            rt_seconds: 100.0 * 60.0,
-            ms_level: 2,
-            isolation_window: Some((500.0, 25.0, 25.0)),
-        });
-        meta.insert(2, ScanMeta {
-            offset: 200,
-            rt_seconds: 105.0 * 60.0,
-            ms_level: 2,
-            isolation_window: Some((500.0, 25.0, 25.0)),
-        });
+        meta.insert(
+            1,
+            ScanMeta {
+                offset: 100,
+                rt_seconds: 100.0 * 60.0,
+                ms_level: 2,
+                isolation_window: Some((500.0, 25.0, 25.0)),
+            },
+        );
+        meta.insert(
+            2,
+            ScanMeta {
+                offset: 200,
+                rt_seconds: 105.0 * 60.0,
+                ms_level: 2,
+                isolation_window: Some((500.0, 25.0, 25.0)),
+            },
+        );
         let idx = ScanIndex::from_meta(meta, IndexSource::BuiltFromScan);
         let result = idx.find_by_rt(103.0, 500.0, 30.0);
         assert_eq!(result.unwrap().0, 2);
@@ -1069,18 +1091,24 @@ mod tests {
     #[test]
     fn scan_index_with_meta_basic() {
         let mut meta_map = HashMap::new();
-        meta_map.insert(1, ScanMeta {
-            offset: 100,
-            rt_seconds: 120.5,
-            ms_level: 2,
-            isolation_window: Some((500.0, 1.0, 1.0)),
-        });
-        meta_map.insert(5, ScanMeta {
-            offset: 5000,
-            rt_seconds: 300.0,
-            ms_level: 1,
-            isolation_window: None,
-        });
+        meta_map.insert(
+            1,
+            ScanMeta {
+                offset: 100,
+                rt_seconds: 120.5,
+                ms_level: 2,
+                isolation_window: Some((500.0, 1.0, 1.0)),
+            },
+        );
+        meta_map.insert(
+            5,
+            ScanMeta {
+                offset: 5000,
+                rt_seconds: 300.0,
+                ms_level: 1,
+                isolation_window: None,
+            },
+        );
         let idx = ScanIndex::from_meta(meta_map, IndexSource::NativeIndex);
 
         assert_eq!(idx.len(), 2);
@@ -1125,7 +1153,9 @@ mod tests {
             "scan 1 RT: expected ~120.5, got {}",
             meta1.rt_seconds
         );
-        let iw = meta1.isolation_window.expect("scan 1 should have isolation window");
+        let iw = meta1
+            .isolation_window
+            .expect("scan 1 should have isolation window");
         assert!(
             (iw.0 - 471.2561).abs() < 0.01,
             "scan 1 isolation target_mz: expected ~471.2561, got {}",
@@ -1181,7 +1211,10 @@ mod tests {
         let xml = br#"<cvParam accession="MS:1000511" value="1"/>
         <cvParam accession="MS:1000016" value="10.5" unitAccession="UO:0000031"/>"#;
         let (rt, ms, _) = extract_meta_from_region(xml);
-        assert!((rt - 630.0).abs() < 0.1, "10.5 min should be 630 seconds, got {rt}");
+        assert!(
+            (rt - 630.0).abs() < 0.1,
+            "10.5 min should be 630 seconds, got {rt}"
+        );
         assert_eq!(ms, 1);
     }
 }

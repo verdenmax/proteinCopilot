@@ -260,7 +260,11 @@ fn run_inspect(
 
     // 2. Build TargetDigestIndex from FASTA
     info!(fasta = %fasta_path.display(), "building target digest index");
-    let index = TargetDigestIndex::from_fasta(fasta_path, similarity_config.max_missed_cleavages)?;
+    let index = TargetDigestIndex::from_fasta(
+        fasta_path,
+        similarity_config.max_missed_cleavages,
+        similarity_config.max_mismatches,
+    )?;
     info!(peptides = index.len(), "target digest index ready");
 
     // 3. Create dummy UnifiedPsm with the peptide

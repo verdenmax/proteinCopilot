@@ -135,7 +135,12 @@ async fn main() {
 
     let mut diag = protein_copilot_core::diagnostics::SearchDiagnostics::new();
     let result = match engine
-        .search(&params, &[spectrum_path.to_path_buf()], noop_progress(), &mut diag)
+        .search(
+            &params,
+            &[spectrum_path.to_path_buf()],
+            noop_progress(),
+            &mut diag,
+        )
         .await
     {
         Ok(r) => r,

@@ -57,10 +57,7 @@ pub trait SpectrumReader: Send + Sync {
     /// Default implementation reads all spectra (slow for large files).
     /// [`crate::IndexedMzMLReader`] overrides to read directly from the
     /// PCIX v2 disk cache index — zero I/O, sub-millisecond.
-    fn list_ms2_meta(
-        &self,
-        path: &Path,
-    ) -> Result<Vec<Ms2ScanMeta>, SpectrumIoError> {
+    fn list_ms2_meta(&self, path: &Path) -> Result<Vec<Ms2ScanMeta>, SpectrumIoError> {
         use protein_copilot_core::spectrum::MsLevel;
 
         let spectra = self.read_all(path)?;
