@@ -663,6 +663,11 @@ struct ClassifyEntrapmentHitsInput {
     target_fasta: String,
     /// Output directory (default: ./output/entrapment/)
     output_dir: Option<String>,
+    /// Directory containing mzML spectrum files for provenance tracing.
+    /// When provided, runs fragment ion provenance analysis after classification.
+    #[serde(default)]
+    #[schemars(description = "Directory containing mzML files for provenance tracing (optional)")]
+    pub mzml_dir: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -679,6 +684,38 @@ struct FindSimilarTargetsInput {
     target_fasta: String,
     /// Maximum mismatches to consider (default: 2)
     max_mismatches: Option<u16>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct AnnotateProvenanceInput {
+    /// Path to the mzML spectrum file
+    file_path: String,
+    /// Scan number (1-based)
+    scan_number: u32,
+    /// Trap peptide sequence (stripped, no modifications)
+    trap_sequence: String,
+    /// Target peptide sequence (stripped). Empty string if L4.
+    #[serde(default)]
+    target_sequence: String,
+    /// Modifications as (position, delta_mass) pairs
+    #[serde(default)]
+    modifications: Vec<(usize, f64)>,
+    /// Fragment mass tolerance in ppm (default: 20.0)
+    #[serde(default = "default_frag_tol")]
+    fragment_tolerance_ppm: f64,
+    /// Maximum fragment charge state (default: 2)
+    #[serde(default = "default_max_charge")]
+    max_fragment_charge: i32,
+    /// Output HTML file path (default: ./provenance_scan{N}.html)
+    #[serde(default)]
+    output_path: Option<String>,
+}
+
+fn default_frag_tol() -> f64 {
+    20.0
+}
+fn default_max_charge() -> i32 {
+    2
 }
 
 // --- Entrapment analysis output schemas ---
@@ -742,6 +779,28 @@ struct FindSimilarTargetsOutput {
     substitution_type: Option<String>,
     edit_distance: Option<u32>,
     alignment_detail: Option<String>,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct AnnotateProvenanceOutput {
+    /// Path to the generated HTML mirror plot.
+    output_file: String,
+    /// Trap peptide sequence.
+    trap_sequence: String,
+    /// Target peptide sequence (empty if L4).
+    target_sequence: String,
+    /// Number of peaks matching only trap ions.
+    trap_matched_count: u32,
+    /// Number of peaks matching only target ions.
+    target_matched_count: u32,
+    /// Number of peaks matching both trap and target ions.
+    shared_count: u32,
+    /// Number of peaks matching neither.
+    unassigned_count: u32,
+    /// shared / (trap_matched + target_matched + shared).
+    shared_ratio: f64,
+    /// Total peaks in the spectrum.
+    total_peaks: usize,
 }
 
 fn default_import_format() -> String {
@@ -3396,7 +3455,7 @@ impl ProteinCopilotServer {
 
     #[rmcp::tool(
         name = "classify_entrapment_hits",
-        description = "Classify trap-database PSM hits by homology to target proteome. Reads search results, applies target/trap rules from YAML config, digests target FASTA, and classifies each trap PSM as L0-L4. Outputs classified.tsv, razor_errors.tsv, run_metadata.json, and entrapment_report.html. Returns summary statistics."
+        description = "Classify trap-database PSM hits by homology to target proteome. Reads search results, applies target/trap rules from YAML config, digests target FASTA, and classifies each trap PSM as L0-L4. Optionally traces fragment ion provenance when mzml_dir is provided. Outputs classified.tsv, razor_errors.tsv, run_metadata.json, and entrapment_report.html. Returns summary statistics."
     )]
     fn classify_entrapment_hits(
         &self,
@@ -3426,9 +3485,23 @@ impl ProteinCopilotServer {
             EntrapmentAnalyzer::new(config.clone(), std::path::Path::new(&input.target_fasta))
                 .map_err(|e| ErrorData::new(ErrorCode::INTERNAL_ERROR, format!("{e}"), None))?;
 
-        let classified = analyzer
+        let mut classified = analyzer
             .classify_all(&psms)
             .map_err(|e| ErrorData::new(ErrorCode::INTERNAL_ERROR, format!("{e}"), None))?;
+
+        // Provenance tracing (optional)
+        if let Some(mzml_dir) = &input.mzml_dir {
+            use protein_copilot_entrapment_analysis::trace_provenance_batch;
+            let mzml_path = std::path::Path::new(mzml_dir);
+            match trace_provenance_batch(&mut classified, mzml_path, &config) {
+                Ok(count) => {
+                    tracing::info!("Provenance traced for {} PSMs", count);
+                }
+                Err(e) => {
+                    tracing::warn!("Provenance tracing failed: {}", e);
+                }
+            }
+        }
 
         let summary = analyzer.summary(&classified);
 
@@ -3667,5 +3740,118 @@ impl ProteinCopilotServer {
         };
 
         Ok(Json(output))
+    }
+
+    // -----------------------------------------------------------------------
+    // Provenance annotation (single PSM → mirror plot)
+    // -----------------------------------------------------------------------
+
+    #[rmcp::tool(
+        name = "annotate_provenance",
+        description = "Annotate a single spectrum with fragment ion provenance analysis. Generates a mirror plot HTML file showing which peaks come from the trap peptide, target peptide, both (shared), or neither (unassigned)."
+    )]
+    fn annotate_provenance(
+        &self,
+        Parameters(input): Parameters<AnnotateProvenanceInput>,
+    ) -> Result<Json<AnnotateProvenanceOutput>, ErrorData> {
+        use protein_copilot_core::search_params::{MassTolerance, ToleranceUnit};
+        use protein_copilot_entrapment_analysis::mirror_plot::render_mirror_plot;
+        use protein_copilot_entrapment_analysis::provenance::trace_provenance;
+
+        // Validate inputs
+        validate_file_path(&input.file_path)?;
+        validate_scan_number(input.scan_number)?;
+
+        if input.trap_sequence.trim().is_empty() {
+            return Err(mcp_err(
+                ErrorCode::INVALID_PARAMS,
+                "trap_sequence cannot be empty",
+            ));
+        }
+        if input.fragment_tolerance_ppm <= 0.0 || !input.fragment_tolerance_ppm.is_finite() {
+            return Err(mcp_err(
+                ErrorCode::INVALID_PARAMS,
+                format!(
+                    "fragment_tolerance_ppm must be a positive finite number, got {}",
+                    input.fragment_tolerance_ppm
+                ),
+            ));
+        }
+        if input.max_fragment_charge < 1 {
+            return Err(mcp_err(
+                ErrorCode::INVALID_PARAMS,
+                format!(
+                    "max_fragment_charge must be >= 1, got {}",
+                    input.max_fragment_charge
+                ),
+            ));
+        }
+
+        // Read spectrum via cached indexed reader
+        let file_path = Path::new(&input.file_path);
+        let reader = self.get_or_create_reader(file_path)?;
+        let spectrum = reader
+            .read_spectrum(file_path, input.scan_number)
+            .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
+
+        // Build tolerance
+        let tolerance = MassTolerance {
+            value: input.fragment_tolerance_ppm,
+            unit: ToleranceUnit::Ppm,
+        };
+
+        // Run provenance analysis
+        let provenance = trace_provenance(
+            &spectrum.mz_array,
+            &spectrum.intensity_array,
+            &input.trap_sequence,
+            &input.target_sequence,
+            &input.modifications,
+            &tolerance,
+            input.max_fragment_charge,
+        );
+
+        // Generate output path
+        let output_path = input
+            .output_path
+            .map(PathBuf::from)
+            .unwrap_or_else(|| {
+                PathBuf::from(format!(
+                    "./provenance_scan{}.html",
+                    input.scan_number
+                ))
+            });
+
+        // Ensure parent directory exists
+        if let Some(parent) = output_path.parent() {
+            if !parent.as_os_str().is_empty() && !parent.exists() {
+                std::fs::create_dir_all(parent).map_err(|e| {
+                    mcp_err(
+                        ErrorCode::INTERNAL_ERROR,
+                        format!("failed to create output directory: {e}"),
+                    )
+                })?;
+            }
+        }
+
+        // Render mirror plot
+        render_mirror_plot(&provenance, &output_path).map_err(|e| {
+            mcp_err(
+                ErrorCode::INTERNAL_ERROR,
+                format!("failed to write mirror plot: {e}"),
+            )
+        })?;
+
+        Ok(Json(AnnotateProvenanceOutput {
+            output_file: output_path.display().to_string(),
+            trap_sequence: provenance.trap_sequence,
+            target_sequence: provenance.target_sequence,
+            trap_matched_count: provenance.trap_matched_count,
+            target_matched_count: provenance.target_matched_count,
+            shared_count: provenance.shared_count,
+            unassigned_count: provenance.unassigned_count,
+            shared_ratio: provenance.shared_ratio,
+            total_peaks: provenance.annotated_peaks.len(),
+        }))
     }
 }
