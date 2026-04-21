@@ -45,11 +45,33 @@ struct PsmRow {
     substitution_type: String,
     edit_distance: String,
     alignment_detail: String,
+    trap_matched: String,
+    target_matched: String,
+    shared_ions: String,
+    shared_ratio: String,
+    is_chimeric: String,
 }
 
 impl PsmRow {
     /// Convert a [`ClassifiedPsm`] into a flat row suitable for JSON serialisation.
     fn from_classified(cp: &ClassifiedPsm) -> Self {
+        let (trap_matched, target_matched, shared_ions, shared_ratio, is_chimeric) =
+            match &cp.provenance {
+                Some(prov) => (
+                    prov.trap_matched_count.to_string(),
+                    prov.target_matched_count.to_string(),
+                    prov.shared_count.to_string(),
+                    format!("{:.4}", prov.shared_ratio),
+                    prov.is_chimeric.to_string(),
+                ),
+                None => (
+                    String::new(),
+                    String::new(),
+                    String::new(),
+                    String::new(),
+                    String::new(),
+                ),
+            };
         Self {
             peptide: cp.psm.peptide.clone(),
             group: cp.group.to_string(),
@@ -88,6 +110,11 @@ impl PsmRow {
             substitution_type: cp.substitution_type.to_string(),
             edit_distance: cp.edit_distance.map(|d| d.to_string()).unwrap_or_default(),
             alignment_detail: cp.alignment_detail.clone().unwrap_or_default(),
+            trap_matched,
+            target_matched,
+            shared_ions,
+            shared_ratio,
+            is_chimeric,
         }
     }
 }
@@ -305,5 +332,41 @@ mod tests {
         assert_eq!(row.substitution_type, "QKSubstitution");
         assert_eq!(row.edit_distance, "1");
         assert_eq!(row.alignment_detail, "Q3→K");
+    }
+
+    #[test]
+    fn test_psm_row_with_provenance() {
+        use crate::provenance::FragmentProvenance;
+
+        let mut cp = make_psm("PEPTIDE", PsmGroup::Trap, DiscriminabilityLevel::L2);
+        cp.provenance = Some(FragmentProvenance {
+            trap_sequence: "PEPTIDE".into(),
+            target_sequence: "PAPTIDE".into(),
+            annotated_peaks: vec![],
+            trap_matched_count: 5,
+            target_matched_count: 3,
+            shared_count: 2,
+            unassigned_count: 10,
+            shared_ratio: 0.2000,
+            is_chimeric: false,
+        });
+
+        let row = PsmRow::from_classified(&cp);
+        assert_eq!(row.trap_matched, "5");
+        assert_eq!(row.target_matched, "3");
+        assert_eq!(row.shared_ions, "2");
+        assert_eq!(row.shared_ratio, "0.2000");
+        assert_eq!(row.is_chimeric, "false");
+    }
+
+    #[test]
+    fn test_psm_row_without_provenance() {
+        let cp = make_psm("PEPTIDE", PsmGroup::Trap, DiscriminabilityLevel::L4);
+        let row = PsmRow::from_classified(&cp);
+        assert_eq!(row.trap_matched, "");
+        assert_eq!(row.target_matched, "");
+        assert_eq!(row.shared_ions, "");
+        assert_eq!(row.shared_ratio, "");
+        assert_eq!(row.is_chimeric, "");
     }
 }
