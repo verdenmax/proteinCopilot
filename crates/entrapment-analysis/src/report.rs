@@ -149,7 +149,7 @@ mod tests {
     use super::*;
     use crate::types::{
         ClassifiedPsm, DiscriminabilityLevel, EntrapmentSummary, LevelCounts, PsmGroup,
-        RazorFamily, UnifiedPsm,
+        RazorFamily, SubstitutionType, UnifiedPsm,
     };
 
     fn make_psm(peptide: &str, group: PsmGroup, level: DiscriminabilityLevel) -> ClassifiedPsm {
@@ -171,6 +171,9 @@ mod tests {
             mismatches: Some(1),
             delta_mass_da: Some(0.0364),
             diff_positions: Some("[3:A->G]".to_string()),
+            substitution_type: SubstitutionType::None,
+            edit_distance: None,
+            alignment_detail: None,
         }
     }
 

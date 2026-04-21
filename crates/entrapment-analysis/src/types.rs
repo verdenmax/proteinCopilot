@@ -71,6 +71,52 @@ impl fmt::Display for PsmGroup {
 }
 
 // ---------------------------------------------------------------------------
+// SubstitutionType (v2)
+// ---------------------------------------------------------------------------
+
+/// Substitution type annotation for L2 classified PSMs (v2).
+///
+/// Informational only — does not affect L0-L4 level assignment.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SubstitutionType {
+    /// No substitution detected (L0/L4) or not applicable.
+    None,
+    /// I↔L isomer (L1).
+    LIIsomer,
+    /// Q↔K substitution (Δm ≈ 36.4 mDa).
+    QKSubstitution,
+    /// Isobaric dipeptide substitution (N↔GG or Q↔AG).
+    IsobaricDipeptide {
+        single_residue: char,
+        dipeptide: String,
+    },
+    /// Other near-isobaric substitution (|Δm| < threshold).
+    NearIsobaric,
+    /// Distinguishable substitution (|Δm| ≥ threshold).
+    Distinguishable,
+}
+
+impl SubstitutionType {
+    /// Returns a short label for display.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::None => "None",
+            Self::LIIsomer => "LIIsomer",
+            Self::QKSubstitution => "QKSubstitution",
+            Self::IsobaricDipeptide { .. } => "IsobaricDipeptide",
+            Self::NearIsobaric => "NearIsobaric",
+            Self::Distinguishable => "Distinguishable",
+        }
+    }
+}
+
+impl fmt::Display for SubstitutionType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Structs
 // ---------------------------------------------------------------------------
 
@@ -114,6 +160,12 @@ pub struct ClassifiedPsm {
     pub delta_mass_da: Option<f64>,
     /// Human-readable diff positions, e.g. `"[2:D->N,5:G->A]"`.
     pub diff_positions: Option<String>,
+    /// Substitution type annotation (v2). Informational only.
+    pub substitution_type: SubstitutionType,
+    /// Edit distance to best target (v2). Equals Hamming distance for same-length matches.
+    pub edit_distance: Option<u32>,
+    /// Alignment detail string (v2), e.g. "D0→N" or "ins:G@5".
+    pub alignment_detail: Option<String>,
 }
 
 /// Per-level hit counts for the five discriminability levels.
@@ -225,5 +277,44 @@ mod tests {
         assert_eq!(PsmGroup::Target.to_string(), "target");
         assert_eq!(PsmGroup::Trap.to_string(), "trap");
         assert_eq!(PsmGroup::Ambiguous.to_string(), "ambiguous");
+    }
+
+    #[test]
+    fn test_substitution_type_serde() {
+        let st = SubstitutionType::QKSubstitution;
+        let json = serde_json::to_string(&st).unwrap();
+        assert_eq!(json, r#""QKSubstitution""#);
+        let st2: SubstitutionType = serde_json::from_str(&json).unwrap();
+        assert_eq!(st2, SubstitutionType::QKSubstitution);
+    }
+
+    #[test]
+    fn test_substitution_type_isobaric_dipeptide_serde() {
+        let st = SubstitutionType::IsobaricDipeptide {
+            single_residue: 'N',
+            dipeptide: "GG".to_string(),
+        };
+        let json = serde_json::to_string(&st).unwrap();
+        assert!(json.contains("IsobaricDipeptide"));
+        assert!(json.contains("GG"));
+        let st2: SubstitutionType = serde_json::from_str(&json).unwrap();
+        assert_eq!(st2, st);
+    }
+
+    #[test]
+    fn test_substitution_type_display() {
+        assert_eq!(SubstitutionType::None.as_str(), "None");
+        assert_eq!(SubstitutionType::LIIsomer.as_str(), "LIIsomer");
+        assert_eq!(SubstitutionType::QKSubstitution.as_str(), "QKSubstitution");
+        assert_eq!(SubstitutionType::NearIsobaric.as_str(), "NearIsobaric");
+        assert_eq!(
+            SubstitutionType::Distinguishable.as_str(),
+            "Distinguishable"
+        );
+        let idb = SubstitutionType::IsobaricDipeptide {
+            single_residue: 'N',
+            dipeptide: "GG".to_string(),
+        };
+        assert_eq!(idb.as_str(), "IsobaricDipeptide");
     }
 }

@@ -246,7 +246,7 @@ fn opt_to_string<T: std::fmt::Display>(opt: &Option<T>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{DiscriminabilityLevel, PsmGroup, UnifiedPsm};
+    use crate::types::{DiscriminabilityLevel, PsmGroup, SubstitutionType, UnifiedPsm};
 
     fn make_classified_psm(
         peptide: &str,
@@ -292,6 +292,9 @@ mod tests {
             } else {
                 None
             },
+            substitution_type: SubstitutionType::None,
+            edit_distance: None,
+            alignment_detail: None,
         }
     }
 
@@ -378,6 +381,9 @@ mod tests {
             mismatches: None,
             delta_mass_da: None,
             diff_positions: None,
+            substitution_type: SubstitutionType::None,
+            edit_distance: None,
+            alignment_detail: None,
         };
 
         write_classified_tsv(&[psm], &path).expect("write TSV");

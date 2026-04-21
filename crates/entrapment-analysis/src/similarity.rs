@@ -9,7 +9,7 @@ use protein_copilot_search_engine::digest::residue_mass;
 
 use crate::config::SimilarityConfig;
 use crate::digest::TargetDigestIndex;
-use crate::types::{ClassifiedPsm, DiscriminabilityLevel, PsmGroup, UnifiedPsm};
+use crate::types::{ClassifiedPsm, DiscriminabilityLevel, PsmGroup, SubstitutionType, UnifiedPsm};
 
 /// Compute Hamming-style character differences between two equal-length sequences.
 ///
@@ -87,6 +87,9 @@ pub fn classify_single(
             mismatches: None,
             delta_mass_da: None,
             diff_positions: None,
+            substitution_type: SubstitutionType::None,
+            edit_distance: None,
+            alignment_detail: None,
         };
     }
 
@@ -102,6 +105,9 @@ pub fn classify_single(
             mismatches: Some(0),
             delta_mass_da: Some(0.0),
             diff_positions: Some(String::new()),
+            substitution_type: SubstitutionType::None,
+            edit_distance: None,
+            alignment_detail: None,
         };
     }
 
@@ -120,6 +126,9 @@ pub fn classify_single(
                     mismatches: Some(0),
                     delta_mass_da: Some(0.0),
                     diff_positions: Some(String::new()),
+                    substitution_type: SubstitutionType::None,
+                    edit_distance: None,
+                    alignment_detail: None,
                 };
             }
             let (mm, dm, dp) = hamming_diff(&psm.peptide, orig).unwrap_or((0, 0.0, String::new()));
@@ -132,6 +141,9 @@ pub fn classify_single(
                 mismatches: Some(mm),
                 delta_mass_da: Some(dm),
                 diff_positions: Some(dp),
+                substitution_type: SubstitutionType::LIIsomer,
+                edit_distance: None,
+                alignment_detail: None,
             };
         }
     }
@@ -185,6 +197,9 @@ pub fn classify_single(
             mismatches: None,
             delta_mass_da: None,
             diff_positions: None,
+            substitution_type: SubstitutionType::None,
+            edit_distance: None,
+            alignment_detail: None,
         };
     }
 
@@ -203,6 +218,9 @@ pub fn classify_single(
         mismatches: Some(best_mm),
         delta_mass_da: Some(best_dm),
         diff_positions: Some(best_dp),
+        substitution_type: SubstitutionType::None,
+        edit_distance: None,
+        alignment_detail: None,
     }
 }
 

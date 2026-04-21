@@ -15,7 +15,8 @@ pub mod types;
 
 pub use error::EntrapmentError;
 pub use types::{
-    ClassifiedPsm, DiscriminabilityLevel, EntrapmentSummary, LevelCounts, PsmGroup, UnifiedPsm,
+    ClassifiedPsm, DiscriminabilityLevel, EntrapmentSummary, LevelCounts, PsmGroup,
+    SubstitutionType, UnifiedPsm,
 };
 
 use std::path::Path;
