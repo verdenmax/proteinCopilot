@@ -182,6 +182,51 @@ pub struct ProvenanceConfig {
     /// from those instead: `(rt_stop − rt_start) / 2`.
     #[serde(default = "default_rt_tolerance_min")]
     pub rt_tolerance_min: f64,
+
+    /// SILAC heavy-label configuration. If present, enables heavy co-eluting target search.
+    #[serde(default)]
+    pub silac: Option<SilacConfig>,
+
+    /// Generate per-PSM HTML provenance reports for L2/L3 traps.
+    #[serde(default = "default_true")]
+    pub generate_per_psm_reports: bool,
+
+    /// Maximum number of co-eluting candidates per trap PSM (prevents explosion in dense regions).
+    #[serde(default = "default_max_co_eluting_candidates")]
+    pub max_co_eluting_candidates: usize,
+}
+
+/// SILAC heavy-label configuration for co-eluting target search.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SilacConfig {
+    /// Delta mass for heavy Lysine (¹³C₆¹⁵N₂-Lys).
+    #[serde(default = "default_heavy_k_delta")]
+    pub heavy_k_delta: f64,
+
+    /// Delta mass for heavy Arginine (¹³C₆¹⁵N₄-Arg).
+    #[serde(default = "default_heavy_r_delta")]
+    pub heavy_r_delta: f64,
+
+    /// Whether to search for heavy-labeled co-eluting targets.
+    #[serde(default = "default_true")]
+    pub enable_heavy_search: bool,
+}
+
+impl Default for SilacConfig {
+    fn default() -> Self {
+        Self {
+            heavy_k_delta: default_heavy_k_delta(),
+            heavy_r_delta: default_heavy_r_delta(),
+            enable_heavy_search: true,
+        }
+    }
+}
+
+fn default_heavy_k_delta() -> f64 {
+    8.014199
+}
+fn default_heavy_r_delta() -> f64 {
+    10.008269
 }
 
 impl Default for ProvenanceConfig {
@@ -193,6 +238,9 @@ impl Default for ProvenanceConfig {
             min_peaks_for_analysis: default_min_peaks_for_analysis(),
             levels_to_trace: default_levels_to_trace(),
             rt_tolerance_min: default_rt_tolerance_min(),
+            silac: None,
+            generate_per_psm_reports: true,
+            max_co_eluting_candidates: default_max_co_eluting_candidates(),
         }
     }
 }
@@ -215,6 +263,10 @@ fn default_levels_to_trace() -> Vec<String> {
 
 fn default_rt_tolerance_min() -> f64 {
     0.5 // 30 seconds, reasonable default for DIA elution windows
+}
+
+fn default_max_co_eluting_candidates() -> usize {
+    20
 }
 
 fn default_max_mismatches() -> u16 {
@@ -512,5 +564,46 @@ similarity:
         assert_eq!(cfg.similarity.len_tolerance, 3);
         assert!(!cfg.similarity.enable_dipeptide_check);
         assert!(!cfg.similarity.enable_qk_detection);
+    }
+
+    #[test]
+    fn test_silac_config_default() {
+        let silac = SilacConfig::default();
+        assert!((silac.heavy_k_delta - 8.014199).abs() < 1e-6);
+        assert!((silac.heavy_r_delta - 10.008269).abs() < 1e-6);
+        assert!(silac.enable_heavy_search);
+    }
+
+    #[test]
+    fn test_provenance_config_with_silac() {
+        let yaml = r#"
+fragment_tolerance_ppm: 20.0
+max_fragment_charge: 2
+silac:
+  heavy_k_delta: 8.014199
+  heavy_r_delta: 10.008269
+  enable_heavy_search: true
+generate_per_psm_reports: true
+max_co_eluting_candidates: 15
+"#;
+        let config: ProvenanceConfig = serde_yaml::from_str(yaml).unwrap();
+        assert!(config.silac.is_some());
+        let silac = config.silac.unwrap();
+        assert!((silac.heavy_k_delta - 8.014199).abs() < 1e-6);
+        assert!(config.generate_per_psm_reports);
+        assert_eq!(config.max_co_eluting_candidates, 15);
+    }
+
+    #[test]
+    fn test_provenance_config_backward_compat() {
+        let yaml = r#"
+fragment_tolerance_ppm: 20.0
+max_fragment_charge: 2
+chimera_threshold: 0.3
+"#;
+        let config: ProvenanceConfig = serde_yaml::from_str(yaml).unwrap();
+        assert!(config.silac.is_none());
+        assert!(config.generate_per_psm_reports);
+        assert_eq!(config.max_co_eluting_candidates, 20);
     }
 }
