@@ -139,7 +139,7 @@ proteinCopilot/
 │   ├── result-import/                 ← [lib] 外部搜索结果导入（DIA-NN / custom JSON）
 │   ├── fasta-db/                      ← [lib] FASTA 数据库管理（注册表 + 下载 + 缓存）
 │   ├── integration-tests/             ← [lib] 集成测试
-│   ├── entrapment-analysis/           ← [lib] 陷阱库分析（L0-L4 分级 + edit distance + 报告）
+│   ├── entrapment-analysis/           ← [lib] 陷阱库分析（L0-L4 分级 + edit distance + fragment provenance + 报告）
 │   ├── entrapment-cli/                ← [bin] 陷阱库分析 CLI 工具
 │   └── mcp-server/                    ← [bin] MCP Server（组装所有 tool）
 ```
@@ -698,15 +698,18 @@ result-import::
 
 | 模块 | 功能 |
 |------|------|
-| `config.rs` | YAML 配置解析（SimilarityConfig + target/trap 规则） |
+| `config.rs` | YAML 配置解析（SimilarityConfig + ProvenanceConfig + target/trap 规则） |
 | `loader/` | 搜索结果加载（DIA-NN parquet + 通用 TSV） |
 | `tagger.rs` | target/trap 标记（accession 规则匹配） |
 | `digest.rs` | tryptic in-silico digest + k-mer 倒排索引（`find_similar()` 跨长搜索） |
 | `similarity.rs` | L0-L4 分级（Phase A 等长 Hamming + Phase B 跨长 Levenshtein） |
 | `levenshtein.rs` | Levenshtein edit distance + alignment（v2 新增） |
-| `types.rs` | `ClassifiedPsm` + `SubstitutionType` 枚举（6 种变体） |
-| `output.rs` | TSV 输出（含 substitution_type / edit_distance / alignment_detail） |
-| `report.rs` | HTML 交互报告（Plotly.js + mDa 显示） |
+| `provenance.rs` | 碎片离子溯源引擎（b/y ion 匹配 + TrapOnly/TargetOnly/Shared 分类）（v3 新增） |
+| `mod_parser.rs` | UniMod 修饰解析（`(UniMod:X)` → position + delta mass）（v3 新增） |
+| `mirror_plot.rs` | trap vs target 镜像图渲染（Plotly.js HTML）（v3 新增） |
+| `types.rs` | `ClassifiedPsm` + `SubstitutionType` 枚举 + `FragmentProvenance` |
+| `output.rs` | TSV 输出（含 substitution_type / edit_distance / provenance 列） |
+| `report.rs` | HTML 交互报告（Plotly.js + mDa 显示 + 溯源统计） |
 
 **v2 关键特性**：
 - **Levenshtein edit distance**：替代 Hamming-only，支持 indel 跨长比较
@@ -715,8 +718,15 @@ result-import::
 - **delta_mass 有符号化**：修复 v1 Hamming 路径中使用绝对值的问题
 - **BestMatch tiebreaker**：使用 `<` 确保 delta_mass 比较可达
 
-**依赖**：`core`, `serde`, `serde_yaml`, `arrow`, `parquet`, `tracing`
-**不依赖**：`rmcp`, `spectrum-io`（v1 不需要 mzML）
+**v3 关键特性**：
+- **碎片离子溯源**：trace_provenance() 对每个观测峰分类为 TrapOnly/TargetOnly/Shared/Unassigned
+- **UniMod 修饰解析**：parse_modified_sequence() 解析 DIA-NN Modified.Sequence
+- **RT-based scan lookup**：find_by_rt() 二分查找，DIA-NN 数据无 scan_number 时的回退方案
+- **嵌合谱检测**：shared_ratio > chimera_threshold → is_chimeric 标记
+- **容错 mzML 加载**：缺失文件跳过并 warn，不中断批量溯源
+
+**依赖**：`core`, `spectrum-io`（v3 新增）, `serde`, `serde_yaml`, `arrow`, `parquet`, `tracing`
+**不依赖**：`rmcp`
 
 ### 3.14 `entrapment-cli`（bin crate）
 
@@ -1099,6 +1109,7 @@ entrapment-cli 是独立二进制，仅依赖 entrapment-analysis。
 | `classify_entrapment_hits` | entrapment-analysis | results_file, config_file, target_fasta, output_dir? | EntrapmentSummary | 运行陷阱库分类流程（L0-L4 + HTML 报告） |
 | `analyze_entrapment_stats` | entrapment-analysis | classified_file | DetailedStats | 从已分类 TSV 生成统计分析 |
 | `find_similar_targets` | entrapment-analysis | peptide, target_fasta, max_mismatches? | Vec\<SimilarityHit\> | 查找肽段在 target 库中最相似序列 |
+| `annotate_provenance` | entrapment-analysis | peptide, target_peptide, file_path, scan_number, fragment_tolerance?, chimera_threshold? | FragmentProvenance + is_chimeric | 对单个 trap PSM 进行碎片离子溯源 |
 | `list_searches` | mcp-server | status_filter?, limit? | Vec\<SearchHistoryEntry\> | 搜索历史 |
 | `get_search_status` | mcp-server | run_id | SearchProgress | 查询搜索进度 |
 | `cancel_search` | mcp-server | run_id | SearchProgress | 取消搜索 |

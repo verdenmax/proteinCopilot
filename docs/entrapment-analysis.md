@@ -18,7 +18,7 @@
 |------|------|------|-----------|
 | **L0** | Razor Error | 肽段序列完全相同，存在于 target 和 trap 蛋白中（razor 分配错误） | ❌ |
 | **L1** | L/I Isomer | 仅 L↔I 替换，单同位素质量相同（113.084064 Da） | ❌ |
-| **L2** | Near-isobaric | 氨基酸替换的质量差 < fragment tolerance（如 D→N，Δm=0.9840 Da） | ❌ (MS1) / ⚠️ (MS2) |
+| **L2** | Near-isobaric | 氨基酸替换的质量差 < fragment tolerance（如 D→N，Δm=0.9840 Da） | ❌ (MS1) / ⚠️ (MS2)¹ |
 | **L3** | Distinguishable Homolog | 有同源性但质量可区分（Hamming distance ≤ max_mismatches） | ✅ |
 | **L4** | True Trap | 无显著同源性的真正陷阱命中 | ✅ |
 
@@ -67,6 +67,7 @@ entrapment analyze \
   --results search_report.parquet \
   --config entrapment.yaml \
   --target-fasta human_swissprot.fasta \
+  --mzml-dir /path/to/mzml/files \
   --out output/entrapment
 ```
 
@@ -76,8 +77,8 @@ entrapment analyze \
 
 | 文件 | 内容 |
 |------|------|
-| `classified.tsv` | 所有 PSM 的分类结果（含 level, best_target 等） |
-| `entrapment_report.html` | 交互式 HTML 报告（饼图 + 柱状图 + Δm 直方图 + 可筛选表格） |
+| `classified.tsv` | 所有 PSM 的分类结果（含 level, best_target, provenance 等） |
+| `entrapment_report.html` | 交互式 HTML 报告（饼图 + 柱状图 + Δm 直方图 + 溯源统计 + 可筛选表格） |
 | `razor_errors.tsv` | L0 级别的 razor 分配错误（仅 trap 组） |
 | `run_metadata.json` | 运行元数据（输入文件 SHA256、配置快照、计数统计） |
 
@@ -137,12 +138,14 @@ entrapment inspect \
 |------|------|------|
 | `Stripped.Sequence` | ✅ | 去修饰肽段序列 |
 | `Protein.Ids` | ✅ | 蛋白 accession（`;` 分隔多蛋白） |
+| `Modified.Sequence` | | 带 UniMod 修饰的序列（v3 修饰解析） |
 | `Precursor.Charge` | | 电荷态 |
 | `Precursor.Mz` | | 前体 m/z |
-| `RT` | | 保留时间（分钟） |
+| `RT` | | 保留时间 apex（分钟） |
+| `RT.Start` | | 洗脱窗口起点（分钟，v3 RT-based scan lookup） |
+| `RT.Stop` | | 洗脱窗口终点（分钟，v3 RT-based scan lookup） |
 | `Q.Value` | | q-value |
 | `Run` | | 运行名称 |
-| `Precursor.Id` | | scan 编号 |
 
 ### 通用 TSV
 
@@ -154,9 +157,10 @@ entrapment inspect \
 
 | Tool | 功能 |
 |------|------|
-| `classify_entrapment_hits` | 运行完整分类流程，返回统计摘要 + HTML 报告 |
+| `classify_entrapment_hits` | 运行完整分类流程（含溯源），返回统计摘要 + HTML 报告 |
 | `analyze_entrapment_stats` | 从已分类 TSV 生成统计分析 |
 | `find_similar_targets` | 查找单个肽段在 target 库中的最相似序列 |
+| `annotate_provenance` | 对单个 trap PSM 进行碎片离子溯源分析（v3） |
 
 ## 示例
 
@@ -174,14 +178,25 @@ Total PSMs:     131159
 Trap PSM breakdown by discriminability level:
   L0 (razor error):         0
   L1 (L/I isomer):          39
-  L2 (near-isobaric):       6
-  L3 (distinguishable):     71
-  L4 (true trap):           418
+  L2 (near-isobaric):       8
+  L3 (distinguishable):     92
+  L4 (true trap):           395
+
+Provenance traced for 62 PSMs
 ```
 
-## v2 路线图
+## 版本历程
 
-- **L1.5 级别**：Q↔K 近等重替换（Δm=36.4 mDa）+ 等重双肽替换（GG↔N, AG↔Q, AD↔EG）
-- **编辑距离**：替代 Hamming 距离，支持不等长肽段比较
-- **共洗脱碎片追踪**：利用 mzML 原始数据验证轻重标 XIC 一致性
-- **修饰感知比对**：在比较时考虑 PTM 位置差异
+### v2（✅ 已完成）
+- **编辑距离**：Levenshtein 替代 Hamming，支持不等长肽段比较
+- **Q/K 检测**：SubstitutionType::QKSubstitution 注释（Δm=36.4 mDa）
+- **等重二肽替换**：IsobaricDipeptide 检测（GG↔N, AG↔Q, AD↔EG）
+- **k-mer 倒排索引**：pigeonhole 预筛加速跨长搜索
+
+### v3（✅ 已完成）
+- **碎片离子溯源**：b/y 离子匹配分类（TrapOnly / TargetOnly / Shared / Unassigned）
+- **嵌合谱检测**：shared_ratio > threshold 标记 chimeric
+- **UniMod 修饰解析**：DIA-NN Modified.Sequence → 位置 + delta mass
+- **RT-based scan lookup**：DIA-NN 无 scan_number 时通过 RT + precursor m/z 查找 MS2
+- **镜像图可视化**：trap vs target 碎片离子对比 HTML
+- **容错设计**：缺失 mzML 文件跳过而非中断
