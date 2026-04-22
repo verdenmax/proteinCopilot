@@ -12,6 +12,7 @@ pub mod mirror_plot;
 pub mod output;
 pub mod mod_parser;
 pub mod provenance;
+pub mod coelution;
 pub mod report;
 pub mod similarity;
 pub mod tagger;
@@ -197,7 +198,7 @@ pub fn trace_provenance_batch(
         }
 
         // Must have either scan_number or retention_time + precursor_mz for RT-based lookup.
-        let has_scan = cpsm.psm.scan_number.map_or(false, |s| s > 0);
+        let has_scan = cpsm.psm.scan_number.is_some_and(|s| s > 0);
         let has_rt_mz = cpsm.psm.retention_time.is_some() && cpsm.psm.precursor_mz.is_some();
         if !has_scan && !has_rt_mz {
             continue;
