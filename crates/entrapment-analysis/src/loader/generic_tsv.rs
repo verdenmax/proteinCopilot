@@ -180,6 +180,8 @@ pub fn load_generic_tsv(
             charge,
             precursor_mz,
             retention_time,
+            rt_start: None,
+            rt_stop: None,
             scan_number,
             spectrum_file,
             protein_ids,

@@ -180,6 +180,7 @@ pub fn trace_provenance_batch(
 
     // Group PSMs by spectrum_file for efficient file reading.
     // Build a map: spectrum_file → list of indices to trace.
+    // Each entry carries either a scan_number or RT+precursor_mz for lookup.
     let mut file_groups: HashMap<String, Vec<usize>> = HashMap::new();
 
     for (idx, cpsm) in classified.iter().enumerate() {
@@ -194,14 +195,14 @@ pub fn trace_provenance_batch(
         if cpsm.provenance.is_some() {
             continue; // already traced
         }
-        // Need a scan number and spectrum file to read the spectrum.
-        let scan_number = match cpsm.psm.scan_number {
-            Some(s) => s,
-            None => continue,
-        };
-        if scan_number == 0 {
+
+        // Must have either scan_number or retention_time + precursor_mz for RT-based lookup.
+        let has_scan = cpsm.psm.scan_number.map_or(false, |s| s > 0);
+        let has_rt_mz = cpsm.psm.retention_time.is_some() && cpsm.psm.precursor_mz.is_some();
+        if !has_scan && !has_rt_mz {
             continue;
         }
+
         let spectrum_file = match cpsm.psm.spectrum_file.as_deref() {
             Some(f) if !f.is_empty() => f.to_string(),
             _ => continue,
@@ -227,21 +228,79 @@ pub fn trace_provenance_batch(
     }
 
     for (spectrum_file, indices) in &file_groups {
-        // Find the mzML file on disk.
-        let mzml_path = find_mzml_file(mzml_dir, spectrum_file)?;
+        // Find the mzML file on disk — skip this file group if not found.
+        let mzml_path = match find_mzml_file(mzml_dir, spectrum_file) {
+            Ok(p) => p,
+            Err(_) => {
+                tracing::warn!(
+                    spectrum_file = %spectrum_file,
+                    skipped_psms = indices.len(),
+                    "mzML file not found, skipping provenance for this run"
+                );
+                continue;
+            }
+        };
 
         // Create indexed reader for O(1) scan access.
-        let reader = protein_copilot_spectrum_io::create_indexed_reader(&mzml_path)
-            .map_err(|e| EntrapmentError::SpectrumError {
-                path: mzml_path.clone(),
-                detail: format!("failed to create reader: {}", e),
-            })?;
+        let reader = match protein_copilot_spectrum_io::create_indexed_reader(&mzml_path) {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!(
+                    file = %mzml_path.display(),
+                    error = %e,
+                    skipped_psms = indices.len(),
+                    "failed to create spectrum reader, skipping this run"
+                );
+                continue;
+            }
+        };
 
         for &idx in indices {
             let cpsm = &classified[idx];
-            let scan_number = match cpsm.psm.scan_number {
-                Some(s) => s,
-                None => continue,
+
+            // Resolve scan number: direct or via RT-based lookup.
+            let scan_number = if let Some(s) = cpsm.psm.scan_number.filter(|&s| s > 0) {
+                s
+            } else if let (Some(rt), Some(mz)) =
+                (cpsm.psm.retention_time, cpsm.psm.precursor_mz)
+            {
+                // Derive tolerance from RT.Start / RT.Stop, or use config default.
+                let tol = match (cpsm.psm.rt_start, cpsm.psm.rt_stop) {
+                    (Some(start), Some(stop)) if stop > start => (stop - start) / 2.0,
+                    _ => config.provenance.rt_tolerance_min,
+                };
+                match reader.find_by_rt(&mzml_path, rt, mz, tol) {
+                    Ok(Some((scan, delta))) => {
+                        tracing::debug!(
+                            peptide = %cpsm.psm.peptide,
+                            rt_min = rt,
+                            precursor_mz = mz,
+                            resolved_scan = scan,
+                            rt_delta_min = delta,
+                            "resolved scan via RT-based lookup"
+                        );
+                        scan
+                    }
+                    Ok(None) => {
+                        tracing::debug!(
+                            peptide = %cpsm.psm.peptide,
+                            rt_min = rt,
+                            precursor_mz = mz,
+                            "no matching MS2 scan found for RT-based lookup, skipping"
+                        );
+                        continue;
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            peptide = %cpsm.psm.peptide,
+                            error = %e,
+                            "RT-based scan lookup failed, skipping"
+                        );
+                        continue;
+                    }
+                }
+            } else {
+                continue;
             };
 
             // Read the MS2 spectrum.
@@ -451,6 +510,8 @@ mod tests {
             charge: Some(2),
             precursor_mz: Some(400.0),
             retention_time: None,
+            rt_start: None,
+            rt_stop: None,
             scan_number: Some(1),
             spectrum_file: Some("test".into()),
             protein_ids: "P1".into(),
@@ -488,6 +549,8 @@ mod tests {
             charge: Some(2),
             precursor_mz: Some(400.0),
             retention_time: None,
+            rt_start: None,
+            rt_stop: None,
             scan_number: None, // no scan number
             spectrum_file: Some("test".into()),
             protein_ids: "P1".into(),
@@ -527,6 +590,8 @@ mod tests {
             charge: Some(2),
             precursor_mz: Some(400.0),
             retention_time: None,
+            rt_start: None,
+            rt_stop: None,
             scan_number: Some(1),
             spectrum_file: Some("test".into()),
             protein_ids: "P1".into(),

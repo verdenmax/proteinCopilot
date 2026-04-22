@@ -192,6 +192,8 @@ mod tests {
                 charge: Some(2),
                 precursor_mz: Some(500.25),
                 retention_time: Some(12.5),
+                rt_start: None,
+                rt_stop: None,
                 scan_number: Some(100),
                 spectrum_file: Some("test.raw".to_string()),
                 protein_ids: "sp|P12345|TEST_HUMAN".to_string(),

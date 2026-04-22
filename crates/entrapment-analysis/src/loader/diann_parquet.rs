@@ -6,7 +6,9 @@
 //! - `Modified.Sequence` — modified sequence with UniMod annotations (optional)
 //! - `Precursor.Charge` — charge state (optional)
 //! - `Precursor.Mz` — precursor m/z (optional)
-//! - `RT` — retention time in minutes (optional)
+//! - `RT` — retention time apex in minutes (optional)
+//! - `RT.Start` — elution window start in minutes (optional)
+//! - `RT.Stop` — elution window end in minutes (optional)
 //! - `Q.Value` — FDR q-value (optional)
 //! - `Run` — raw/spectrum file name (optional)
 
@@ -64,6 +66,8 @@ pub fn load_diann_parquet(path: &Path) -> Result<Vec<UnifiedPsm>, EntrapmentErro
         let charge_col = get_int_column_optional(&batch, &schema, "Precursor.Charge");
         let mz_col = get_float_column_optional(&batch, &schema, "Precursor.Mz");
         let rt_col = get_float_column_optional(&batch, &schema, "RT");
+        let rt_start_col = get_float_column_optional(&batch, &schema, "RT.Start");
+        let rt_stop_col = get_float_column_optional(&batch, &schema, "RT.Stop");
         let qvalue_col = get_float_column_optional(&batch, &schema, "Q.Value");
         let run_col = get_string_column_optional(&batch, &schema, "Run");
         let modified_seq_col =
@@ -80,6 +84,8 @@ pub fn load_diann_parquet(path: &Path) -> Result<Vec<UnifiedPsm>, EntrapmentErro
             let charge = charge_col.as_ref().and_then(|c| get_i32(c, row));
             let precursor_mz = mz_col.as_ref().and_then(|c| get_f64(c, row));
             let retention_time = rt_col.as_ref().and_then(|c| get_f64(c, row));
+            let rt_start = rt_start_col.as_ref().and_then(|c| get_f64(c, row));
+            let rt_stop = rt_stop_col.as_ref().and_then(|c| get_f64(c, row));
             let q_value = qvalue_col.as_ref().and_then(|c| get_f64(c, row));
             let spectrum_file = run_col
                 .as_ref()
@@ -105,6 +111,8 @@ pub fn load_diann_parquet(path: &Path) -> Result<Vec<UnifiedPsm>, EntrapmentErro
                 charge,
                 precursor_mz,
                 retention_time,
+                rt_start,
+                rt_stop,
                 scan_number: None, // DIA-NN doesn't have scan numbers
                 spectrum_file,
                 protein_ids,

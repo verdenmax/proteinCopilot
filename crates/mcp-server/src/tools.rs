@@ -3724,6 +3724,8 @@ impl ProteinCopilotServer {
             charge: None,
             precursor_mz: None,
             retention_time: None,
+            rt_start: None,
+            rt_stop: None,
             scan_number: None,
             spectrum_file: None,
             protein_ids: String::new(),

@@ -88,6 +88,8 @@ fn make_psm(
         charge: Some(2),
         precursor_mz: None,
         retention_time: Some(300.0),
+        rt_start: None,
+        rt_stop: None,
         scan_number,
         spectrum_file: spectrum_file.map(|s| s.to_string()),
         protein_ids: protein_ids.to_string(),

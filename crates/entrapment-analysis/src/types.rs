@@ -129,8 +129,14 @@ pub struct UnifiedPsm {
     pub charge: Option<i32>,
     /// Observed precursor *m/z*.
     pub precursor_mz: Option<f64>,
-    /// Retention time in **minutes**.
+    /// Retention time in **minutes** (apex / single value).
     pub retention_time: Option<f64>,
+    /// Elution window start in **minutes** (e.g. DIA-NN `RT.Start`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rt_start: Option<f64>,
+    /// Elution window end in **minutes** (e.g. DIA-NN `RT.Stop`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rt_stop: Option<f64>,
     /// Scan number (1-based).
     pub scan_number: Option<u32>,
     /// Name of the spectrum / raw file.
@@ -346,6 +352,8 @@ mod tests {
             charge: Some(2),
             precursor_mz: Some(300.0),
             retention_time: None,
+            rt_start: None,
+            rt_stop: None,
             scan_number: None,
             spectrum_file: None,
             protein_ids: "P1".into(),

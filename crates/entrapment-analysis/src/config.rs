@@ -174,6 +174,14 @@ pub struct ProvenanceConfig {
     /// Which similarity levels to include in the provenance trace.
     #[serde(default = "default_levels_to_trace")]
     pub levels_to_trace: Vec<String>,
+
+    /// Fallback RT tolerance in minutes when `scan_number` is unavailable.
+    ///
+    /// Used with `find_by_rt` to locate the matching MS2 scan.
+    /// If the PSM carries `rt_start` / `rt_stop`, the tolerance is derived
+    /// from those instead: `(rt_stop − rt_start) / 2`.
+    #[serde(default = "default_rt_tolerance_min")]
+    pub rt_tolerance_min: f64,
 }
 
 impl Default for ProvenanceConfig {
@@ -184,6 +192,7 @@ impl Default for ProvenanceConfig {
             chimera_threshold: default_chimera_threshold(),
             min_peaks_for_analysis: default_min_peaks_for_analysis(),
             levels_to_trace: default_levels_to_trace(),
+            rt_tolerance_min: default_rt_tolerance_min(),
         }
     }
 }
@@ -202,6 +211,10 @@ fn default_min_peaks_for_analysis() -> u32 {
 }
 fn default_levels_to_trace() -> Vec<String> {
     vec!["L2".to_string(), "L3".to_string(), "L4".to_string()]
+}
+
+fn default_rt_tolerance_min() -> f64 {
+    0.5 // 30 seconds, reasonable default for DIA elution windows
 }
 
 fn default_max_mismatches() -> u16 {
