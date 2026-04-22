@@ -200,3 +200,31 @@ Provenance traced for 62 PSMs
 - **RT-based scan lookup**：DIA-NN 无 scan_number 时通过 RT + precursor m/z 查找 MS2
 - **镜像图可视化**：trap vs target 碎片离子对比 HTML
 - **容错设计**：缺失 mzML 文件跳过而非中断
+
+### v4: 多目标碎片溯源 (Multi-Target Fragment Provenance)
+
+v4 对每个 L2/L3 trap PSM 自动查找所有共洗脱的 target 肽段（轻标 + 重标 SILAC），将每个观测碎片离子归属到具体的 target 来源。
+
+**功能特性：**
+- **共洗脱索引（CoElutionIndex）**：基于 RT 窗口交叉 + DIA 隔离窗口匹配，O(log N + k) 查询
+- **轻重标搜索**：同时查找 light 和 SILAC heavy 形式的共洗脱 target
+- **多目标碎片匹配**：每个观测峰可归属到多个 target 的理论碎片离子
+- **Per-PSM HTML 报告**：包含候选表、镜像谱图（Plotly.js）、碎片归属表
+
+**前置条件：**
+- `--mzml-dir` 参数指向 mzML 文件目录
+- config 中配置 `provenance.silac` 块（可选，启用重标搜索）
+
+**输出文件：**
+- `provenance_summary.html` — 所有溯源 PSMs 的汇总表
+- `provenance/` 目录 — 每个 PSM 一份独立的 HTML 报告
+
+**新增配置参数（`provenance` 块下）：**
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `silac.heavy_k_delta` | 8.014199 | 重标 Lysine delta mass (Da) |
+| `silac.heavy_r_delta` | 10.008269 | 重标 Arginine delta mass (Da) |
+| `silac.enable_heavy_search` | true | 是否搜索重标候选 |
+| `generate_per_psm_reports` | true | 是否生成 per-PSM HTML 报告 |
+| `max_co_eluting_candidates` | 20 | 每个 trap PSM 的最大候选数 |
