@@ -183,6 +183,11 @@ pub fn trace_provenance_batch(
     let mut file_groups: HashMap<String, Vec<usize>> = HashMap::new();
 
     for (idx, cpsm) in classified.iter().enumerate() {
+        // Only trace trap PSMs (target PSMs get L4 from classify_single but
+        // should not be provenance-traced).
+        if cpsm.group != PsmGroup::Trap {
+            continue;
+        }
         if !levels_to_trace.contains(cpsm.level.as_str()) {
             continue;
         }
