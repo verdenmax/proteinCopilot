@@ -9,6 +9,7 @@ description = "Entrapment (trap-database) hit classification and homology analys
 [dependencies]
 protein-copilot-core = { workspace = true }
 protein-copilot-search-engine = { workspace = true }
+protein-copilot-spectrum-io = { workspace = true }
 
 serde = { workspace = true }
 serde_json = { workspace = true }

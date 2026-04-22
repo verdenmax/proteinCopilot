@@ -89,11 +89,14 @@ pub fn file_sha256(path: &Path) -> Result<String, EntrapmentError> {
 /// Headers: peptide, charge, precursor_mz, retention_time, scan_number,
 /// spectrum_file, protein_ids, q_value, group, level, best_target_peptide,
 /// best_target_protein, mismatches, delta_mass_da, diff_positions,
-/// substitution_type, edit_distance, alignment_detail.
+/// substitution_type, edit_distance, alignment_detail, trap_matched,
+/// target_matched, shared_ions, shared_ratio, is_chimeric.
 ///
 /// Optional fields (`best_target_peptide`, `edit_distance`, `alignment_detail`,
 /// `diff_positions`) are written as empty strings when `None`.
 /// `substitution_type` is always present (defaults to `None` variant).
+/// Provenance columns (`trap_matched`, `target_matched`, `shared_ions`,
+/// `shared_ratio`, `is_chimeric`) are empty when provenance is not traced.
 pub fn write_classified_tsv(psms: &[ClassifiedPsm], path: &Path) -> Result<(), EntrapmentError> {
     let file = File::create(path).map_err(|e| EntrapmentError::IoError {
         path: path.to_path_buf(),
@@ -121,12 +124,35 @@ pub fn write_classified_tsv(psms: &[ClassifiedPsm], path: &Path) -> Result<(), E
         "substitution_type",
         "edit_distance",
         "alignment_detail",
+        "trap_matched",
+        "target_matched",
+        "shared_ions",
+        "shared_ratio",
+        "is_chimeric",
     ])
     .map_err(|e| EntrapmentError::OutputError {
         detail: format!("failed to write TSV header to {}: {e}", path.display()),
     })?;
 
     for cp in psms {
+        let (trap_matched, target_matched, shared_ions, shared_ratio, is_chimeric) =
+            match &cp.provenance {
+                Some(prov) => (
+                    prov.trap_matched_count.to_string(),
+                    prov.target_matched_count.to_string(),
+                    prov.shared_count.to_string(),
+                    format!("{:.4}", prov.shared_ratio),
+                    prov.is_chimeric.to_string(),
+                ),
+                None => (
+                    String::new(),
+                    String::new(),
+                    String::new(),
+                    String::new(),
+                    String::new(),
+                ),
+            };
+
         wtr.write_record([
             &cp.psm.peptide,
             &opt_to_string(&cp.psm.charge),
@@ -146,6 +172,11 @@ pub fn write_classified_tsv(psms: &[ClassifiedPsm], path: &Path) -> Result<(), E
             &cp.substitution_type.to_string(),
             &opt_to_string(&cp.edit_distance),
             &opt_to_string(&cp.alignment_detail),
+            &trap_matched,
+            &target_matched,
+            &shared_ions,
+            &shared_ratio,
+            &is_chimeric,
         ])
         .map_err(|e| EntrapmentError::OutputError {
             detail: format!("failed to write TSV row to {}: {e}", path.display()),
@@ -269,10 +300,13 @@ mod tests {
                 charge: Some(2),
                 precursor_mz: Some(500.25),
                 retention_time: Some(12.5),
+                rt_start: None,
+                rt_stop: None,
                 scan_number: Some(1001),
                 spectrum_file: Some("sample.raw".to_owned()),
                 protein_ids: protein.to_owned(),
                 q_value: Some(0.01),
+                modifications: Vec::new(),
             },
             group,
             level,
@@ -304,6 +338,7 @@ mod tests {
             substitution_type: SubstitutionType::None,
             edit_distance: None,
             alignment_detail: None,
+            provenance: None,
         }
     }
 
@@ -378,10 +413,13 @@ mod tests {
                 charge: None,
                 precursor_mz: None,
                 retention_time: None,
+                rt_start: None,
+                rt_stop: None,
                 scan_number: None,
                 spectrum_file: None,
                 protein_ids: "sp|P001|TEST_YEAST".to_owned(),
                 q_value: None,
+                modifications: Vec::new(),
             },
             group: PsmGroup::Trap,
             level: DiscriminabilityLevel::L4,
@@ -393,6 +431,7 @@ mod tests {
             substitution_type: SubstitutionType::None,
             edit_distance: None,
             alignment_detail: None,
+            provenance: None,
         };
 
         write_classified_tsv(&[psm], &path).expect("write TSV");
@@ -526,10 +565,13 @@ mod tests {
                 charge: Some(2),
                 precursor_mz: Some(500.0),
                 retention_time: Some(10.0),
+                rt_start: None,
+                rt_stop: None,
                 scan_number: Some(100),
                 spectrum_file: Some("test.raw".to_owned()),
                 protein_ids: "sp|P001|TRAP_YEAST".to_owned(),
                 q_value: Some(0.01),
+                modifications: Vec::new(),
             },
             group: PsmGroup::Trap,
             level: DiscriminabilityLevel::L2,
@@ -541,6 +583,7 @@ mod tests {
             substitution_type: SubstitutionType::QKSubstitution,
             edit_distance: Some(1),
             alignment_detail: Some("Q3→K".to_owned()),
+            provenance: None,
         };
 
         write_classified_tsv(&[psm], &path).expect("write TSV");
@@ -551,5 +594,80 @@ mod tests {
         assert!(lines[0].contains("edit_distance"));
         assert!(lines[0].contains("alignment_detail"));
         assert!(lines[1].contains("QKSubstitution"));
+    }
+
+    #[test]
+    fn test_write_classified_tsv_with_provenance() {
+        use crate::provenance::{AnnotatedPeak, FragmentProvenance, IonOrigin};
+
+        let mut cpsm = make_classified_psm(
+            "PEPTIDE",
+            "sp|P001|TRAP_YEAST",
+            PsmGroup::Trap,
+            DiscriminabilityLevel::L2,
+        );
+        cpsm.provenance = Some(FragmentProvenance {
+            trap_sequence: "PEPTIDE".into(),
+            target_sequence: "PAPTIDE".into(),
+            annotated_peaks: vec![AnnotatedPeak {
+                mz_observed: 200.0,
+                intensity: 1000.0,
+                origin: IonOrigin::TrapOnly,
+                trap_ion_label: Some("b2+1".into()),
+                target_ion_label: None,
+            }],
+            trap_matched_count: 3,
+            target_matched_count: 2,
+            shared_count: 1,
+            unassigned_count: 4,
+            shared_ratio: 0.1667,
+            is_chimeric: false,
+        });
+
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let path = dir.path().join("provenance.tsv");
+        write_classified_tsv(&[cpsm], &path).expect("write TSV");
+
+        let content = std::fs::read_to_string(&path).expect("read TSV");
+        let lines: Vec<&str> = content.lines().collect();
+
+        // Check header has new columns
+        assert!(lines[0].contains("trap_matched"));
+        assert!(lines[0].contains("target_matched"));
+        assert!(lines[0].contains("shared_ions"));
+        assert!(lines[0].contains("shared_ratio"));
+        assert!(lines[0].contains("is_chimeric"));
+
+        // Check data row has provenance values
+        let fields: Vec<&str> = lines[1].split('\t').collect();
+        let header_fields: Vec<&str> = lines[0].split('\t').collect();
+
+        // Find column indices for provenance columns
+        let trap_idx = header_fields
+            .iter()
+            .position(|&h| h == "trap_matched")
+            .expect("trap_matched column");
+        let target_idx = header_fields
+            .iter()
+            .position(|&h| h == "target_matched")
+            .expect("target_matched column");
+        let shared_idx = header_fields
+            .iter()
+            .position(|&h| h == "shared_ions")
+            .expect("shared_ions column");
+        let ratio_idx = header_fields
+            .iter()
+            .position(|&h| h == "shared_ratio")
+            .expect("shared_ratio column");
+        let chimeric_idx = header_fields
+            .iter()
+            .position(|&h| h == "is_chimeric")
+            .expect("is_chimeric column");
+
+        assert_eq!(fields[trap_idx], "3");
+        assert_eq!(fields[target_idx], "2");
+        assert_eq!(fields[shared_idx], "1");
+        assert_eq!(fields[ratio_idx], "0.1667");
+        assert_eq!(fields[chimeric_idx], "false");
     }
 }

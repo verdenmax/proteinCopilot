@@ -13,10 +13,13 @@ fn make_psm(peptide: &str, protein: &str) -> UnifiedPsm {
         charge: Some(2),
         precursor_mz: None,
         retention_time: None,
+        rt_start: None,
+        rt_stop: None,
         scan_number: None,
         spectrum_file: None,
         protein_ids: protein.to_string(),
         q_value: Some(0.01),
+        modifications: Vec::new(),
     }
 }
 

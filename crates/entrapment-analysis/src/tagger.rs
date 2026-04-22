@@ -281,7 +281,8 @@ fn load_accession_list(path: &Path, set: &mut HashSet<String>) -> Result<(), Ent
 mod tests {
     use super::*;
     use crate::config::{
-        ConflictResolution, EntrapmentConfig, GroupConfig, SimilarityConfig, UnmatchedPolicy,
+        ConflictResolution, EntrapmentConfig, GroupConfig, ProvenanceConfig, SimilarityConfig,
+        UnmatchedPolicy,
     };
 
     /// Helper: build a minimal config from target/trap `AccessionContains` rules.
@@ -310,6 +311,7 @@ mod tests {
             conflict_resolution: conflict,
             unmatched,
             similarity: SimilarityConfig::default(),
+            provenance: ProvenanceConfig::default(),
         }
     }
 
@@ -446,6 +448,7 @@ mod tests {
             conflict_resolution: ConflictResolution::PreferTarget,
             unmatched: UnmatchedPolicy::Ignore,
             similarity: SimilarityConfig::default(),
+            provenance: ProvenanceConfig::default(),
         };
 
         let tagger = Tagger::new(&config).expect("tagger should build");
@@ -488,6 +491,7 @@ mod tests {
             conflict_resolution: ConflictResolution::PreferTarget,
             unmatched: UnmatchedPolicy::Ignore,
             similarity: SimilarityConfig::default(),
+            provenance: ProvenanceConfig::default(),
         };
 
         let result = Tagger::new(&config);

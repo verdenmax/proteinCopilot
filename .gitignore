@@ -32,3 +32,4 @@ output/
 .superpowers/
 .worktrees/
 mcp_stderr.log
+.superpowers/

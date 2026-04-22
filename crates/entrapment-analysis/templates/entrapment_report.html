@@ -82,6 +82,11 @@
                     <th onclick="sortTable(8)">Sub Type ⇅</th>
                     <th onclick="sortTable(9)">Edit Dist ⇅</th>
                     <th onclick="sortTable(10)">Alignment ⇅</th>
+                    <th onclick="sortTable(11)">Trap Matched ⇅</th>
+                    <th onclick="sortTable(12)">Target Matched ⇅</th>
+                    <th onclick="sortTable(13)">Shared Ions ⇅</th>
+                    <th onclick="sortTable(14)">Shared Ratio ⇅</th>
+                    <th onclick="sortTable(15)">Chimeric ⇅</th>
                 </tr></thead>
                 <tbody id="psm-tbody"></tbody>
             </table>
@@ -214,7 +219,12 @@
                 p.diff_positions || '',
                 p.substitution_type || '',
                 p.edit_distance || '',
-                p.alignment_detail || ''
+                p.alignment_detail || '',
+                p.trap_matched || '',
+                p.target_matched || '',
+                p.shared_ions || '',
+                p.shared_ratio || '',
+                p.is_chimeric || ''
             ];
         });
         populateTable(allRows);
@@ -238,6 +248,11 @@
                 '<td>' + escHtml(r[8]) + '</td>' +
                 '<td>' + escHtml(r[9]) + '</td>' +
                 '<td style="font-size:0.85em">' + escHtml(r[10]) + '</td>' +
+                '<td>' + escHtml(r[11]) + '</td>' +
+                '<td>' + escHtml(r[12]) + '</td>' +
+                '<td>' + escHtml(r[13]) + '</td>' +
+                '<td>' + escHtml(r[14]) + '</td>' +
+                '<td>' + escHtml(r[15]) + '</td>' +
                 '</tr>';
         }
         tbody.innerHTML = html;

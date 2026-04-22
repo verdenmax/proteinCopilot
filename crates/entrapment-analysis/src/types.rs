@@ -129,8 +129,14 @@ pub struct UnifiedPsm {
     pub charge: Option<i32>,
     /// Observed precursor *m/z*.
     pub precursor_mz: Option<f64>,
-    /// Retention time in **minutes**.
+    /// Retention time in **minutes** (apex / single value).
     pub retention_time: Option<f64>,
+    /// Elution window start in **minutes** (e.g. DIA-NN `RT.Start`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rt_start: Option<f64>,
+    /// Elution window end in **minutes** (e.g. DIA-NN `RT.Stop`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rt_stop: Option<f64>,
     /// Scan number (1-based).
     pub scan_number: Option<u32>,
     /// Name of the spectrum / raw file.
@@ -139,6 +145,9 @@ pub struct UnifiedPsm {
     pub protein_ids: String,
     /// False-discovery-rate q-value.
     pub q_value: Option<f64>,
+    /// Parsed modifications: (0-based position, delta_mass_da).
+    #[serde(default)]
+    pub modifications: Vec<(usize, f64)>,
 }
 
 /// A PSM that has been classified with group and discriminability information.
@@ -166,6 +175,9 @@ pub struct ClassifiedPsm {
     pub edit_distance: Option<u32>,
     /// Alignment detail string (v2), e.g. "D0→N" or "ins:G@5".
     pub alignment_detail: Option<String>,
+    /// Fragment ion provenance analysis result (v3). None if not traced.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provenance: Option<crate::provenance::FragmentProvenance>,
 }
 
 /// Per-level hit counts for the five discriminability levels.
@@ -316,5 +328,42 @@ mod tests {
             dipeptide: "GG".to_string(),
         };
         assert_eq!(idb.as_str(), "IsobaricDipeptide");
+    }
+
+    #[test]
+    fn classified_psm_provenance_default() {
+        // Deserialize JSON without provenance field → None
+        let json = r#"{"psm":{"peptide":"PEP","charge":2,"precursor_mz":300.0,"retention_time":null,"scan_number":null,"spectrum_file":null,"protein_ids":"P1","q_value":0.01},"group":"Target","level":"L4","best_target_peptide":null,"best_target_protein":null,"mismatches":null,"delta_mass_da":null,"diff_positions":null,"substitution_type":"None","edit_distance":null,"alignment_detail":null}"#;
+        let cpsm: ClassifiedPsm = serde_json::from_str(json).unwrap();
+        assert!(cpsm.provenance.is_none());
+    }
+
+    #[test]
+    fn unified_psm_modifications_default() {
+        let json = r#"{"peptide":"PEP","charge":2,"precursor_mz":300.0,"retention_time":null,"scan_number":null,"spectrum_file":null,"protein_ids":"P1","q_value":0.01}"#;
+        let psm: UnifiedPsm = serde_json::from_str(json).unwrap();
+        assert!(psm.modifications.is_empty());
+    }
+
+    #[test]
+    fn unified_psm_modifications_roundtrip() {
+        let psm = UnifiedPsm {
+            peptide: "ACDFK".into(),
+            charge: Some(2),
+            precursor_mz: Some(300.0),
+            retention_time: None,
+            rt_start: None,
+            rt_stop: None,
+            scan_number: None,
+            spectrum_file: None,
+            protein_ids: "P1".into(),
+            q_value: Some(0.01),
+            modifications: vec![(1, 57.021464)],
+        };
+        let json = serde_json::to_string(&psm).unwrap();
+        let deser: UnifiedPsm = serde_json::from_str(&json).unwrap();
+        assert_eq!(deser.modifications.len(), 1);
+        assert_eq!(deser.modifications[0].0, 1);
+        assert!((deser.modifications[0].1 - 57.021464).abs() < 1e-6);
     }
 }

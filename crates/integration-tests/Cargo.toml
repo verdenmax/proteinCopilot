@@ -21,5 +21,6 @@ protein-copilot-fdr = { workspace = true }
 protein-copilot-result-import = { workspace = true }
 protein-copilot-entrapment-analysis = { workspace = true }
 serde_json = { workspace = true }
+serde_yaml = "0.9"
 tokio = { workspace = true }
 tempfile = "3"

@@ -56,6 +56,9 @@ enum Commands {
         /// Output directory (default: ./output/entrapment)
         #[arg(short, long, default_value = "output/entrapment")]
         out: String,
+        /// Directory containing mzML files for provenance tracing (optional)
+        #[arg(long)]
+        mzml_dir: Option<PathBuf>,
     },
     /// Regenerate HTML report from classified TSV
     Report {
@@ -121,7 +124,8 @@ fn main() {
             target_fasta,
             format,
             out,
-        } => run_analyze(&results, &config, &target_fasta, format.as_ref(), &out),
+            mzml_dir,
+        } => run_analyze(&results, &config, &target_fasta, format.as_ref(), &out, mzml_dir.as_deref()),
         Commands::Report { classified, out } => run_report(&classified, out.as_deref()),
         Commands::Inspect {
             peptide,
@@ -147,6 +151,7 @@ fn run_analyze(
     fasta_path: &str,
     format_arg: Option<&FormatArg>,
     out_dir: &str,
+    mzml_dir: Option<&Path>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let results_path = Path::new(results_path);
     let config_path = Path::new(config_path);
@@ -174,7 +179,21 @@ fn run_analyze(
 
     // 5. Classify all PSMs
     info!("classifying PSMs");
-    let classified = analyser.classify_all(&psms)?;
+    let mut classified = analyser.classify_all(&psms)?;
+
+    // 5b. Provenance tracing (optional)
+    if let Some(mzml_dir) = mzml_dir {
+        use protein_copilot_entrapment_analysis::trace_provenance_batch;
+
+        println!(
+            "Running provenance tracing with mzML files from: {}",
+            mzml_dir.display()
+        );
+        match trace_provenance_batch(&mut classified, mzml_dir, &config) {
+            Ok(count) => println!("Provenance traced for {} PSMs", count),
+            Err(e) => eprintln!("Warning: provenance tracing failed: {}", e),
+        }
+    }
 
     // 6. Create output directory
     std::fs::create_dir_all(&out_dir)?;
@@ -273,10 +292,13 @@ fn run_inspect(
         charge: None,
         precursor_mz: None,
         retention_time: None,
+        rt_start: None,
+        rt_stop: None,
         scan_number: None,
         spectrum_file: None,
         protein_ids: String::new(),
         q_value: None,
+        modifications: Vec::new(),
     };
 
     // 4. Classify the single peptide (always as Trap to trigger similarity checks)
