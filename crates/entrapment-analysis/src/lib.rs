@@ -13,6 +13,7 @@ pub mod output;
 pub mod mod_parser;
 pub mod provenance;
 pub mod coelution;
+pub mod multi_report;
 pub mod report;
 pub mod similarity;
 pub mod tagger;
