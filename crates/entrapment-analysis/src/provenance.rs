@@ -262,7 +262,10 @@ fn amino_acid_mass(aa: char) -> f64 {
         'Q' => 128.05858,
         'K' => 128.09496,
         'R' => 156.10111,
-        _ => 0.0, // unknown amino acid
+        _ => {
+            tracing::debug!(amino_acid = %aa, "unknown amino acid, using mass=0.0");
+            0.0
+        }
     }
 }
 

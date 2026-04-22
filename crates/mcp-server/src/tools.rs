@@ -706,6 +706,9 @@ struct AnnotateProvenanceInput {
     /// Maximum fragment charge state (default: 2)
     #[serde(default = "default_max_charge")]
     max_fragment_charge: i32,
+    /// Chimera threshold for shared_ratio (default: 0.3)
+    #[serde(default = "default_chimera_threshold")]
+    chimera_threshold: f64,
     /// Output HTML file path (default: ./provenance_scan{N}.html)
     #[serde(default)]
     output_path: Option<String>,
@@ -716,6 +719,9 @@ fn default_frag_tol() -> f64 {
 }
 fn default_max_charge() -> i32 {
     2
+}
+fn default_chimera_threshold() -> f64 {
+    0.3
 }
 
 // --- Entrapment analysis output schemas ---
@@ -799,6 +805,8 @@ struct AnnotateProvenanceOutput {
     unassigned_count: u32,
     /// shared / (trap_matched + target_matched + shared).
     shared_ratio: f64,
+    /// Whether shared_ratio exceeds the chimera threshold.
+    is_chimeric: bool,
     /// Total peaks in the spectrum.
     total_peaks: usize,
 }
@@ -3851,6 +3859,7 @@ impl ProteinCopilotServer {
             shared_count: provenance.shared_count,
             unassigned_count: provenance.unassigned_count,
             shared_ratio: provenance.shared_ratio,
+            is_chimeric: provenance.shared_ratio > input.chimera_threshold,
             total_peaks: provenance.annotated_peaks.len(),
         }))
     }

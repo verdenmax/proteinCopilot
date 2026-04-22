@@ -205,6 +205,22 @@ pub fn trace_provenance_batch(
     }
 
     // Process each file group.
+    if file_groups.is_empty() {
+        // Check if we had eligible PSMs but all lacked scan numbers
+        let eligible_count = classified
+            .iter()
+            .filter(|c| levels_to_trace.contains(c.level.as_str()) && c.provenance.is_none())
+            .count();
+        if eligible_count > 0 {
+            tracing::warn!(
+                eligible_psms = eligible_count,
+                "no PSMs have scan_number or spectrum_file — provenance tracing requires \
+                 scan-level data. DIA-NN parquet results do not include scan numbers; \
+                 consider using a search engine that provides scan-level identifiers."
+            );
+        }
+    }
+
     for (spectrum_file, indices) in &file_groups {
         // Find the mzML file on disk.
         let mzml_path = find_mzml_file(mzml_dir, spectrum_file)?;

@@ -73,7 +73,16 @@ pub fn parse_modified_sequence(modified_seq: &str) -> (String, Vec<ParsedModific
             if let Some(end) = find_closing_paren(bytes, i) {
                 let inner = &modified_seq[i + 1..end]; // content between ( and )
                 if let Some(id) = parse_unimod_tag(inner) {
-                    let delta_mass = unimod_delta_mass(id).unwrap_or(0.0);
+                    let delta_mass = match unimod_delta_mass(id) {
+                        Some(dm) => dm,
+                        None => {
+                            tracing::warn!(
+                                unimod_id = id,
+                                "unknown UniMod accession, using delta_mass=0.0"
+                            );
+                            0.0
+                        }
+                    };
                     // Position is the index of the *preceding* residue.
                     // If the annotation appears at the start (N-terminal mod),
                     // position is 0.

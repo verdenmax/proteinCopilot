@@ -177,10 +177,14 @@ fn check_isobaric_dipeptide(shorter: &str, longer: &str) -> Option<(char, String
     None
 }
 
-/// Extract 0-based positions of substitutions between two sequences.
+/// Extract 0-based positions (on the trap/query sequence) of substitutions.
 ///
-/// Compares characters pairwise (up to the shorter length) and returns the
-/// indices where the characters differ.
+/// For **same-length** sequences, compares characters pairwise and returns
+/// indices where they differ.
+///
+/// For **cross-length** sequences (insertions/deletions), a simple zip is
+/// incorrect because positions shift after an indel.  In that case, use
+/// [`extract_substitution_positions_from_alignment`] instead.
 fn extract_diff_positions(trap_seq: &str, target_seq: &str) -> Vec<usize> {
     trap_seq
         .chars()
@@ -189,6 +193,38 @@ fn extract_diff_positions(trap_seq: &str, target_seq: &str) -> Vec<usize> {
         .filter(|(_, (a, b))| a != b)
         .map(|(i, _)| i)
         .collect()
+}
+
+/// Extract substitution positions from a Levenshtein alignment detail string.
+///
+/// Parses entries like `"D0→N"` to extract position 0, ignoring `"ins:..."` and
+/// `"del:..."` entries (which don't correspond to a substitution *at* a trap
+/// position in the same way).  Returns the 0-based positions on the **trap**
+/// (query) sequence where a substitution occurred.
+fn extract_substitution_positions_from_alignment(alignment_detail: &str) -> Vec<usize> {
+    if alignment_detail.is_empty() {
+        return Vec::new();
+    }
+    let mut positions = Vec::new();
+    for op in alignment_detail.split(',') {
+        let op = op.trim();
+        // Skip insertion/deletion ops
+        if op.starts_with("ins:") || op.starts_with("del:") {
+            continue;
+        }
+        // Substitution format: "X<pos>→Y" — extract <pos>
+        if let Some(arrow_pos) = op.find('→') {
+            // Characters before → are like "D0", "A12" — skip first char (amino acid)
+            let before_arrow = &op[..arrow_pos];
+            if before_arrow.len() > 1 {
+                // Skip leading amino acid character (single byte ASCII)
+                if let Ok(pos) = before_arrow[1..].parse::<usize>() {
+                    positions.push(pos);
+                }
+            }
+        }
+    }
+    positions
 }
 
 /// Calculate mass adjustment for modifications at substitution positions.
@@ -446,7 +482,10 @@ pub fn classify_single(
         }
         BestMatch::CrossLength(cross) => {
             // Modification-aware delta mass adjustment for cross-length matches.
-            let diff_pos = extract_diff_positions(&psm.peptide, &cross.target_peptide);
+            // Use alignment-based substitution positions (not char-by-char zip,
+            // which gives wrong positions when insertions/deletions shift offsets).
+            let diff_pos =
+                extract_substitution_positions_from_alignment(&cross.alignment_detail);
             let mod_adj = mod_mass_adjustment(&psm.modifications, &diff_pos);
             let adjusted_dm = cross.delta_mass_da - mod_adj;
 

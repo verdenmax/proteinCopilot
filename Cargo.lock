@@ -1679,6 +1679,7 @@ dependencies = [
  "protein-copilot-spectrum-io",
  "protein-copilot-xic",
  "serde_json",
+ "serde_yaml",
  "tempfile",
  "tokio",
 ]
