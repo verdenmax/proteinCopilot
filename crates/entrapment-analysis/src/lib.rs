@@ -373,6 +373,281 @@ fn find_mzml_file(dir: &Path, raw_file: &str) -> Result<std::path::PathBuf, Entr
     })
 }
 
+// ---------------------------------------------------------------------------
+// v4 Multi-Target Provenance Batch Pipeline
+// ---------------------------------------------------------------------------
+
+/// Extract DIA isolation windows from an mzML file via its MS2 scan metadata.
+///
+/// De-duplicates windows by rounding center/lower/upper to 2 decimal places.
+/// Returns an empty list if the reader fails to list MS2 metadata.
+pub fn extract_dia_windows(
+    reader: &dyn protein_copilot_spectrum_io::SpectrumReader,
+    mzml_path: &std::path::Path,
+) -> Vec<coelution::DiaWindow> {
+    let mut seen = std::collections::HashSet::new();
+    let mut windows = Vec::new();
+
+    if let Ok(meta_list) = reader.list_ms2_meta(mzml_path) {
+        for meta in &meta_list {
+            if let Some((center, lower, upper)) = meta.isolation_window {
+                // Round to 2 decimal places to deduplicate.
+                let key = (
+                    (center * 100.0) as i64,
+                    (lower * 100.0) as i64,
+                    (upper * 100.0) as i64,
+                );
+                if seen.insert(key) {
+                    windows.push(coelution::DiaWindow {
+                        center,
+                        low: center - lower,
+                        high: center + upper,
+                    });
+                }
+            }
+        }
+    }
+
+    windows
+}
+
+/// Run multi-target provenance tracing on classified PSMs.
+///
+/// For each L2/L3 trap PSM:
+/// 1. Find co-eluting targets from the full PSM list
+/// 2. Read the MS2 spectrum from mzML
+/// 3. Match observed peaks against all candidate theoretical ions
+/// 4. Generate per-PSM HTML report
+///
+/// Returns `(traced_count, provenance_results)`.
+pub fn trace_multi_target_provenance(
+    classified: &[ClassifiedPsm],
+    all_psms: &[UnifiedPsm],
+    all_groups: &[PsmGroup],
+    mzml_dir: &Path,
+    config: &EntrapmentConfig,
+    output_dir: &Path,
+) -> Result<(u32, Vec<types::MultiTargetProvenance>), EntrapmentError> {
+    use std::collections::HashSet;
+
+    use protein_copilot_core::search_params::{MassTolerance, ToleranceUnit};
+
+    let tolerance = MassTolerance {
+        value: config.provenance.fragment_tolerance_ppm,
+        unit: ToleranceUnit::Ppm,
+    };
+
+    let levels_to_trace: HashSet<&str> = config
+        .provenance
+        .levels_to_trace
+        .iter()
+        .map(|s| s.as_str())
+        .collect();
+
+    // Collect eligible trap PSMs: group==Trap, level in levels_to_trace,
+    // has scan_number or (retention_time + precursor_mz), has spectrum_file.
+    struct Eligible<'a> {
+        cpsm: &'a ClassifiedPsm,
+        run: String,
+    }
+
+    let mut eligible: Vec<Eligible<'_>> = Vec::new();
+    for cpsm in classified {
+        if cpsm.group != PsmGroup::Trap {
+            continue;
+        }
+        if !levels_to_trace.contains(cpsm.level.as_str()) {
+            continue;
+        }
+        let has_scan = cpsm.psm.scan_number.is_some_and(|s| s > 0);
+        let has_rt_mz = cpsm.psm.retention_time.is_some() && cpsm.psm.precursor_mz.is_some();
+        if !has_scan && !has_rt_mz {
+            continue;
+        }
+        let run = match cpsm.psm.spectrum_file.as_deref() {
+            Some(f) if !f.is_empty() => f.to_string(),
+            _ => continue,
+        };
+        eligible.push(Eligible { cpsm, run });
+    }
+
+    // Get unique run names (preserving order).
+    let mut run_names: Vec<String> = Vec::new();
+    {
+        let mut seen_runs: HashSet<&str> = HashSet::new();
+        for e in &eligible {
+            if seen_runs.insert(&e.run) {
+                run_names.push(e.run.clone());
+            }
+        }
+    }
+
+    // Create provenance output directory if per-PSM reports requested.
+    if config.provenance.generate_per_psm_reports {
+        let prov_dir = output_dir.join("provenance");
+        std::fs::create_dir_all(&prov_dir).map_err(|e| EntrapmentError::IoError {
+            path: prov_dir.clone(),
+            detail: format!("failed to create provenance directory: {e}"),
+        })?;
+    }
+
+    let mut traced_count = 0u32;
+    let mut results: Vec<types::MultiTargetProvenance> = Vec::new();
+
+    for run_name in &run_names {
+        // Find mzML file.
+        let mzml_path = match find_mzml_file(mzml_dir, run_name) {
+            Ok(p) => p,
+            Err(_) => {
+                let skip_count = eligible.iter().filter(|e| &e.run == run_name).count();
+                tracing::warn!(
+                    spectrum_file = %run_name,
+                    skipped_psms = skip_count,
+                    "mzML file not found, skipping multi-target provenance for this run"
+                );
+                continue;
+            }
+        };
+
+        // Create indexed reader for O(1) scan access.
+        let reader = match protein_copilot_spectrum_io::create_indexed_reader(&mzml_path) {
+            Ok(r) => r,
+            Err(e) => {
+                let skip_count = eligible.iter().filter(|e| &e.run == run_name).count();
+                tracing::warn!(
+                    file = %mzml_path.display(),
+                    error = %e,
+                    skipped_psms = skip_count,
+                    "failed to create spectrum reader, skipping this run"
+                );
+                continue;
+            }
+        };
+
+        // Extract DIA windows.
+        let dia_windows = extract_dia_windows(reader.as_ref(), &mzml_path);
+
+        // Build co-elution index.
+        let silac_ref = config.provenance.silac.as_ref();
+        let index = coelution::CoElutionIndex::build(
+            all_psms,
+            all_groups,
+            &dia_windows,
+            silac_ref,
+            config.provenance.max_co_eluting_candidates,
+        );
+
+        // Process each eligible PSM in this run.
+        for e in eligible.iter().filter(|e| &e.run == run_name) {
+            let cpsm = e.cpsm;
+
+            // Resolve scan number: direct or via RT-based lookup.
+            let scan_number = if let Some(s) = cpsm.psm.scan_number.filter(|&s| s > 0) {
+                s
+            } else if let (Some(rt), Some(mz)) =
+                (cpsm.psm.retention_time, cpsm.psm.precursor_mz)
+            {
+                let tol = match (cpsm.psm.rt_start, cpsm.psm.rt_stop) {
+                    (Some(start), Some(stop)) if stop > start => (stop - start) / 2.0,
+                    _ => config.provenance.rt_tolerance_min,
+                };
+                match reader.find_by_rt(&mzml_path, rt, mz, tol) {
+                    Ok(Some((scan, _delta))) => scan,
+                    Ok(None) => {
+                        tracing::debug!(
+                            peptide = %cpsm.psm.peptide,
+                            rt_min = rt,
+                            precursor_mz = mz,
+                            "no matching MS2 scan found for RT-based lookup, skipping"
+                        );
+                        continue;
+                    }
+                    Err(err) => {
+                        tracing::warn!(
+                            peptide = %cpsm.psm.peptide,
+                            error = %err,
+                            "RT-based scan lookup failed, skipping"
+                        );
+                        continue;
+                    }
+                }
+            } else {
+                continue;
+            };
+
+            // Read the MS2 spectrum.
+            let spectrum = match reader.read_spectrum(&mzml_path, scan_number) {
+                Ok(s) => s,
+                Err(err) => {
+                    tracing::warn!(
+                        scan = scan_number,
+                        file = %mzml_path.display(),
+                        error = %err,
+                        "could not read scan, skipping multi-target provenance"
+                    );
+                    continue;
+                }
+            };
+
+            // Skip spectra with too few peaks.
+            if (spectrum.mz_array.len() as u32) < config.provenance.min_peaks_for_analysis {
+                continue;
+            }
+
+            // Find co-eluting candidates.
+            let candidates = index.find_co_eluting(&cpsm.psm, run_name);
+            if candidates.is_empty() {
+                continue;
+            }
+
+            // Trace multi-target provenance.
+            let mut prov = multi_provenance::trace_multi_target(
+                &spectrum.mz_array,
+                &spectrum.intensity_array,
+                &cpsm.psm.peptide,
+                &cpsm.psm.modifications,
+                &candidates,
+                &tolerance,
+                config.provenance.max_fragment_charge,
+            );
+            prov.scan_number = scan_number;
+
+            // Generate per-PSM HTML report if configured.
+            if config.provenance.generate_per_psm_reports {
+                let report_path = output_dir
+                    .join("provenance")
+                    .join(format!(
+                        "{}_{}_scan{}.html",
+                        run_name, cpsm.psm.peptide, scan_number
+                    ));
+                if let Err(err) = multi_report::render_multi_provenance_report(&prov, &report_path)
+                {
+                    tracing::warn!(
+                        path = %report_path.display(),
+                        error = %err,
+                        "failed to write per-PSM provenance report"
+                    );
+                }
+            }
+
+            results.push(prov);
+            traced_count += 1;
+        }
+    }
+
+    // Write summary report.
+    let summary_path = output_dir.join("provenance_summary.html");
+    if let Err(err) = multi_report::render_provenance_summary(&results, &summary_path) {
+        tracing::warn!(
+            path = %summary_path.display(),
+            error = %err,
+            "failed to write provenance summary report"
+        );
+    }
+
+    Ok((traced_count, results))
+}
+
 /// Extract the protein-family name from a UniProt-format accession.
 ///
 /// E.g. `"sp|P12345|EF1A1_HUMAN"` → `"EF1A1"`.
