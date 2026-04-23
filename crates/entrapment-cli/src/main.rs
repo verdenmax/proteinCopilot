@@ -195,6 +195,48 @@ fn run_analyze(
         }
     }
 
+    // 5c. Multi-target provenance (v4) — runs when mzml_dir is provided
+    if let Some(mzml_dir) = mzml_dir {
+        use protein_copilot_entrapment_analysis::tagger::Tagger;
+        use protein_copilot_entrapment_analysis::trace_multi_target_provenance;
+
+        // Build group assignments for all PSMs (needed for CoElutionIndex)
+        let tagger = Tagger::new(&config)?;
+        let groups: Vec<PsmGroup> = psms
+            .iter()
+            .map(|psm| {
+                tagger
+                    .tag(&psm.protein_ids)
+                    .unwrap_or(PsmGroup::Target)
+            })
+            .collect();
+
+        println!("Running multi-target provenance tracing...");
+        match trace_multi_target_provenance(
+            &classified,
+            &psms,
+            &groups,
+            mzml_dir,
+            &config,
+            &out_dir,
+        ) {
+            Ok((count, _results)) => {
+                println!("Multi-target provenance traced for {} PSMs", count);
+                if count > 0 {
+                    println!(
+                        "Per-PSM reports written to: {}/provenance/",
+                        out_dir.display()
+                    );
+                    println!(
+                        "Summary report: {}/provenance_summary.html",
+                        out_dir.display()
+                    );
+                }
+            }
+            Err(e) => eprintln!("Warning: multi-target provenance failed: {}", e),
+        }
+    }
+
     // 6. Create output directory
     std::fs::create_dir_all(&out_dir)?;
 

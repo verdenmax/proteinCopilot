@@ -200,3 +200,51 @@ Provenance traced for 62 PSMs
 - **RT-based scan lookup**：DIA-NN 无 scan_number 时通过 RT + precursor m/z 查找 MS2
 - **镜像图可视化**：trap vs target 碎片离子对比 HTML
 - **容错设计**：缺失 mzML 文件跳过而非中断
+
+### v4: 多目标碎片溯源 (Multi-Target Fragment Provenance)
+
+v4 对每个 L2/L3 trap PSM 自动查找所有共洗脱的 target 肽段（轻标 + 重标 SILAC），将每个观测碎片离子归属到具体的 target 来源。
+
+**功能特性：**
+- **共洗脱索引（CoElutionIndex）**：基于 RT 窗口交叉 + DIA 隔离窗口匹配，O(log N + k) 查询
+- **轻重标搜索**：同时查找 light 和 SILAC heavy 形式的共洗脱 target
+- **多目标碎片匹配**：每个观测峰可归属到多个 target 的理论碎片离子
+- **DIA 双扫描镜像（Dual-Scan Mirror）**：轻标和重标前体落在不同隔离窗口，分别从对应的 MS2 扫描读取观测谱图
+  - 轻标镜像：使用轻标前体 m/z 通过 `find_by_rt` 定位 MS2 扫描
+  - 重标镜像：使用 SILAC 偏移后的重标前体 m/z 定位不同的 MS2 扫描
+  - 重标镜像的 trap 理论离子使用 SILAC delta 偏移（`shift_ions_heavy`）
+  - 验证 `heavy_scan != light_scan`，避免重复读取同一扫描
+- **Per-PSM HTML 报告**：
+  - 信息头：轻/重标前体 m/z、电荷、轻标扫描号、重标扫描号、谱图文件名
+  - 候选表：共洗脱 target 肽段（含前体 m/z、蛋白 ID、标记形式）
+  - 轻标镜像谱图（Light Mirror）：归一化强度、离子标注、噪声过滤
+  - 重标镜像谱图（Heavy Mirror）：独立扫描号、SILAC 偏移 trap 离子
+  - Trap 碎片归属表：仅展示 trap 碎片离子的 target 匹配
+
+**数据结构：**
+- `MirrorData`：每个镜像的独立数据（scan_number + annotated_peaks + 统计计数）
+- `MultiTargetProvenance`：`light: MirrorData` + `heavy: Option<MirrorData>` + 候选列表
+
+**前置条件：**
+- `--mzml-dir` 参数指向 mzML 文件目录
+- config 中配置 `provenance.silac` 块（可选，启用重标搜索）
+
+**输出文件：**
+- `provenance_summary.html` — 所有溯源 PSMs 的汇总表
+- `provenance/` 目录 — 每个 PSM 一份独立的 HTML 报告
+
+**新增配置参数（`provenance` 块下）：**
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `silac.heavy_k_delta` | 8.014199 | 重标 Lysine delta mass (Da) |
+| `silac.heavy_r_delta` | 10.008269 | 重标 Arginine delta mass (Da) |
+| `silac.enable_heavy_search` | true | 是否搜索重标候选 |
+| `generate_per_psm_reports` | true | 是否生成 per-PSM HTML 报告 |
+| `max_co_eluting_candidates` | 20 | 每个 trap PSM 的最大候选数 |
+
+**镜像谱图展示优化：**
+- 噪声峰过滤：<5% 相对强度的峰以极淡色（`#f0f0f0`）背景展示
+- 匹配峰标注：每个峰顶标注 b/y 离子名称（字号 10、颜色跟随离子）
+- 柱宽统一 1.2 Da（匹配峰）/ 0.5 Da（未匹配）/ 0.3 Da（噪声）
+- 无边框纯色柱形，视觉清晰

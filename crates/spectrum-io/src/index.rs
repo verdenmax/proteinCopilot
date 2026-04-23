@@ -631,11 +631,12 @@ pub fn build_index_by_byte_scan(path: &Path) -> Result<ScanIndex, SpectrumIoErro
     let mut fallback_scan: u32 = 0;
     let mut global_pos: u64 = 0;
 
-    // A <spectrum> opening tag is typically ~100-200 bytes. We need at least
-    // this many bytes after a match to reliably parse the id attribute.
-    // Tags found with fewer remaining bytes are skipped and re-found in the
-    // next buffer fill via the overlap region.
-    const TAG_MIN_CONTENT: usize = 2048;
+    // We need enough bytes after a `<spectrum ` match to extract metadata up to
+    // the `<binaryDataArrayList` tag.  In real DIA files the isolation-window
+    // cvParams (MS:1000827/28/29) can appear 3000+ bytes from the tag start
+    // (e.g. Thermo DIA mzML with long scanWindow / userParam blocks).
+    // 8192 bytes safely covers all observed layouts.
+    const TAG_MIN_CONTENT: usize = 8192;
 
     loop {
         let buf = reader.fill_buf().map_err(|e| SpectrumIoError::IoError {

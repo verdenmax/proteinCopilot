@@ -75,9 +75,9 @@ pub struct FragmentProvenance {
 // ---------------------------------------------------------------------------
 
 /// A theoretical ion with its m/z and human-readable label.
-struct TheoreticalIon {
-    mz: f64,
-    label: String,
+pub(crate) struct TheoreticalIon {
+    pub(crate) mz: f64,
+    pub(crate) label: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -188,7 +188,7 @@ pub fn trace_provenance(
 ///
 /// Modifications are position-delta pairs where position is a 0-based residue
 /// index and delta is the mass shift in Daltons.
-fn generate_theoretical_ions(
+pub(crate) fn generate_theoretical_ions(
     sequence: &str,
     modifications: &[(usize, f64)],
     max_charge: i32,
@@ -240,7 +240,7 @@ fn generate_theoretical_ions(
 }
 
 /// Standard monoisotopic amino acid residue masses (Da).
-fn amino_acid_mass(aa: char) -> f64 {
+pub(crate) fn amino_acid_mass(aa: char) -> f64 {
     match aa {
         'G' => 57.02146,
         'A' => 71.03711,

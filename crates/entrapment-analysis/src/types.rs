@@ -246,6 +246,109 @@ pub struct RazorFamily {
 }
 
 // ---------------------------------------------------------------------------
+// v4 Multi-Target Provenance Types
+// ---------------------------------------------------------------------------
+
+/// Whether a co-eluting candidate is a light or heavy (SILAC) form.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum LabelForm {
+    /// Light (unlabeled) form.
+    Light,
+    /// Heavy (SILAC-labeled) form with shifted precursor and residue deltas.
+    Heavy {
+        /// Heavy precursor m/z.
+        precursor_mz_heavy: f64,
+        /// (0-based position, delta_Da) for each labeled residue (K or R).
+        residue_deltas: Vec<(usize, f64)>,
+    },
+}
+
+/// A co-eluting target peptide candidate found within the same DIA window and RT range.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CoElutingCandidate {
+    /// Target peptide sequence.
+    pub peptide: String,
+    /// Protein accession(s).
+    pub protein_ids: Vec<String>,
+    /// Precursor m/z (light form; for Heavy, use `label_form` field).
+    pub precursor_mz: f64,
+    /// Charge state.
+    pub charge: i32,
+    /// Elution window start (minutes).
+    pub rt_start: f64,
+    /// Elution window stop (minutes).
+    pub rt_stop: f64,
+    /// Light or Heavy form.
+    pub label_form: LabelForm,
+    /// Modifications: (0-based position, delta_mass_Da).
+    pub modifications: Vec<(usize, f64)>,
+}
+
+/// A single target ion match for a multi-target annotated peak.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TargetIonMatch {
+    /// Index into `MultiTargetProvenance::candidates`.
+    pub candidate_index: usize,
+    /// Ion label, e.g. "b3+1", "y5+2".
+    pub ion_label: String,
+    /// Matching error in ppm.
+    pub delta_ppm: f64,
+}
+
+/// An observed peak annotated with multi-target provenance information.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MultiAnnotatedPeak {
+    /// Observed m/z.
+    pub mz_observed: f64,
+    /// Observed intensity.
+    pub intensity: f64,
+    /// Ion label from the trap peptide (if matched).
+    pub trap_ion: Option<String>,
+    /// All target ion matches (may be 0, 1, or many).
+    pub target_matches: Vec<TargetIonMatch>,
+}
+
+/// Data for one mirror spectrum (light or heavy scan).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MirrorData {
+    /// Scan number of the observed MS2 spectrum.
+    pub scan_number: u32,
+    /// Per-peak multi-target annotation.
+    pub annotated_peaks: Vec<MultiAnnotatedPeak>,
+    /// Count of peaks matching only trap ions.
+    pub trap_only_count: u32,
+    /// Count of peaks matching at least one target (not trap).
+    pub target_only_count: u32,
+    /// Count of peaks matching both trap and at least one target.
+    pub shared_count: u32,
+    /// Count of peaks matching nothing.
+    pub unassigned_count: u32,
+}
+
+/// Complete multi-target provenance result for one trap PSM.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MultiTargetProvenance {
+    /// The trap PSM being analyzed.
+    pub trap_peptide: String,
+    /// Precursor m/z (light form) of the trap PSM.
+    pub trap_precursor_mz: f64,
+    /// Precursor m/z (heavy SILAC form) of the trap PSM, if applicable.
+    pub trap_precursor_mz_heavy: Option<f64>,
+    /// Charge state of the trap PSM.
+    pub trap_charge: i32,
+    /// Spectrum/raw file name.
+    pub spectrum_file: String,
+    /// All co-eluting target candidates (light + heavy).
+    /// Candidate indices in TargetIonMatch reference this vec.
+    pub candidates: Vec<CoElutingCandidate>,
+    /// Light mirror data (observed from the light-precursor DIA scan).
+    pub light: MirrorData,
+    /// Heavy mirror data (observed from the heavy-precursor DIA scan).
+    /// None if no heavy precursor or no matching scan found.
+    pub heavy: Option<MirrorData>,
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -365,5 +468,59 @@ mod tests {
         assert_eq!(deser.modifications.len(), 1);
         assert_eq!(deser.modifications[0].0, 1);
         assert!((deser.modifications[0].1 - 57.021464).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_label_form_light() {
+        let form = LabelForm::Light;
+        assert!(matches!(form, LabelForm::Light));
+    }
+
+    #[test]
+    fn test_label_form_heavy() {
+        let form = LabelForm::Heavy {
+            precursor_mz_heavy: 556.13,
+            residue_deltas: vec![(9, 8.014199)],
+        };
+        if let LabelForm::Heavy { precursor_mz_heavy, residue_deltas } = form {
+            assert!((precursor_mz_heavy - 556.13).abs() < 0.01);
+            assert_eq!(residue_deltas.len(), 1);
+        } else {
+            panic!("expected Heavy");
+        }
+    }
+
+    #[test]
+    fn test_co_eluting_candidate() {
+        let candidate = CoElutingCandidate {
+            peptide: "STTSGHLVYK".to_string(),
+            protein_ids: vec!["sp|P12345|EF1A_HUMAN".to_string()],
+            precursor_mz: 548.12,
+            charge: 2,
+            rt_start: 34.5,
+            rt_stop: 35.8,
+            label_form: LabelForm::Light,
+            modifications: vec![],
+        };
+        assert_eq!(candidate.peptide, "STTSGHLVYK");
+        assert_eq!(candidate.charge, 2);
+    }
+
+    #[test]
+    fn test_multi_annotated_peak() {
+        let peak = MultiAnnotatedPeak {
+            mz_observed: 285.155,
+            intensity: 45230.0,
+            trap_ion: Some("b3+1".to_string()),
+            target_matches: vec![
+                TargetIonMatch {
+                    candidate_index: 0,
+                    ion_label: "b3+1".to_string(),
+                    delta_ppm: -2.1,
+                },
+            ],
+        };
+        assert!(peak.trap_ion.is_some());
+        assert_eq!(peak.target_matches.len(), 1);
     }
 }
