@@ -2448,7 +2448,7 @@ impl ProteinCopilotServer {
                 xic: None,
                 raw_scans: None,
                 ion_metadata: vec![],
-                peptide_info: make_peptide_info(&peptide_seq, charge, annotation.precursor_mz),
+                peptide_info: make_peptide_info(&peptide_seq, charge, annotation.theoretical_mz),
             };
             ReportGenerator::render_unified(&unified_data, &out_path, plotly_mode)
                 .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
@@ -2475,7 +2475,7 @@ impl ProteinCopilotServer {
                 resolved_scan,
                 &peptide_seq,
                 charge,
-                annotation.precursor_mz,
+                annotation.theoretical_mz,
                 &modifications,
                 &xic_params,
             ) {
@@ -2495,7 +2495,7 @@ impl ProteinCopilotServer {
                             resolved_scan,
                             &peptide_seq,
                             charge,
-                            annotation.precursor_mz,
+                            annotation.theoretical_mz,
                             &modifications,
                             &xic_params,
                             20.0,
@@ -2511,7 +2511,7 @@ impl ProteinCopilotServer {
                                         peptide_info: make_peptide_info(
                                             &peptide_seq,
                                             charge,
-                                            annotation.precursor_mz,
+                                            annotation.theoretical_mz,
                                         ),
                                     };
 

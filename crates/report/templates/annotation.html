@@ -152,7 +152,7 @@
     add("Peptide", D.peptide_sequence, "peptide");
     add("Protein(s)", D.protein_accessions.join(", ") || "\u2014");
     add("Score", scoreWrap);
-    add("Precursor m/z", fmt(D.precursor_mz, 4));
+    add("Precursor m/z", fmt(D.theoretical_mz, 4));
     add("\u0394 mass", fmt(D.delta_mass_ppm, 2) + " ppm");
     panel.appendChild(grid);
   })();
