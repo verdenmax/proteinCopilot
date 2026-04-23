@@ -707,7 +707,10 @@ result-import::
 | `provenance.rs` | 碎片离子溯源引擎（b/y ion 匹配 + TrapOnly/TargetOnly/Shared 分类）（v3 新增） |
 | `mod_parser.rs` | UniMod 修饰解析（`(UniMod:X)` → position + delta mass）（v3 新增） |
 | `mirror_plot.rs` | trap vs target 镜像图渲染（Plotly.js HTML）（v3 新增） |
-| `types.rs` | `ClassifiedPsm` + `SubstitutionType` 枚举 + `FragmentProvenance` |
+| `coelution.rs` | 共洗脱索引（RT 窗口交叉 + DIA 隔离窗口匹配）（v4 新增） |
+| `multi_provenance.rs` | 多目标碎片匹配引擎（返回 MirrorData + shift_ions_heavy）（v4 新增） |
+| `multi_report.rs` | 双扫描镜像 HTML 报告（轻/重标分离渲染 + 噪声过滤）（v4 新增） |
+| `types.rs` | `ClassifiedPsm` + `SubstitutionType` + `FragmentProvenance` + `MirrorData` + `MultiTargetProvenance` + `CoElutingCandidate` |
 | `output.rs` | TSV 输出（含 substitution_type / edit_distance / provenance 列） |
 | `report.rs` | HTML 交互报告（Plotly.js + mDa 显示 + 溯源统计） |
 
@@ -724,6 +727,16 @@ result-import::
 - **RT-based scan lookup**：find_by_rt() 二分查找，DIA-NN 数据无 scan_number 时的回退方案
 - **嵌合谱检测**：shared_ratio > chimera_threshold → is_chimeric 标记
 - **容错 mzML 加载**：缺失文件跳过并 warn，不中断批量溯源
+
+**v4 关键特性**：
+- **共洗脱索引（CoElutionIndex）**：基于 RT 窗口交叉 + DIA 隔离窗口匹配，O(log N + k) 查询共洗脱 target
+- **轻重标 SILAC 搜索**：同时查找 light 和 SILAC heavy 形式的候选（LabelForm::Light / Heavy）
+- **多目标碎片匹配**：trace_multi_target() 返回 MirrorData，每个观测峰归属到 0..N 个 target
+- **DIA 双扫描镜像**：轻/重标前体落在不同隔离窗口，通过 find_by_rt 分别定位各自的 MS2 扫描
+- **MirrorData 结构**：`light: MirrorData` + `heavy: Option<MirrorData>` 独立存储各镜像数据
+- **SILAC 偏移 trap 离子**：shift_ions_heavy() 为重标镜像生成偏移后的 trap 理论碎片离子
+- **增强 HTML 报告**：双扫描号、候选前体 m/z、噪声过滤（<5%）、离子标注、无边框柱形
+- **边界安全**：heavy_scan ≠ light_scan 验证、precursor_mz=None 守卫、parse_ion_label 空串保护
 
 **依赖**：`core`, `spectrum-io`（v3 新增）, `serde`, `serde_yaml`, `arrow`, `parquet`, `tracing`
 **不依赖**：`rmcp`
