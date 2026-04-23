@@ -315,6 +315,14 @@ pub struct MultiTargetProvenance {
     pub trap_peptide: String,
     /// Scan number of the analyzed spectrum.
     pub scan_number: u32,
+    /// Precursor m/z (light form) of the trap PSM.
+    pub trap_precursor_mz: f64,
+    /// Precursor m/z (heavy SILAC form) of the trap PSM, if applicable.
+    pub trap_precursor_mz_heavy: Option<f64>,
+    /// Charge state of the trap PSM.
+    pub trap_charge: i32,
+    /// Spectrum/raw file name.
+    pub spectrum_file: String,
     /// All co-eluting target candidates (light + heavy).
     pub candidates: Vec<CoElutingCandidate>,
     /// Per-peak multi-target annotation.

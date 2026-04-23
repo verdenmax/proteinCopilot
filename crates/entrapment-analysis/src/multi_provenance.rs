@@ -97,6 +97,10 @@ pub fn trace_multi_target(
     MultiTargetProvenance {
         trap_peptide: trap_sequence.to_string(),
         scan_number: 0, // caller sets the actual scan number
+        trap_precursor_mz: 0.0, // caller sets
+        trap_precursor_mz_heavy: None, // caller sets
+        trap_charge: 0, // caller sets
+        spectrum_file: String::new(), // caller sets
         candidates: candidates.to_vec(),
         annotated_peaks,
         trap_only_count,

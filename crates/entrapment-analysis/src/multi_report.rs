@@ -4,9 +4,11 @@
 //! of a trap PSM originate from co-eluting target peptides.  Each report
 //! contains:
 //!
-//! 1. **Candidate table** — co-eluting target peptides with m/z, charge, RT, etc.
-//! 2. **Mirror spectrum** — Plotly.js bar chart: trap peaks up, target peaks down.
-//! 3. **Attribution table** — per-peak m/z, intensity, origin, target matches.
+//! 1. **Trap PSM info** — peptide, precursor m/z (light+heavy), charge, scan, file.
+//! 2. **Candidate table** — co-eluting target peptides with precursor m/z, file, etc.
+//! 3. **Light mirror spectrum** — normalized, matched peaks bold (trap ↑ vs light targets ↓).
+//! 4. **Heavy mirror spectrum** — normalized, matched peaks bold (trap ↑ vs heavy targets ↓).
+//! 5. **Trap ion attribution** — only trap fragment ions, showing target matches.
 //!
 //! A summary report lists all analysed PSMs with links to per-PSM reports.
 
@@ -59,15 +61,6 @@ fn classify_peak(peak: &MultiAnnotatedPeak) -> PeakOrigin {
     }
 }
 
-fn origin_label(origin: &PeakOrigin) -> &'static str {
-    match origin {
-        PeakOrigin::TrapOnly => "TrapOnly",
-        PeakOrigin::Shared => "Shared",
-        PeakOrigin::TargetOnly => "TargetOnly",
-        PeakOrigin::Unassigned => "Unassigned",
-    }
-}
-
 fn origin_css_class(origin: &PeakOrigin) -> &'static str {
     match origin {
         PeakOrigin::TrapOnly => "origin-trap",
@@ -86,6 +79,11 @@ fn label_form_str(lf: &LabelForm) -> &'static str {
         LabelForm::Light => "Light",
         LabelForm::Heavy { .. } => "Heavy",
     }
+}
+
+/// Check if a candidate is a Light form.
+fn is_light(lf: &LabelForm) -> bool {
+    matches!(lf, LabelForm::Light)
 }
 
 // ---------------------------------------------------------------------------
@@ -108,7 +106,7 @@ fn css_block() -> &'static str {
 body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 20px; background: #fafafa; color: #333; }
 .header { background: #2c3e50; color: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; }
 .header h1 { margin: 0 0 8px 0; font-size: 1.3em; }
-.header .meta { font-size: 0.9em; opacity: 0.9; }
+.header .meta { font-size: 0.9em; opacity: 0.9; line-height: 1.8; }
 .section { background: white; border: 1px solid #ddd; border-radius: 8px; padding: 16px; margin-bottom: 20px; }
 .section h2 { margin-top: 0; font-size: 1.1em; border-bottom: 2px solid #3498db; padding-bottom: 6px; }
 table { border-collapse: collapse; width: 100%; font-size: 0.85em; }
@@ -122,7 +120,10 @@ tr:nth-child(even) { background: #fafafa; }
 .origin-unassigned { color: #7f7f7f; }
 .chimeric { background: #fff3cd !important; }
 .footer { text-align: center; color: #888; font-size: 0.8em; padding: 12px; }
-#mirror-plot { width: 100%; height: 450px; }
+.mirror-plot { width: 100%; height: 420px; }
+.info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 24px; }
+.info-grid .label { color: rgba(255,255,255,0.7); font-size: 0.85em; }
+.info-grid .value { font-weight: 600; }
 </style>"#
 }
 
@@ -133,7 +134,7 @@ tr:nth-child(even) { background: #fafafa; }
 /// Generate a complete, self-contained HTML string for a multi-target
 /// provenance report of a single trap PSM.
 pub fn generate_multi_provenance_html(prov: &MultiTargetProvenance) -> String {
-    let mut html = String::with_capacity(16384);
+    let mut html = String::with_capacity(32768);
 
     // -- doctype + head --
     let _ = write!(
@@ -141,40 +142,42 @@ pub fn generate_multi_provenance_html(prov: &MultiTargetProvenance) -> String {
         r#"<!DOCTYPE html>
 <html><head>
 <meta charset="utf-8">
-<title>Provenance: {trap}</title>
+<title>Provenance: {trap} (scan {scan})</title>
 <script src="https://cdn.plot.ly/plotly-2.35.0.min.js"></script>
 {css}
 </head><body>
 "#,
         trap = html_escape(&prov.trap_peptide),
+        scan = prov.scan_number,
         css = css_block(),
     );
 
-    // -- header --
-    let total_peaks = prov.annotated_peaks.len();
-    let _ = write!(
-        html,
-        r#"<div class="header">
-<h1>Fragment Ion Provenance Report</h1>
-<div class="meta">Trap peptide: <b>{trap}</b> &nbsp;|&nbsp; Scan: <b>{scan}</b> &nbsp;|&nbsp; Candidates: <b>{ncand}</b> &nbsp;|&nbsp; Peaks: <b>{npeaks}</b></div>
-</div>
-"#,
-        trap = html_escape(&prov.trap_peptide),
-        scan = prov.scan_number,
-        ncand = prov.candidates.len(),
-        npeaks = total_peaks,
-    );
+    // -- header with extended info --
+    write_header(&mut html, prov);
 
     // -- candidate table --
     write_candidate_table(&mut html, prov);
 
-    // -- mirror spectrum --
-    write_mirror_spectrum(&mut html, prov);
+    // -- mirror spectra: light and heavy --
+    let has_light_candidates = prov.candidates.iter().any(|c| is_light(&c.label_form));
+    let has_heavy_candidates = prov.candidates.iter().any(|c| !is_light(&c.label_form));
 
-    // -- attribution table --
+    if has_light_candidates {
+        write_mirror_spectrum(&mut html, prov, MirrorKind::Light);
+    }
+    if has_heavy_candidates {
+        write_mirror_spectrum(&mut html, prov, MirrorKind::Heavy);
+    }
+    // Fallback: if no candidates of either kind, show combined mirror
+    if !has_light_candidates && !has_heavy_candidates {
+        write_mirror_spectrum(&mut html, prov, MirrorKind::Light);
+    }
+
+    // -- attribution table (trap ions only) --
     write_attribution_table(&mut html, prov);
 
     // -- footer --
+    let total_peaks = prov.annotated_peaks.len();
     let _ = write!(
         html,
         r#"<div class="footer">
@@ -201,7 +204,46 @@ pub fn render_multi_provenance_report(
 }
 
 // ---------------------------------------------------------------------------
-// Candidate table section
+// Header section (enhanced)
+// ---------------------------------------------------------------------------
+
+fn write_header(html: &mut String, prov: &MultiTargetProvenance) {
+    let heavy_mz_str = match prov.trap_precursor_mz_heavy {
+        Some(mz) => format!("{mz:.4}"),
+        None => "N/A".to_string(),
+    };
+
+    let _ = write!(
+        html,
+        r#"<div class="header">
+<h1>Fragment Ion Provenance Report</h1>
+<div class="meta">
+<div class="info-grid">
+<div><span class="label">Trap Peptide:</span> <span class="value">{trap}</span></div>
+<div><span class="label">Spectrum File:</span> <span class="value">{file}</span></div>
+<div><span class="label">Scan:</span> <span class="value">{scan}</span></div>
+<div><span class="label">Charge:</span> <span class="value">{charge}+</span></div>
+<div><span class="label">Precursor m/z (Light):</span> <span class="value">{mz_light:.4}</span></div>
+<div><span class="label">Precursor m/z (Heavy):</span> <span class="value">{mz_heavy}</span></div>
+<div><span class="label">Candidates:</span> <span class="value">{ncand}</span></div>
+<div><span class="label">Peaks:</span> <span class="value">{npeaks}</span></div>
+</div>
+</div>
+</div>
+"#,
+        trap = html_escape(&prov.trap_peptide),
+        file = html_escape(&prov.spectrum_file),
+        scan = prov.scan_number,
+        charge = prov.trap_charge,
+        mz_light = prov.trap_precursor_mz,
+        mz_heavy = heavy_mz_str,
+        ncand = prov.candidates.len(),
+        npeaks = prov.annotated_peaks.len(),
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Candidate table section (enhanced)
 // ---------------------------------------------------------------------------
 
 fn write_candidate_table(html: &mut String, prov: &MultiTargetProvenance) {
@@ -210,7 +252,7 @@ fn write_candidate_table(html: &mut String, prov: &MultiTargetProvenance) {
         r#"<div class="section">
 <h2>Co-Eluting Target Candidates</h2>
 <table>
-<tr><th>#</th><th>Peptide</th><th>Protein</th><th>Label</th><th>m/z</th><th>Charge</th><th>RT Range (min)</th><th>Matched Ions</th></tr>
+<tr><th>#</th><th>Peptide</th><th>Protein</th><th>Label</th><th>Precursor m/z</th><th>Charge</th><th>RT Range (min)</th><th>Spectrum File</th><th>Matched Ions</th></tr>
 "#,
     );
 
@@ -218,18 +260,26 @@ fn write_candidate_table(html: &mut String, prov: &MultiTargetProvenance) {
         let matched = count_target_matches_for_candidate(prov, i);
         let color = candidate_color(i);
         let proteins = cand.protein_ids.join("; ");
+        // For Heavy candidates, show both light and heavy m/z
+        let mz_display = match &cand.label_form {
+            LabelForm::Heavy {
+                precursor_mz_heavy, ..
+            } => format!("{:.4} (H: {:.4})", cand.precursor_mz, precursor_mz_heavy),
+            LabelForm::Light => format!("{:.4}", cand.precursor_mz),
+        };
         let _ = writeln!(
             html,
-            r#"<tr><td><span class="color-dot" style="background:{color}"></span>{idx}</td><td>{pep}</td><td>{prot}</td><td>{label}</td><td>{mz:.4}</td><td>{z}+</td><td>{rt0:.2} – {rt1:.2}</td><td>{matched}</td></tr>"#,
+            r#"<tr><td><span class="color-dot" style="background:{color}"></span>{idx}</td><td>{pep}</td><td>{prot}</td><td>{label}</td><td>{mz}</td><td>{z}+</td><td>{rt0:.2} – {rt1:.2}</td><td>{file}</td><td>{matched}</td></tr>"#,
             color = color,
             idx = i,
             pep = html_escape(&cand.peptide),
             prot = html_escape(&proteins),
             label = label_form_str(&cand.label_form),
-            mz = cand.precursor_mz,
+            mz = mz_display,
             z = cand.charge,
             rt0 = cand.rt_start,
             rt1 = cand.rt_stop,
+            file = html_escape(&prov.spectrum_file),
             matched = matched,
         );
     }
@@ -245,92 +295,154 @@ fn count_target_matches_for_candidate(prov: &MultiTargetProvenance, candidate_in
 }
 
 // ---------------------------------------------------------------------------
-// Mirror spectrum section (Plotly)
+// Mirror spectrum section (Plotly) — Light and Heavy variants
 // ---------------------------------------------------------------------------
 
-fn write_mirror_spectrum(html: &mut String, prov: &MultiTargetProvenance) {
+/// Which mirror to render.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum MirrorKind {
+    Light,
+    Heavy,
+}
+
+fn write_mirror_spectrum(html: &mut String, prov: &MultiTargetProvenance, kind: MirrorKind) {
+    let kind_label = match kind {
+        MirrorKind::Light => "Light",
+        MirrorKind::Heavy => "Heavy",
+    };
+    let plot_id = match kind {
+        MirrorKind::Light => "mirror-plot-light",
+        MirrorKind::Heavy => "mirror-plot-heavy",
+    };
+
+    // Collect candidate indices of the requested kind.
+    let candidate_indices: Vec<usize> = prov
+        .candidates
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| match kind {
+            MirrorKind::Light => is_light(&c.label_form),
+            MirrorKind::Heavy => !is_light(&c.label_form),
+        })
+        .map(|(i, _)| i)
+        .collect();
+
+    // Compute max intensity for normalization.
+    let max_intensity = prov
+        .annotated_peaks
+        .iter()
+        .map(|p| p.intensity)
+        .fold(0.0_f64, f64::max)
+        .max(1.0);
+
     let _ = write!(
         html,
         r#"<div class="section">
-<h2>Mirror Spectrum</h2>
-<div id="mirror-plot"></div>
+<h2>Mirror Spectrum — {kind} Targets (Scan {scan})</h2>
+<div id="{plot_id}" class="mirror-plot"></div>
 <script>
+(function() {{
+var maxI = {max_intensity};
+function norm(v) {{ return v / maxI * 100.0; }}
 "#,
+        kind = kind_label,
+        scan = prov.scan_number,
+        plot_id = plot_id,
+        max_intensity = max_intensity,
     );
 
-    // Build traces:
-    // 1. Trap-matched peaks (positive Y): TrapOnly = blue, Shared = purple
-    // 2. Target-matched peaks (negative Y): coloured by candidate index
-    // 3. Unassigned (positive, gray, dimmed)
+    // Determine which peaks have target matches in the current kind.
+    let matching_target_indices: std::collections::HashSet<usize> =
+        candidate_indices.iter().copied().collect();
 
-    // -- Trap trace (TrapOnly peaks) --
-    write_plotly_trace(
+    // Classify peaks for the top half (trap).
+    // Peaks matched by this kind's targets = shared; only trap = trap-only.
+    let mut trap_only_mz = Vec::new();
+    let mut trap_only_int = Vec::new();
+    let mut trap_only_labels = Vec::new();
+    let mut shared_mz = Vec::new();
+    let mut shared_int = Vec::new();
+    let mut shared_labels = Vec::new();
+    let mut unassigned_mz = Vec::new();
+    let mut unassigned_int = Vec::new();
+
+    for peak in &prov.annotated_peaks {
+        let norm_int = peak.intensity / max_intensity * 100.0;
+        let has_trap = peak.trap_ion.is_some();
+        let has_kind_target = peak
+            .target_matches
+            .iter()
+            .any(|m| matching_target_indices.contains(&m.candidate_index));
+
+        if has_trap && has_kind_target {
+            shared_mz.push(peak.mz_observed);
+            shared_int.push(norm_int);
+            shared_labels.push(peak.trap_ion.clone().unwrap_or_default());
+        } else if has_trap {
+            trap_only_mz.push(peak.mz_observed);
+            trap_only_int.push(norm_int);
+            trap_only_labels.push(peak.trap_ion.clone().unwrap_or_default());
+        } else if !has_trap && !peak.target_matches.is_empty() && !has_kind_target {
+            // Target-only for the OTHER kind — show as unassigned in this mirror
+            unassigned_mz.push(peak.mz_observed);
+            unassigned_int.push(norm_int);
+        } else if !has_trap && peak.target_matches.is_empty() {
+            unassigned_mz.push(peak.mz_observed);
+            unassigned_int.push(norm_int);
+        }
+        // target-only for THIS kind shown only in bottom half
+    }
+
+    // Top traces — normalized, bold (wider bar) for shared
+    write_normalized_trace(
         html,
         "trap_only",
         "Trap Only",
         TRAP_COLOR,
-        &collect_peaks_by_origin(prov, |o| matches!(o, PeakOrigin::TrapOnly)),
-        true,
+        &trap_only_mz,
+        &trap_only_int,
+        &trap_only_labels,
+        false,
     );
-
-    // -- Shared trace (positive Y, purple) --
-    write_plotly_trace(
+    write_normalized_trace(
         html,
-        "shared",
-        "Shared",
+        "shared_up",
+        "Shared (Trap↑)",
         SHARED_COLOR,
-        &collect_peaks_by_origin(prov, |o| matches!(o, PeakOrigin::Shared)),
-        true,
+        &shared_mz,
+        &shared_int,
+        &shared_labels,
+        true, // bold
     );
-
-    // -- Unassigned trace (positive Y, gray) --
-    write_plotly_trace(
+    write_normalized_trace(
         html,
         "unassigned",
         "Unassigned",
         UNASSIGNED_COLOR,
-        &collect_peaks_by_origin(prov, |o| matches!(o, PeakOrigin::Unassigned)),
-        true,
+        &unassigned_mz,
+        &unassigned_int,
+        &Vec::new(),
+        false,
     );
 
-    // -- Target-only traces (negative Y, one per candidate) --
-    let target_only_peaks: Vec<&MultiAnnotatedPeak> = prov
-        .annotated_peaks
-        .iter()
-        .filter(|p| matches!(classify_peak(p), PeakOrigin::TargetOnly))
-        .collect();
-
-    // Also include shared peaks in negative direction per candidate
-    let shared_peaks: Vec<&MultiAnnotatedPeak> = prov
-        .annotated_peaks
-        .iter()
-        .filter(|p| matches!(classify_peak(p), PeakOrigin::Shared))
-        .collect();
-
-    for (ci, cand) in prov.candidates.iter().enumerate() {
+    // Bottom traces — one per candidate of this kind
+    let mut target_trace_vars = Vec::new();
+    for &ci in &candidate_indices {
+        let cand = &prov.candidates[ci];
         let color = candidate_color(ci);
         let mut mzs = Vec::new();
         let mut ints = Vec::new();
         let mut labels = Vec::new();
+        let mut bold_flags = Vec::new();
 
-        // Target-only peaks matching this candidate
-        for peak in &target_only_peaks {
+        for peak in &prov.annotated_peaks {
             for m in &peak.target_matches {
                 if m.candidate_index == ci {
+                    let norm_int = peak.intensity / max_intensity * 100.0;
                     mzs.push(peak.mz_observed);
-                    ints.push(-peak.intensity); // negative Y
+                    ints.push(-norm_int); // negative for bottom
                     labels.push(m.ion_label.clone());
-                }
-            }
-        }
-
-        // Shared peaks matching this candidate (show in negative too)
-        for peak in &shared_peaks {
-            for m in &peak.target_matches {
-                if m.candidate_index == ci {
-                    mzs.push(peak.mz_observed);
-                    ints.push(-peak.intensity);
-                    labels.push(m.ion_label.clone());
+                    bold_flags.push(peak.trap_ion.is_some()); // bold if shared
                 }
             }
         }
@@ -339,86 +451,56 @@ fn write_mirror_spectrum(html: &mut String, prov: &MultiTargetProvenance) {
             continue;
         }
 
-        let trace_name = format!("Target: {}", cand.peptide);
         let var_name = format!("target_{ci}");
-        write_plotly_trace_raw(html, &var_name, &trace_name, color, &mzs, &ints, &labels);
+        let trace_name = format!("[C{ci}] {pep} ({label})",
+            ci = ci,
+            pep = cand.peptide,
+            label = label_form_str(&cand.label_form),
+        );
+
+        // Write trace with per-bar bold outline for shared peaks.
+        write_target_trace_with_bold(html, &var_name, &trace_name, color, &mzs, &ints, &labels, &bold_flags);
+        target_trace_vars.push(format!("trace_{var_name}"));
     }
 
-    // -- Layout + render --
+    // Assemble and render
     let _ = write!(
         html,
         r#"
-var traces = [trace_trap_only, trace_shared, trace_unassigned"#,
+var traces = [trace_trap_only, trace_shared_up, trace_unassigned"#,
     );
-
-    for ci in 0..prov.candidates.len() {
-        let var_name = format!("trace_target_{ci}");
-        // Only add if the variable was created
-        let _ = write!(html, r#",
-  typeof {var} !== 'undefined' ? {var} : null"#, var = var_name);
+    for v in &target_trace_vars {
+        let _ = write!(html, ", {v}");
     }
 
     let _ = write!(
         html,
-        r#"].filter(function(t) {{ return t !== null; }});
+        r#"];
 
 var layout = {{
-  title: 'Fragment Ion Mirror Spectrum',
+  title: '{kind} Mirror — Scan {scan}',
   xaxis: {{ title: 'm/z' }},
-  yaxis: {{ title: 'Intensity' }},
+  yaxis: {{ title: 'Relative Intensity (%)' }},
   barmode: 'overlay',
   hovermode: 'closest',
   showlegend: true,
-  legend: {{ x: 1, xanchor: 'right', y: 1 }}
+  legend: {{ x: 1, xanchor: 'right', y: 1 }},
+  shapes: [{{ type: 'line', x0: 0, x1: 1, xref: 'paper', y0: 0, y1: 0, line: {{ color: '#333', width: 1 }} }}]
 }};
 
-Plotly.newPlot('mirror-plot', traces, layout, {{responsive: true}});
+Plotly.newPlot('{plot_id}', traces, layout, {{responsive: true}});
+}})();
 </script>
 </div>
 "#,
+        kind = kind_label,
+        scan = prov.scan_number,
+        plot_id = plot_id,
     );
 }
 
-/// Collect peaks matching a given origin predicate.
-struct PlotPeak {
-    mz: f64,
-    intensity: f64,
-    label: String,
-}
-
-fn collect_peaks_by_origin<F>(prov: &MultiTargetProvenance, pred: F) -> Vec<PlotPeak>
-where
-    F: Fn(PeakOrigin) -> bool,
-{
-    prov.annotated_peaks
-        .iter()
-        .filter(|p| pred(classify_peak(p)))
-        .map(|p| PlotPeak {
-            mz: p.mz_observed,
-            intensity: p.intensity,
-            label: p.trap_ion.clone().unwrap_or_default(),
-        })
-        .collect()
-}
-
-fn write_plotly_trace(
-    html: &mut String,
-    var_suffix: &str,
-    name: &str,
-    color: &str,
-    peaks: &[PlotPeak],
-    positive: bool,
-) {
-    let mzs: Vec<f64> = peaks.iter().map(|p| p.mz).collect();
-    let ints: Vec<f64> = peaks
-        .iter()
-        .map(|p| if positive { p.intensity } else { -p.intensity })
-        .collect();
-    let labels: Vec<String> = peaks.iter().map(|p| p.label.clone()).collect();
-    write_plotly_trace_raw(html, var_suffix, name, color, &mzs, &ints, &labels);
-}
-
-fn write_plotly_trace_raw(
+/// Write a normalized bar trace for the top (trap) half.
+fn write_normalized_trace(
     html: &mut String,
     var_suffix: &str,
     name: &str,
@@ -426,10 +508,18 @@ fn write_plotly_trace_raw(
     mzs: &[f64],
     ints: &[f64],
     labels: &[String],
+    bold: bool,
 ) {
     let mz_json: Vec<String> = mzs.iter().map(|v| format!("{v}")).collect();
     let int_json: Vec<String> = ints.iter().map(|v| format!("{v}")).collect();
-    let label_json: Vec<String> = labels.iter().map(|l| format!("\"{}\"", html_escape(l))).collect();
+    let label_json: Vec<String> = if labels.is_empty() {
+        ints.iter().map(|_| "\"\"".to_string()).collect()
+    } else {
+        labels.iter().map(|l| format!("\"{}\"", html_escape(l))).collect()
+    };
+
+    let line_width = if bold { 2.5 } else { 0.0 };
+    let line_color = if bold { "#2c3e50" } else { color };
 
     let _ = write!(
         html,
@@ -439,8 +529,8 @@ fn write_plotly_trace_raw(
   text: [{labels}],
   name: '{name}',
   type: 'bar',
-  marker: {{ color: '{color}' }},
-  hovertemplate: '%{{text}}<br>m/z: %{{x:.4f}}<br>Intensity: %{{y:.0f}}<extra></extra>'
+  marker: {{ color: '{color}', line: {{ width: {lw}, color: '{lc}' }} }},
+  hovertemplate: '%{{text}}<br>m/z: %{{x:.4f}}<br>Rel.Int: %{{y:.1f}}%<extra></extra>'
 }};
 "#,
         var = var_suffix,
@@ -449,49 +539,100 @@ fn write_plotly_trace_raw(
         labels = label_json.join(", "),
         name = html_escape(name),
         color = color,
+        lw = line_width,
+        lc = line_color,
+    );
+}
+
+/// Write a target trace with per-bar bold outline (for shared peaks).
+fn write_target_trace_with_bold(
+    html: &mut String,
+    var_suffix: &str,
+    name: &str,
+    color: &str,
+    mzs: &[f64],
+    ints: &[f64],
+    labels: &[String],
+    bold_flags: &[bool],
+) {
+    let mz_json: Vec<String> = mzs.iter().map(|v| format!("{v}")).collect();
+    let int_json: Vec<String> = ints.iter().map(|v| format!("{v}")).collect();
+    let label_json: Vec<String> = labels.iter().map(|l| format!("\"{}\"", html_escape(l))).collect();
+    let line_widths: Vec<String> = bold_flags.iter().map(|&b| if b { "2.5".to_string() } else { "0".to_string() }).collect();
+
+    let _ = write!(
+        html,
+        r#"var trace_{var} = {{
+  x: [{mzs}],
+  y: [{ints}],
+  text: [{labels}],
+  name: '{name}',
+  type: 'bar',
+  marker: {{ color: '{color}', line: {{ width: [{lws}], color: '#2c3e50' }} }},
+  hovertemplate: '%{{text}}<br>m/z: %{{x:.4f}}<br>Rel.Int: %{{y:.1f}}%<extra></extra>'
+}};
+"#,
+        var = var_suffix,
+        mzs = mz_json.join(", "),
+        ints = int_json.join(", "),
+        labels = label_json.join(", "),
+        name = html_escape(name),
+        color = color,
+        lws = line_widths.join(", "),
     );
 }
 
 // ---------------------------------------------------------------------------
-// Attribution table section
+// Attribution table — trap ions only
 // ---------------------------------------------------------------------------
 
 fn write_attribution_table(html: &mut String, prov: &MultiTargetProvenance) {
     let _ = write!(
         html,
         r#"<div class="section">
-<h2>Fragment Ion Attribution</h2>
+<h2>Trap Fragment Ion Attribution</h2>
+<p style="color:#666;font-size:0.85em;margin-top:0">Only peaks matching trap fragment ions are shown. Target matches indicate potential chimeric contamination.</p>
 <table>
-<tr><th>m/z</th><th>Intensity</th><th>Trap Ion</th><th>Origin</th><th>Target Matches</th></tr>
+<tr><th>m/z</th><th>Rel. Intensity (%)</th><th>Trap Ion</th><th>Target Matches</th></tr>
 "#,
     );
 
+    let max_intensity = prov
+        .annotated_peaks
+        .iter()
+        .map(|p| p.intensity)
+        .fold(0.0_f64, f64::max)
+        .max(1.0);
+
+    // Only show peaks that match a trap fragment ion.
     for peak in &prov.annotated_peaks {
+        let trap_label = match &peak.trap_ion {
+            Some(lbl) => lbl,
+            None => continue, // skip non-trap peaks
+        };
+
+        let rel_int = peak.intensity / max_intensity * 100.0;
         let origin = classify_peak(peak);
-        let origin_str = origin_label(&origin);
         let css = origin_css_class(&origin);
 
-        let trap_label = peak.trap_ion.as_deref().unwrap_or("–");
-
         let target_desc = if peak.target_matches.is_empty() {
-            "–".to_string()
+            "— (trap unique)".to_string()
         } else {
             peak.target_matches
                 .iter()
                 .map(|m| format_target_match(m, prov))
                 .collect::<Vec<_>>()
-                .join("; ")
+                .join("<br>")
         };
 
         let _ = writeln!(
             html,
-            r#"<tr><td>{mz:.3}</td><td>{int:.0}</td><td>{trap}</td><td class="{css}">{origin}</td><td>{target}</td></tr>"#,
+            r#"<tr><td>{mz:.4}</td><td>{rel:.1}</td><td class="{css}"><b>{trap}</b></td><td>{target}</td></tr>"#,
             mz = peak.mz_observed,
-            int = peak.intensity,
-            trap = html_escape(trap_label),
+            rel = rel_int,
             css = css,
-            origin = origin_str,
-            target = html_escape(&target_desc),
+            trap = html_escape(trap_label),
+            target = target_desc,
         );
     }
 
@@ -499,16 +640,18 @@ fn write_attribution_table(html: &mut String, prov: &MultiTargetProvenance) {
 }
 
 fn format_target_match(m: &TargetIonMatch, prov: &MultiTargetProvenance) -> String {
-    let pep = prov
-        .candidates
-        .get(m.candidate_index)
-        .map(|c| c.peptide.as_str())
+    let cand = prov.candidates.get(m.candidate_index);
+    let pep = cand.map(|c| c.peptide.as_str()).unwrap_or("?");
+    let label = cand
+        .map(|c| label_form_str(&c.label_form))
         .unwrap_or("?");
     format!(
-        "[C{idx}:{pep}] {ion} (Δ{ppm:+.1}ppm)",
+        "<span class=\"color-dot\" style=\"background:{color}\"></span>[C{idx}] {pep} ({label}) → <b>{ion}</b> (Δ{ppm:+.1} ppm)",
+        color = candidate_color(m.candidate_index),
         idx = m.candidate_index,
-        pep = pep,
-        ion = m.ion_label,
+        pep = html_escape(pep),
+        label = label,
+        ion = html_escape(&m.ion_label),
         ppm = m.delta_ppm,
     )
 }
@@ -539,7 +682,7 @@ pub fn generate_provenance_summary_html(results: &[MultiTargetProvenance]) -> St
 <div class="section">
 <h2>All Analysed Trap PSMs</h2>
 <table>
-<tr><th>Peptide</th><th>Scan</th><th>#Candidates</th><th>TrapOnly</th><th>Shared</th><th>TargetOnly</th><th>Unassigned</th><th>Report</th></tr>
+<tr><th>Peptide</th><th>File</th><th>Scan</th><th>m/z (L)</th><th>Charge</th><th>#Cand</th><th>TrapOnly</th><th>Shared</th><th>TargetOnly</th><th>Unassigned</th><th>Report</th></tr>
 "#,
         css = css_block(),
         n = results.len(),
@@ -555,17 +698,25 @@ pub fn generate_provenance_summary_html(results: &[MultiTargetProvenance]) -> St
         let row_class = if shared_frac > 0.30 { " class=\"chimeric\"" } else { "" };
 
         let scan = prov.scan_number;
+        let report_filename = format!(
+            "provenance/{}_{}_scan{}.html",
+            prov.spectrum_file, prov.trap_peptide, scan
+        );
         let _ = writeln!(
             html,
-            r#"<tr{cls}><td>{pep}</td><td>{scan}</td><td>{ncand}</td><td>{to}</td><td>{sh}</td><td>{tgt}</td><td>{ua}</td><td><a href="{scan}.html">view</a></td></tr>"#,
+            r#"<tr{cls}><td>{pep}</td><td>{file}</td><td>{scan}</td><td>{mz:.4}</td><td>{z}+</td><td>{ncand}</td><td>{to}</td><td>{sh}</td><td>{tgt}</td><td>{ua}</td><td><a href="{report}">view</a></td></tr>"#,
             cls = row_class,
             pep = html_escape(&prov.trap_peptide),
+            file = html_escape(&prov.spectrum_file),
             scan = scan,
+            mz = prov.trap_precursor_mz,
+            z = prov.trap_charge,
             ncand = prov.candidates.len(),
             to = prov.trap_only_count,
             sh = prov.shared_count,
             tgt = prov.target_only_count,
             ua = prov.unassigned_count,
+            report = report_filename,
         );
     }
 
@@ -596,6 +747,10 @@ mod tests {
         MultiTargetProvenance {
             trap_peptide: "STTTGHLIYK".to_string(),
             scan_number: 12345,
+            trap_precursor_mz: 547.789,
+            trap_precursor_mz_heavy: Some(556.803),
+            trap_charge: 2,
+            spectrum_file: "550_600_2Da_Rep1".to_string(),
             candidates: vec![CoElutingCandidate {
                 peptide: "STTSGHLVYK".to_string(),
                 protein_ids: vec!["sp|P12345|EF1A_HUMAN".to_string()],
@@ -647,8 +802,7 @@ mod tests {
         assert!(html.contains("285.155"));
         assert!(html.contains("plotly"));
         assert!(html.contains("b3+1"));
-        assert!(html.contains("TrapOnly"));
-        assert!(html.contains("Shared"));
+        assert!(html.contains("Trap Fragment Ion Attribution"));
     }
 
     #[test]
@@ -738,6 +892,10 @@ mod tests {
         let prov = MultiTargetProvenance {
             trap_peptide: "CHIMERIC".to_string(),
             scan_number: 999,
+            trap_precursor_mz: 500.0,
+            trap_precursor_mz_heavy: None,
+            trap_charge: 2,
+            spectrum_file: "test_run".to_string(),
             candidates: vec![],
             annotated_peaks: vec![],
             trap_only_count: 1,
@@ -754,6 +912,10 @@ mod tests {
         let prov = MultiTargetProvenance {
             trap_peptide: "EMPTYK".to_string(),
             scan_number: 1,
+            trap_precursor_mz: 300.0,
+            trap_precursor_mz_heavy: None,
+            trap_charge: 2,
+            spectrum_file: "test_run".to_string(),
             candidates: vec![],
             annotated_peaks: vec![],
             trap_only_count: 0,

@@ -611,6 +611,27 @@ pub fn trace_multi_target_provenance(
                 config.provenance.max_fragment_charge,
             );
             prov.scan_number = scan_number;
+            prov.trap_precursor_mz = cpsm.psm.precursor_mz.unwrap_or(0.0);
+            prov.trap_charge = cpsm.psm.charge.unwrap_or(0);
+            prov.spectrum_file = run_name.clone();
+
+            // Compute heavy precursor m/z for the trap peptide if SILAC is configured.
+            if let Some(silac) = &config.provenance.silac {
+                let seq_chars: Vec<char> = cpsm.psm.peptide.chars().collect();
+                let total_delta: f64 = seq_chars
+                    .iter()
+                    .map(|&c| match c {
+                        'K' => silac.heavy_k_delta,
+                        'R' => silac.heavy_r_delta,
+                        _ => 0.0,
+                    })
+                    .sum();
+                if total_delta > 0.0 {
+                    let charge = cpsm.psm.charge.unwrap_or(2) as f64;
+                    prov.trap_precursor_mz_heavy =
+                        Some(prov.trap_precursor_mz + total_delta / charge);
+                }
+            }
 
             // Generate per-PSM HTML report if configured.
             if config.provenance.generate_per_psm_reports {
