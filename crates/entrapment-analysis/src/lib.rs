@@ -614,6 +614,18 @@ pub fn trace_multi_target_provenance(
 
             // --- Heavy mirror ---
             let heavy_mirror = if let Some(silac) = &config.provenance.silac {
+                let precursor_mz = match cpsm.psm.precursor_mz {
+                    Some(mz) if mz > 0.0 => mz,
+                    _ => {
+                        // Cannot compute heavy m/z without valid precursor m/z.
+                        0.0
+                    }
+                };
+
+                if precursor_mz <= 0.0 {
+                    None
+                } else {
+
                 let seq_chars: Vec<char> = cpsm.psm.peptide.chars().collect();
                 let total_delta: f64 = seq_chars
                     .iter()
@@ -628,7 +640,7 @@ pub fn trace_multi_target_provenance(
 
                 if total_delta > 0.0 && has_heavy_candidates {
                     let charge = cpsm.psm.charge.unwrap_or(2) as f64;
-                    let heavy_mz = cpsm.psm.precursor_mz.unwrap_or(0.0) + total_delta / charge;
+                    let heavy_mz = precursor_mz + total_delta / charge;
 
                     let heavy_tol = match (cpsm.psm.rt_start, cpsm.psm.rt_stop) {
                         (Some(start), Some(stop)) if stop > start => (stop - start) / 2.0,
@@ -638,6 +650,13 @@ pub fn trace_multi_target_provenance(
 
                     match reader.find_by_rt(&mzml_path, heavy_rt, heavy_mz, heavy_tol) {
                         Ok(Some((heavy_scan, _delta))) => {
+                            if heavy_scan == scan_number {
+                                tracing::debug!(
+                                    scan = heavy_scan,
+                                    "heavy scan equals light scan, skipping heavy mirror"
+                                );
+                                None
+                            } else {
                             match reader.read_spectrum(&mzml_path, heavy_scan) {
                                 Ok(heavy_spec) => {
                                     // Generate trap heavy theoretical ions.
@@ -687,6 +706,7 @@ pub fn trace_multi_target_provenance(
                                     None
                                 }
                             }
+                            }
                         }
                         Ok(None) => {
                             tracing::debug!(
@@ -704,11 +724,12 @@ pub fn trace_multi_target_provenance(
                 } else {
                     None
                 }
+                } // end precursor_mz guard
             } else {
                 None
             };
 
-            // Compute trap heavy precursor m/z for metadata.
+            // Compute trap heavy precursor m/z for metadata (reuses SILAC logic).
             let trap_precursor_mz_heavy = config.provenance.silac.as_ref().and_then(|silac| {
                 let total_delta: f64 = cpsm.psm.peptide.chars()
                     .map(|c| match c {
@@ -719,7 +740,7 @@ pub fn trace_multi_target_provenance(
                     .sum();
                 if total_delta > 0.0 {
                     let charge = cpsm.psm.charge.unwrap_or(2) as f64;
-                    Some(cpsm.psm.precursor_mz.unwrap_or(0.0) + total_delta / charge)
+                    cpsm.psm.precursor_mz.map(|mz| mz + total_delta / charge)
                 } else {
                     None
                 }

@@ -112,7 +112,7 @@ pub fn trace_multi_target(
 ///
 /// Used for the heavy mirror: the caller generates the trap's heavy
 /// theoretical ions (shifted by SILAC deltas) and passes them directly.
-pub fn trace_mirror_with_trap_ions(
+pub(crate) fn trace_mirror_with_trap_ions(
     observed_mz: &[f64],
     observed_intensity: &[f64],
     trap_ions: &[TheoreticalIon],
@@ -249,6 +249,9 @@ pub(crate) fn shift_ions_heavy(
 /// Returns `('b', 3, 1)` for `"b3+1"` and `('y', 5, 2)` for `"y5+2"`.
 fn parse_ion_label(label: &str) -> (char, usize, i32) {
     let chars: Vec<char> = label.chars().collect();
+    if chars.is_empty() {
+        return ('?', 0, 1);
+    }
     let ion_type = chars[0]; // 'b' or 'y'
 
     // Find the '+' separator.

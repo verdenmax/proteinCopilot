@@ -35,8 +35,14 @@ const TRAP_COLOR: &str = "#1f77b4";
 /// Colour for shared (trap + target) peaks.
 const SHARED_COLOR: &str = "#9467bd";
 
-/// Colour for unassigned peaks.
-const UNASSIGNED_COLOR: &str = "#7f7f7f";
+/// Colour for unassigned peaks (above noise threshold).
+const UNASSIGNED_COLOR: &str = "#d0d0d0";
+
+/// Colour for noise peaks (below 5% relative intensity).
+const NOISE_COLOR: &str = "#f0f0f0";
+
+/// Noise threshold: peaks below this relative intensity (%) are drawn faintly.
+const NOISE_THRESHOLD_PCT: f64 = 5.0;
 
 // ---------------------------------------------------------------------------
 // Helper: classify peak origin
@@ -379,6 +385,8 @@ function norm(v) {{ return v / maxI * 100.0; }}
     let mut shared_labels = Vec::new();
     let mut unassigned_mz = Vec::new();
     let mut unassigned_int = Vec::new();
+    let mut noise_mz = Vec::new();
+    let mut noise_int = Vec::new();
 
     for peak in &mirror.annotated_peaks {
         let norm_int = peak.intensity / max_intensity * 100.0;
@@ -398,36 +406,27 @@ function norm(v) {{ return v / maxI * 100.0; }}
             trap_only_labels.push(peak.trap_ion.clone().unwrap_or_default());
         } else if !has_trap && !peak.target_matches.is_empty() && !has_kind_target {
             // Target-only for the OTHER kind — show as unassigned in this mirror
-            unassigned_mz.push(peak.mz_observed);
-            unassigned_int.push(norm_int);
+            if norm_int < NOISE_THRESHOLD_PCT {
+                noise_mz.push(peak.mz_observed);
+                noise_int.push(norm_int);
+            } else {
+                unassigned_mz.push(peak.mz_observed);
+                unassigned_int.push(norm_int);
+            }
         } else if !has_trap && peak.target_matches.is_empty() {
-            unassigned_mz.push(peak.mz_observed);
-            unassigned_int.push(norm_int);
+            if norm_int < NOISE_THRESHOLD_PCT {
+                noise_mz.push(peak.mz_observed);
+                noise_int.push(norm_int);
+            } else {
+                unassigned_mz.push(peak.mz_observed);
+                unassigned_int.push(norm_int);
+            }
         }
         // target-only for THIS kind shown only in bottom half
     }
 
-    // Top traces — normalized, bold (wider bar) for shared
-    write_normalized_trace(
-        html,
-        "trap_only",
-        "Trap Only",
-        TRAP_COLOR,
-        &trap_only_mz,
-        &trap_only_int,
-        &trap_only_labels,
-        false,
-    );
-    write_normalized_trace(
-        html,
-        "shared_up",
-        "Shared (Trap↑)",
-        SHARED_COLOR,
-        &shared_mz,
-        &shared_int,
-        &shared_labels,
-        true, // bold
-    );
+    // Top traces — draw order: noise (faintest) → unassigned → trap-only → shared (boldest)
+    write_noise_trace(html, &noise_mz, &noise_int);
     write_normalized_trace(
         html,
         "unassigned",
@@ -438,6 +437,26 @@ function norm(v) {{ return v / maxI * 100.0; }}
         &Vec::new(),
         false,
     );
+    write_normalized_trace(
+        html,
+        "trap_only",
+        "Trap Only",
+        TRAP_COLOR,
+        &trap_only_mz,
+        &trap_only_int,
+        &trap_only_labels,
+        true,
+    );
+    write_normalized_trace(
+        html,
+        "shared_up",
+        "Shared (Trap↑)",
+        SHARED_COLOR,
+        &shared_mz,
+        &shared_int,
+        &shared_labels,
+        true,
+    );
 
     // Bottom traces — one per candidate of this kind
     let mut target_trace_vars = Vec::new();
@@ -447,7 +466,6 @@ function norm(v) {{ return v / maxI * 100.0; }}
         let mut mzs = Vec::new();
         let mut ints = Vec::new();
         let mut labels = Vec::new();
-        let mut bold_flags = Vec::new();
 
         for peak in &mirror.annotated_peaks {
             for m in &peak.target_matches {
@@ -456,7 +474,6 @@ function norm(v) {{ return v / maxI * 100.0; }}
                     mzs.push(peak.mz_observed);
                     ints.push(-norm_int); // negative for bottom
                     labels.push(m.ion_label.clone());
-                    bold_flags.push(peak.trap_ion.is_some()); // bold if shared
                 }
             }
         }
@@ -472,8 +489,8 @@ function norm(v) {{ return v / maxI * 100.0; }}
             label = label_form_str(&cand.label_form),
         );
 
-        // Write trace with per-bar bold outline for shared peaks.
-        write_target_trace_with_bold(html, &var_name, &trace_name, color, &mzs, &ints, &labels, &bold_flags);
+        // Write target trace (bottom half).
+        write_target_trace(html, &var_name, &trace_name, color, &mzs, &ints, &labels);
         target_trace_vars.push(format!("trace_{var_name}"));
     }
 
@@ -481,7 +498,7 @@ function norm(v) {{ return v / maxI * 100.0; }}
     let _ = write!(
         html,
         r#"
-var traces = [trace_trap_only, trace_shared_up, trace_unassigned"#,
+var traces = [trace_noise, trace_unassigned, trace_trap_only, trace_shared_up"#,
     );
     for v in &target_trace_vars {
         let _ = write!(html, ", {v}");
@@ -513,6 +530,41 @@ Plotly.newPlot('{plot_id}', traces, layout, {{responsive: true}});
     );
 }
 
+/// Write a faint noise trace for peaks below the noise threshold.
+fn write_noise_trace(html: &mut String, mzs: &[f64], ints: &[f64]) {
+    if mzs.is_empty() {
+        // Still emit an empty trace so the var name exists in JS.
+        let _ = write!(
+            html,
+            r#"var trace_noise = {{
+  x: [], y: [], name: 'Noise', type: 'bar', showlegend: false
+}};
+"#
+        );
+        return;
+    }
+    let mz_json: Vec<String> = mzs.iter().map(|v| format!("{v}")).collect();
+    let int_json: Vec<String> = ints.iter().map(|v| format!("{v}")).collect();
+
+    let _ = write!(
+        html,
+        r#"var trace_noise = {{
+  x: [{mzs}],
+  y: [{ints}],
+  name: 'Noise',
+  type: 'bar',
+  width: 0.3,
+  marker: {{ color: '{color}', opacity: 0.4 }},
+  showlegend: false,
+  hoverinfo: 'skip'
+}};
+"#,
+        mzs = mz_json.join(", "),
+        ints = int_json.join(", "),
+        color = NOISE_COLOR,
+    );
+}
+
 /// Write a normalized bar trace for the top (trap) half.
 fn write_normalized_trace(
     html: &mut String,
@@ -532,8 +584,8 @@ fn write_normalized_trace(
         labels.iter().map(|l| format!("\"{}\"", html_escape(l))).collect()
     };
 
-    let line_width = if bold { 1.5 } else { 0.0 };
-    let line_color = if bold { "#2c3e50" } else { color };
+    let bar_width = if bold { 1.2 } else { 0.5 };
+    let opacity = if bold { "1.0" } else { "0.85" };
 
     let _ = write!(
         html,
@@ -541,9 +593,14 @@ fn write_normalized_trace(
   x: [{mzs}],
   y: [{ints}],
   text: [{labels}],
+  textposition: 'outside',
+  textangle: -60,
+  textfont: {{ size: 10, color: '{color}' }},
   name: '{name}',
   type: 'bar',
-  marker: {{ color: '{color}', line: {{ width: {lw}, color: '{lc}' }} }},
+  width: {bw},
+  opacity: {opacity},
+  marker: {{ color: '{color}' }},
   hovertemplate: '%{{text}}<br>m/z: %{{x:.4f}}<br>Rel.Int: %{{y:.1f}}%<extra></extra>'
 }};
 "#,
@@ -553,13 +610,13 @@ fn write_normalized_trace(
         labels = label_json.join(", "),
         name = html_escape(name),
         color = color,
-        lw = line_width,
-        lc = line_color,
+        bw = bar_width,
+        opacity = opacity,
     );
 }
 
-/// Write a target trace with per-bar bold outline (for shared peaks).
-fn write_target_trace_with_bold(
+/// Write a target trace (bottom half) — all bars same width, no outline.
+fn write_target_trace(
     html: &mut String,
     var_suffix: &str,
     name: &str,
@@ -567,12 +624,10 @@ fn write_target_trace_with_bold(
     mzs: &[f64],
     ints: &[f64],
     labels: &[String],
-    bold_flags: &[bool],
 ) {
     let mz_json: Vec<String> = mzs.iter().map(|v| format!("{v}")).collect();
     let int_json: Vec<String> = ints.iter().map(|v| format!("{v}")).collect();
     let label_json: Vec<String> = labels.iter().map(|l| format!("\"{}\"", html_escape(l))).collect();
-    let line_widths: Vec<String> = bold_flags.iter().map(|&b| if b { "1.5".to_string() } else { "0".to_string() }).collect();
 
     let _ = write!(
         html,
@@ -580,9 +635,13 @@ fn write_target_trace_with_bold(
   x: [{mzs}],
   y: [{ints}],
   text: [{labels}],
+  textposition: 'outside',
+  textangle: -60,
+  textfont: {{ size: 10, color: '{color}' }},
   name: '{name}',
   type: 'bar',
-  marker: {{ color: '{color}', line: {{ width: [{lws}], color: '#2c3e50' }} }},
+  width: 1.2,
+  marker: {{ color: '{color}' }},
   hovertemplate: '%{{text}}<br>m/z: %{{x:.4f}}<br>Rel.Int: %{{y:.1f}}%<extra></extra>'
 }};
 "#,
@@ -592,7 +651,6 @@ fn write_target_trace_with_bold(
         labels = label_json.join(", "),
         name = html_escape(name),
         color = color,
-        lws = line_widths.join(", "),
     );
 }
 
