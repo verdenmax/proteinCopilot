@@ -16,7 +16,7 @@ use std::fmt::Write;
 use std::path::Path;
 
 use crate::types::{
-    LabelForm, MultiAnnotatedPeak, MultiTargetProvenance, TargetIonMatch,
+    LabelForm, MirrorData, MultiAnnotatedPeak, MultiTargetProvenance, TargetIonMatch,
 };
 
 // ---------------------------------------------------------------------------
@@ -148,7 +148,7 @@ pub fn generate_multi_provenance_html(prov: &MultiTargetProvenance) -> String {
 </head><body>
 "#,
         trap = html_escape(&prov.trap_peptide),
-        scan = prov.scan_number,
+        scan = prov.light.scan_number,
         css = css_block(),
     );
 
@@ -159,37 +159,39 @@ pub fn generate_multi_provenance_html(prov: &MultiTargetProvenance) -> String {
     write_candidate_table(&mut html, prov);
 
     // -- mirror spectra: light and heavy --
-    let has_light_candidates = prov.candidates.iter().any(|c| is_light(&c.label_form));
-    let has_heavy_candidates = prov.candidates.iter().any(|c| !is_light(&c.label_form));
+    // Light mirror — always rendered
+    write_mirror_spectrum_from_data(&mut html, prov, &prov.light, MirrorKind::Light);
 
-    if has_light_candidates {
-        write_mirror_spectrum(&mut html, prov, MirrorKind::Light);
-    }
-    if has_heavy_candidates {
-        write_mirror_spectrum(&mut html, prov, MirrorKind::Heavy);
-    }
-    // Fallback: if no candidates of either kind, show combined mirror
-    if !has_light_candidates && !has_heavy_candidates {
-        write_mirror_spectrum(&mut html, prov, MirrorKind::Light);
+    // Heavy mirror — only if heavy data exists
+    if let Some(ref heavy) = prov.heavy {
+        write_mirror_spectrum_from_data(&mut html, prov, heavy, MirrorKind::Heavy);
     }
 
     // -- attribution table (trap ions only) --
     write_attribution_table(&mut html, prov);
 
     // -- footer --
-    let total_peaks = prov.annotated_peaks.len();
+    let light = &prov.light;
     let _ = write!(
         html,
         r#"<div class="footer">
-TrapOnly: {to} &nbsp;|&nbsp; Shared: {sh} &nbsp;|&nbsp; TargetOnly: {tgt} &nbsp;|&nbsp; Unassigned: {ua} &nbsp;|&nbsp; Total: {total}
-</div>
-</body></html>"#,
-        to = prov.trap_only_count,
-        sh = prov.shared_count,
-        tgt = prov.target_only_count,
-        ua = prov.unassigned_count,
-        total = total_peaks,
+Light — TrapOnly: {lto} | Shared: {lsh} | TargetOnly: {ltgt} | Unassigned: {lua}"#,
+        lto = light.trap_only_count,
+        lsh = light.shared_count,
+        ltgt = light.target_only_count,
+        lua = light.unassigned_count,
     );
+    if let Some(heavy) = &prov.heavy {
+        let _ = write!(
+            html,
+            " | Heavy — TrapOnly: {} | Shared: {} | TargetOnly: {} | Unassigned: {}",
+            heavy.trap_only_count,
+            heavy.shared_count,
+            heavy.target_only_count,
+            heavy.unassigned_count,
+        );
+    }
+    let _ = write!(html, "\n</div>\n</body></html>");
 
     html
 }
@@ -212,6 +214,10 @@ fn write_header(html: &mut String, prov: &MultiTargetProvenance) {
         Some(mz) => format!("{mz:.4}"),
         None => "N/A".to_string(),
     };
+    let heavy_scan_str = match &prov.heavy {
+        Some(h) => format!("{}", h.scan_number),
+        None => "N/A".to_string(),
+    };
 
     let _ = write!(
         html,
@@ -221,7 +227,8 @@ fn write_header(html: &mut String, prov: &MultiTargetProvenance) {
 <div class="info-grid">
 <div><span class="label">Trap Peptide:</span> <span class="value">{trap}</span></div>
 <div><span class="label">Spectrum File:</span> <span class="value">{file}</span></div>
-<div><span class="label">Scan:</span> <span class="value">{scan}</span></div>
+<div><span class="label">Scan (Light):</span> <span class="value">{light_scan}</span></div>
+<div><span class="label">Scan (Heavy):</span> <span class="value">{heavy_scan}</span></div>
 <div><span class="label">Charge:</span> <span class="value">{charge}+</span></div>
 <div><span class="label">Precursor m/z (Light):</span> <span class="value">{mz_light:.4}</span></div>
 <div><span class="label">Precursor m/z (Heavy):</span> <span class="value">{mz_heavy}</span></div>
@@ -233,12 +240,13 @@ fn write_header(html: &mut String, prov: &MultiTargetProvenance) {
 "#,
         trap = html_escape(&prov.trap_peptide),
         file = html_escape(&prov.spectrum_file),
-        scan = prov.scan_number,
+        light_scan = prov.light.scan_number,
+        heavy_scan = heavy_scan_str,
         charge = prov.trap_charge,
         mz_light = prov.trap_precursor_mz,
         mz_heavy = heavy_mz_str,
         ncand = prov.candidates.len(),
-        npeaks = prov.annotated_peaks.len(),
+        npeaks = prov.light.annotated_peaks.len(),
     );
 }
 
@@ -288,7 +296,8 @@ fn write_candidate_table(html: &mut String, prov: &MultiTargetProvenance) {
 }
 
 fn count_target_matches_for_candidate(prov: &MultiTargetProvenance, candidate_index: usize) -> usize {
-    prov.annotated_peaks
+    prov.light
+        .annotated_peaks
         .iter()
         .filter(|p| p.target_matches.iter().any(|m| m.candidate_index == candidate_index))
         .count()
@@ -305,7 +314,12 @@ enum MirrorKind {
     Heavy,
 }
 
-fn write_mirror_spectrum(html: &mut String, prov: &MultiTargetProvenance, kind: MirrorKind) {
+fn write_mirror_spectrum_from_data(
+    html: &mut String,
+    prov: &MultiTargetProvenance,
+    mirror: &MirrorData,
+    kind: MirrorKind,
+) {
     let kind_label = match kind {
         MirrorKind::Light => "Light",
         MirrorKind::Heavy => "Heavy",
@@ -328,7 +342,7 @@ fn write_mirror_spectrum(html: &mut String, prov: &MultiTargetProvenance, kind: 
         .collect();
 
     // Compute max intensity for normalization.
-    let max_intensity = prov
+    let max_intensity = mirror
         .annotated_peaks
         .iter()
         .map(|p| p.intensity)
@@ -346,7 +360,7 @@ var maxI = {max_intensity};
 function norm(v) {{ return v / maxI * 100.0; }}
 "#,
         kind = kind_label,
-        scan = prov.scan_number,
+        scan = mirror.scan_number,
         plot_id = plot_id,
         max_intensity = max_intensity,
     );
@@ -366,7 +380,7 @@ function norm(v) {{ return v / maxI * 100.0; }}
     let mut unassigned_mz = Vec::new();
     let mut unassigned_int = Vec::new();
 
-    for peak in &prov.annotated_peaks {
+    for peak in &mirror.annotated_peaks {
         let norm_int = peak.intensity / max_intensity * 100.0;
         let has_trap = peak.trap_ion.is_some();
         let has_kind_target = peak
@@ -435,7 +449,7 @@ function norm(v) {{ return v / maxI * 100.0; }}
         let mut labels = Vec::new();
         let mut bold_flags = Vec::new();
 
-        for peak in &prov.annotated_peaks {
+        for peak in &mirror.annotated_peaks {
             for m in &peak.target_matches {
                 if m.candidate_index == ci {
                     let norm_int = peak.intensity / max_intensity * 100.0;
@@ -494,7 +508,7 @@ Plotly.newPlot('{plot_id}', traces, layout, {{responsive: true}});
 </div>
 "#,
         kind = kind_label,
-        scan = prov.scan_number,
+        scan = mirror.scan_number,
         plot_id = plot_id,
     );
 }
@@ -518,7 +532,7 @@ fn write_normalized_trace(
         labels.iter().map(|l| format!("\"{}\"", html_escape(l))).collect()
     };
 
-    let line_width = if bold { 2.5 } else { 0.0 };
+    let line_width = if bold { 1.5 } else { 0.0 };
     let line_color = if bold { "#2c3e50" } else { color };
 
     let _ = write!(
@@ -558,7 +572,7 @@ fn write_target_trace_with_bold(
     let mz_json: Vec<String> = mzs.iter().map(|v| format!("{v}")).collect();
     let int_json: Vec<String> = ints.iter().map(|v| format!("{v}")).collect();
     let label_json: Vec<String> = labels.iter().map(|l| format!("\"{}\"", html_escape(l))).collect();
-    let line_widths: Vec<String> = bold_flags.iter().map(|&b| if b { "2.5".to_string() } else { "0".to_string() }).collect();
+    let line_widths: Vec<String> = bold_flags.iter().map(|&b| if b { "1.5".to_string() } else { "0".to_string() }).collect();
 
     let _ = write!(
         html,
@@ -598,6 +612,7 @@ fn write_attribution_table(html: &mut String, prov: &MultiTargetProvenance) {
     );
 
     let max_intensity = prov
+        .light
         .annotated_peaks
         .iter()
         .map(|p| p.intensity)
@@ -605,7 +620,7 @@ fn write_attribution_table(html: &mut String, prov: &MultiTargetProvenance) {
         .max(1.0);
 
     // Only show peaks that match a trap fragment ion.
-    for peak in &prov.annotated_peaks {
+    for peak in &prov.light.annotated_peaks {
         let trap_label = match &peak.trap_ion {
             Some(lbl) => lbl,
             None => continue, // skip non-trap peaks
@@ -689,15 +704,15 @@ pub fn generate_provenance_summary_html(results: &[MultiTargetProvenance]) -> St
     );
 
     for prov in results {
-        let total = prov.trap_only_count + prov.shared_count + prov.target_only_count + prov.unassigned_count;
+        let total = prov.light.trap_only_count + prov.light.shared_count + prov.light.target_only_count + prov.light.unassigned_count;
         let shared_frac = if total > 0 {
-            f64::from(prov.shared_count) / f64::from(total)
+            f64::from(prov.light.shared_count) / f64::from(total)
         } else {
             0.0
         };
         let row_class = if shared_frac > 0.30 { " class=\"chimeric\"" } else { "" };
 
-        let scan = prov.scan_number;
+        let scan = prov.light.scan_number;
         let report_filename = format!(
             "provenance/{}_{}_scan{}.html",
             prov.spectrum_file, prov.trap_peptide, scan
@@ -712,10 +727,10 @@ pub fn generate_provenance_summary_html(results: &[MultiTargetProvenance]) -> St
             mz = prov.trap_precursor_mz,
             z = prov.trap_charge,
             ncand = prov.candidates.len(),
-            to = prov.trap_only_count,
-            sh = prov.shared_count,
-            tgt = prov.target_only_count,
-            ua = prov.unassigned_count,
+            to = prov.light.trap_only_count,
+            sh = prov.light.shared_count,
+            tgt = prov.light.target_only_count,
+            ua = prov.light.unassigned_count,
             report = report_filename,
         );
     }
@@ -746,7 +761,6 @@ mod tests {
     fn make_test_provenance() -> MultiTargetProvenance {
         MultiTargetProvenance {
             trap_peptide: "STTTGHLIYK".to_string(),
-            scan_number: 12345,
             trap_precursor_mz: 547.789,
             trap_precursor_mz_heavy: Some(556.803),
             trap_charge: 2,
@@ -761,34 +775,38 @@ mod tests {
                 label_form: LabelForm::Light,
                 modifications: vec![],
             }],
-            annotated_peaks: vec![
-                MultiAnnotatedPeak {
-                    mz_observed: 285.155,
-                    intensity: 45230.0,
-                    trap_ion: Some("b3+1".to_string()),
-                    target_matches: vec![TargetIonMatch {
-                        candidate_index: 0,
-                        ion_label: "b3+1".to_string(),
-                        delta_ppm: -2.1,
-                    }],
-                },
-                MultiAnnotatedPeak {
-                    mz_observed: 386.203,
-                    intensity: 72100.0,
-                    trap_ion: Some("b4+1".to_string()),
-                    target_matches: vec![],
-                },
-                MultiAnnotatedPeak {
-                    mz_observed: 512.334,
-                    intensity: 8200.0,
-                    trap_ion: None,
-                    target_matches: vec![],
-                },
-            ],
-            trap_only_count: 1,
-            target_only_count: 0,
-            shared_count: 1,
-            unassigned_count: 1,
+            light: MirrorData {
+                scan_number: 12345,
+                annotated_peaks: vec![
+                    MultiAnnotatedPeak {
+                        mz_observed: 285.155,
+                        intensity: 45230.0,
+                        trap_ion: Some("b3+1".to_string()),
+                        target_matches: vec![TargetIonMatch {
+                            candidate_index: 0,
+                            ion_label: "b3+1".to_string(),
+                            delta_ppm: -2.1,
+                        }],
+                    },
+                    MultiAnnotatedPeak {
+                        mz_observed: 386.203,
+                        intensity: 72100.0,
+                        trap_ion: Some("b4+1".to_string()),
+                        target_matches: vec![],
+                    },
+                    MultiAnnotatedPeak {
+                        mz_observed: 512.334,
+                        intensity: 8200.0,
+                        trap_ion: None,
+                        target_matches: vec![],
+                    },
+                ],
+                trap_only_count: 1,
+                target_only_count: 0,
+                shared_count: 1,
+                unassigned_count: 1,
+            },
+            heavy: None,
         }
     }
 
@@ -891,17 +909,20 @@ mod tests {
         // Create provenance with >30% shared
         let prov = MultiTargetProvenance {
             trap_peptide: "CHIMERIC".to_string(),
-            scan_number: 999,
             trap_precursor_mz: 500.0,
             trap_precursor_mz_heavy: None,
             trap_charge: 2,
             spectrum_file: "test_run".to_string(),
             candidates: vec![],
-            annotated_peaks: vec![],
-            trap_only_count: 1,
-            target_only_count: 0,
-            shared_count: 5, // 5/10 = 50% → chimeric
-            unassigned_count: 4,
+            light: MirrorData {
+                scan_number: 999,
+                annotated_peaks: vec![],
+                trap_only_count: 1,
+                target_only_count: 0,
+                shared_count: 5, // 5/10 = 50% → chimeric
+                unassigned_count: 4,
+            },
+            heavy: None,
         };
         let html = generate_provenance_summary_html(&[prov]);
         assert!(html.contains("chimeric"));
@@ -911,17 +932,20 @@ mod tests {
     fn test_empty_candidates() {
         let prov = MultiTargetProvenance {
             trap_peptide: "EMPTYK".to_string(),
-            scan_number: 1,
             trap_precursor_mz: 300.0,
             trap_precursor_mz_heavy: None,
             trap_charge: 2,
             spectrum_file: "test_run".to_string(),
             candidates: vec![],
-            annotated_peaks: vec![],
-            trap_only_count: 0,
-            target_only_count: 0,
-            shared_count: 0,
-            unassigned_count: 0,
+            light: MirrorData {
+                scan_number: 1,
+                annotated_peaks: vec![],
+                trap_only_count: 0,
+                target_only_count: 0,
+                shared_count: 0,
+                unassigned_count: 0,
+            },
+            heavy: None,
         };
         let html = generate_multi_provenance_html(&prov);
         assert!(html.contains("EMPTYK"));
@@ -939,5 +963,78 @@ mod tests {
         let content = std::fs::read_to_string(&path).unwrap();
         assert!(content.contains("Provenance Summary"));
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn test_dual_scan_both_mirrors() {
+        let prov = MultiTargetProvenance {
+            trap_peptide: "PEPTIDEK".to_string(),
+            trap_precursor_mz: 450.0,
+            trap_precursor_mz_heavy: Some(454.007),
+            trap_charge: 2,
+            spectrum_file: "test_run".to_string(),
+            candidates: vec![
+                CoElutingCandidate {
+                    peptide: "PEPTIDER".to_string(),
+                    protein_ids: vec!["P1".to_string()],
+                    precursor_mz: 451.0,
+                    charge: 2,
+                    rt_start: 30.0,
+                    rt_stop: 32.0,
+                    label_form: LabelForm::Light,
+                    modifications: vec![],
+                },
+                CoElutingCandidate {
+                    peptide: "PEPTIDER".to_string(),
+                    protein_ids: vec!["P1".to_string()],
+                    precursor_mz: 451.0,
+                    charge: 2,
+                    rt_start: 30.0,
+                    rt_stop: 32.0,
+                    label_form: LabelForm::Heavy {
+                        precursor_mz_heavy: 456.0,
+                        residue_deltas: vec![(7, 10.008269)],
+                    },
+                    modifications: vec![],
+                },
+            ],
+            light: MirrorData {
+                scan_number: 100,
+                annotated_peaks: vec![MultiAnnotatedPeak {
+                    mz_observed: 300.0,
+                    intensity: 1000.0,
+                    trap_ion: Some("b3+1".to_string()),
+                    target_matches: vec![TargetIonMatch {
+                        candidate_index: 0,
+                        ion_label: "b3+1".to_string(),
+                        delta_ppm: 1.0,
+                    }],
+                }],
+                trap_only_count: 0,
+                target_only_count: 0,
+                shared_count: 1,
+                unassigned_count: 0,
+            },
+            heavy: Some(MirrorData {
+                scan_number: 105,
+                annotated_peaks: vec![MultiAnnotatedPeak {
+                    mz_observed: 305.0,
+                    intensity: 800.0,
+                    trap_ion: Some("b3+1(H)".to_string()),
+                    target_matches: vec![TargetIonMatch {
+                        candidate_index: 1,
+                        ion_label: "b3+1(H)".to_string(),
+                        delta_ppm: 2.0,
+                    }],
+                }],
+                trap_only_count: 0,
+                target_only_count: 0,
+                shared_count: 1,
+                unassigned_count: 0,
+            }),
+        };
+        let html = generate_multi_provenance_html(&prov);
+        assert!(html.contains("Light Targets (Scan 100)"));
+        assert!(html.contains("Heavy Targets (Scan 105)"));
     }
 }

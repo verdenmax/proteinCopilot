@@ -70,6 +70,5 @@ fn test_full_pipeline_mock() {
         2,
     );
 
-    assert_eq!(result.trap_peptide, "STTTGHLIYK");
     assert_eq!(result.annotated_peaks.len(), 6);
 }

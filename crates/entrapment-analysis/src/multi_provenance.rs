@@ -9,7 +9,7 @@ use protein_copilot_search_engine::matching::within_tolerance;
 
 use crate::provenance::{generate_theoretical_ions, TheoreticalIon};
 use crate::types::{
-    CoElutingCandidate, LabelForm, MultiAnnotatedPeak, MultiTargetProvenance, TargetIonMatch,
+    CoElutingCandidate, LabelForm, MirrorData, MultiAnnotatedPeak, TargetIonMatch,
 };
 
 // ---------------------------------------------------------------------------
@@ -39,7 +39,7 @@ pub fn trace_multi_target(
     candidates: &[CoElutingCandidate],
     fragment_tolerance: &MassTolerance,
     max_fragment_charge: i32,
-) -> MultiTargetProvenance {
+) -> MirrorData {
     // 1. Generate theoretical ions for the trap peptide.
     let trap_ions =
         generate_theoretical_ions(trap_sequence, trap_modifications, max_fragment_charge);
@@ -94,14 +94,78 @@ pub fn trace_multi_target(
         });
     }
 
-    MultiTargetProvenance {
-        trap_peptide: trap_sequence.to_string(),
+    MirrorData {
         scan_number: 0, // caller sets the actual scan number
-        trap_precursor_mz: 0.0, // caller sets
-        trap_precursor_mz_heavy: None, // caller sets
-        trap_charge: 0, // caller sets
-        spectrum_file: String::new(), // caller sets
-        candidates: candidates.to_vec(),
+        annotated_peaks,
+        trap_only_count,
+        target_only_count,
+        shared_count,
+        unassigned_count,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Mirror with pre-generated trap ions
+// ---------------------------------------------------------------------------
+
+/// Trace fragment ion provenance using pre-generated trap ions.
+///
+/// Used for the heavy mirror: the caller generates the trap's heavy
+/// theoretical ions (shifted by SILAC deltas) and passes them directly.
+pub fn trace_mirror_with_trap_ions(
+    observed_mz: &[f64],
+    observed_intensity: &[f64],
+    trap_ions: &[TheoreticalIon],
+    candidates: &[CoElutingCandidate],
+    fragment_tolerance: &MassTolerance,
+    max_fragment_charge: i32,
+) -> MirrorData {
+    let candidate_ions: Vec<Vec<TheoreticalIon>> = candidates
+        .iter()
+        .map(|c| generate_candidate_ions(c, max_fragment_charge))
+        .collect();
+
+    let mut annotated_peaks = Vec::with_capacity(observed_mz.len());
+    let mut trap_only_count = 0u32;
+    let mut target_only_count = 0u32;
+    let mut shared_count = 0u32;
+    let mut unassigned_count = 0u32;
+
+    for (i, &mz) in observed_mz.iter().enumerate() {
+        let intensity = observed_intensity.get(i).copied().unwrap_or(0.0);
+        let trap_match = find_best_match(mz, trap_ions, fragment_tolerance);
+        let trap_ion = trap_match.map(|(label, _ppm)| label);
+
+        let mut target_matches = Vec::new();
+        for (ci, ions) in candidate_ions.iter().enumerate() {
+            if let Some((label, delta_ppm)) =
+                find_best_match_with_ppm(mz, ions, fragment_tolerance)
+            {
+                target_matches.push(TargetIonMatch {
+                    candidate_index: ci,
+                    ion_label: label,
+                    delta_ppm,
+                });
+            }
+        }
+
+        match (trap_ion.is_some(), !target_matches.is_empty()) {
+            (true, true) => shared_count += 1,
+            (true, false) => trap_only_count += 1,
+            (false, true) => target_only_count += 1,
+            (false, false) => unassigned_count += 1,
+        }
+
+        annotated_peaks.push(MultiAnnotatedPeak {
+            mz_observed: mz,
+            intensity,
+            trap_ion,
+            target_matches,
+        });
+    }
+
+    MirrorData {
+        scan_number: 0,
         annotated_peaks,
         trap_only_count,
         target_only_count,
@@ -145,7 +209,7 @@ fn generate_candidate_ions(
 /// For b_n ions the delta comes from residues `[0..n]`;
 /// for y_n ions the delta comes from residues `[len-n..len]`.
 /// Appends `"(H)"` to each ion label to mark it as heavy.
-fn shift_ions_heavy(
+pub(crate) fn shift_ions_heavy(
     sequence: &str,
     light_ions: &[TheoreticalIon],
     residue_deltas: &[(usize, f64)],
@@ -314,8 +378,6 @@ mod tests {
             1,
         );
 
-        assert_eq!(result.trap_peptide, "STTTG");
-        assert_eq!(result.candidates.len(), 1);
         assert!(result.shared_count > 0 || result.trap_only_count > 0);
         assert_eq!(result.annotated_peaks.len(), observed_mz.len());
     }
@@ -360,7 +422,6 @@ mod tests {
             1,
         );
 
-        assert_eq!(result.candidates.len(), 2);
         assert_eq!(result.annotated_peaks.len(), observed_mz.len());
         for peak in &result.annotated_peaks {
             assert!(peak.trap_ion.is_some());
@@ -451,7 +512,6 @@ mod tests {
             1,
         );
 
-        assert_eq!(result.candidates.len(), 0);
         // All peaks should be trap-only since there are no candidates.
         assert!(result.trap_only_count > 0);
         assert_eq!(result.target_only_count, 0);

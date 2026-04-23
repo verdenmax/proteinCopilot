@@ -308,13 +308,28 @@ pub struct MultiAnnotatedPeak {
     pub target_matches: Vec<TargetIonMatch>,
 }
 
+/// Data for one mirror spectrum (light or heavy scan).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MirrorData {
+    /// Scan number of the observed MS2 spectrum.
+    pub scan_number: u32,
+    /// Per-peak multi-target annotation.
+    pub annotated_peaks: Vec<MultiAnnotatedPeak>,
+    /// Count of peaks matching only trap ions.
+    pub trap_only_count: u32,
+    /// Count of peaks matching at least one target (not trap).
+    pub target_only_count: u32,
+    /// Count of peaks matching both trap and at least one target.
+    pub shared_count: u32,
+    /// Count of peaks matching nothing.
+    pub unassigned_count: u32,
+}
+
 /// Complete multi-target provenance result for one trap PSM.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MultiTargetProvenance {
     /// The trap PSM being analyzed.
     pub trap_peptide: String,
-    /// Scan number of the analyzed spectrum.
-    pub scan_number: u32,
     /// Precursor m/z (light form) of the trap PSM.
     pub trap_precursor_mz: f64,
     /// Precursor m/z (heavy SILAC form) of the trap PSM, if applicable.
@@ -324,17 +339,13 @@ pub struct MultiTargetProvenance {
     /// Spectrum/raw file name.
     pub spectrum_file: String,
     /// All co-eluting target candidates (light + heavy).
+    /// Candidate indices in TargetIonMatch reference this vec.
     pub candidates: Vec<CoElutingCandidate>,
-    /// Per-peak multi-target annotation.
-    pub annotated_peaks: Vec<MultiAnnotatedPeak>,
-    /// Summary: count of peaks matching only trap ions.
-    pub trap_only_count: u32,
-    /// Summary: count of peaks matching at least one target (not trap).
-    pub target_only_count: u32,
-    /// Summary: count of peaks matching both trap and at least one target.
-    pub shared_count: u32,
-    /// Summary: count of peaks matching nothing.
-    pub unassigned_count: u32,
+    /// Light mirror data (observed from the light-precursor DIA scan).
+    pub light: MirrorData,
+    /// Heavy mirror data (observed from the heavy-precursor DIA scan).
+    /// None if no heavy precursor or no matching scan found.
+    pub heavy: Option<MirrorData>,
 }
 
 // ---------------------------------------------------------------------------
