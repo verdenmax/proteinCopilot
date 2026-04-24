@@ -59,8 +59,11 @@ pub fn within_tolerance(observed: f64, theoretical: f64, tolerance: &MassToleran
     }
 }
 
-/// Calculates mass deviation in ppm.
+/// Calculates mass deviation in ppm. Returns 0.0 if theoretical is zero.
 fn calc_delta_ppm(observed: f64, theoretical: f64) -> f64 {
+    if theoretical == 0.0 {
+        return 0.0;
+    }
     (observed - theoretical) / theoretical * 1e6
 }
 

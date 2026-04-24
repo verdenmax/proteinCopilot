@@ -416,7 +416,11 @@ pub fn annotate_spectrum(
 
             if let Some(idx) = best_idx {
                 let obs_mz = exp_mz[idx];
-                let dppm = (obs_mz - entry.mz) / entry.mz * 1e6;
+                let dppm = if entry.mz == 0.0 {
+                    0.0
+                } else {
+                    (obs_mz - entry.mz) / entry.mz * 1e6
+                };
 
                 let new_annotation = IonAnnotation {
                     ion_type: entry.ion_type,
@@ -617,7 +621,11 @@ pub fn annotate_heavy_spectrum(
             let (_, best_idx) = find_best_match(entry.mz, exp_mz, fragment_tolerance);
             if let Some(idx) = best_idx {
                 let obs_mz = exp_mz[idx];
-                let dppm = (obs_mz - entry.mz) / entry.mz * 1e6;
+                let dppm = if entry.mz == 0.0 {
+                    0.0
+                } else {
+                    (obs_mz - entry.mz) / entry.mz * 1e6
+                };
                 let new_ann = IonAnnotation {
                     ion_type: entry.ion_type,
                     ion_number: entry.ion_number,

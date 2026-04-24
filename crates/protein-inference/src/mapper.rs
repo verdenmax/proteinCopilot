@@ -11,7 +11,7 @@ use protein_copilot_core::search_result::Psm;
 use crate::error::InferenceError;
 
 /// Decoy protein accession prefix.
-const DECOY_PREFIX: &str = "REV_";
+use protein_copilot_core::util::is_decoy_accession;
 
 /// Result of peptide-to-protein mapping.
 #[derive(Debug, Clone)]
@@ -92,7 +92,7 @@ pub fn build_peptide_protein_map(
     let peptide_is_decoy: HashMap<String, bool> = peptide_to_proteins
         .iter()
         .map(|(pep, prots)| {
-            let all_decoy = prots.iter().all(|acc| acc.starts_with(DECOY_PREFIX));
+            let all_decoy = prots.iter().all(|acc| is_decoy_accession(acc));
             (pep.clone(), all_decoy)
         })
         .collect();
@@ -100,7 +100,7 @@ pub fn build_peptide_protein_map(
     // Validate: at least one target protein must exist
     let has_target = protein_to_peptides
         .keys()
-        .any(|acc| !acc.starts_with(DECOY_PREFIX));
+        .any(|acc| !is_decoy_accession(acc));
     if !has_target {
         return Err(InferenceError::NoTargetProteins);
     }

@@ -214,7 +214,7 @@ fn to_core_psm(imported: &ImportedPsm) -> Psm {
         precursor_mz: imported.precursor_mz,
         calculated_mz,
         delta_mass_ppm: delta_ppm,
-        score: imported.score.unwrap_or(0.0),
+        score: imported.score.unwrap_or(f64::NAN),
         q_value: imported.q_value,
         protein_accessions: imported.protein_accessions.clone(),
         is_decoy: false,

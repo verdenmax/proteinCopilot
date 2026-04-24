@@ -1758,6 +1758,31 @@ impl ProteinCopilotServer {
             ));
         }
 
+        // DIA guard: detect if input is DIA and reject without dia_run_id.
+        // Raw DIA spectra have isolation window centers as precursor m/z, not real
+        // precursors. Searching without extraction produces false positives.
+        {
+            let first_path = Path::new(input.input_files.first().unwrap());
+            if let Ok(info) = protein_copilot_spectrum_io::detect_format(first_path) {
+                let reader = protein_copilot_spectrum_io::create_reader(&info);
+                if let Ok(summary) = reader.read_summary(first_path) {
+                    if let Some(w) = summary.median_isolation_window_da {
+                        if w > 5.0 {
+                            return Err(mcp_err(
+                                ErrorCode::INVALID_PARAMS,
+                                format!(
+                                    "Input file appears to be DIA data (median isolation window \
+                                     {w:.1} Da > 5.0 Da). DIA requires precursor extraction \
+                                     before searching. Please call extract_dia_precursors first, \
+                                     then use the returned dia_run_id with run_search."
+                                ),
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+
         let run_id = Uuid::new_v4();
         let files: Vec<PathBuf> = input.input_files.iter().map(PathBuf::from).collect();
 

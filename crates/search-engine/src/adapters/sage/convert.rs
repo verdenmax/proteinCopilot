@@ -44,7 +44,7 @@ pub fn spectrum_to_raw(spec: &Spectrum, file_id: usize) -> RawSpectrum {
         id: spec.scan_number.to_string(),
         precursors,
         representation: Representation::Centroid,
-        scan_start_time: (spec.retention_time_min / 60.0) as f32,
+        scan_start_time: spec.retention_time_min as f32,
         ion_injection_time: 0.0,
         total_ion_current: spec.intensity_array.iter().sum::<f64>() as f32,
         mz: spec.mz_array.iter().map(|&v| v as f32).collect(),
@@ -142,7 +142,7 @@ mod tests {
         Spectrum {
             scan_number: 42,
             ms_level: MsLevel::MS2,
-            retention_time_min: 120.5, // seconds (confusing name but actually stores seconds)
+            retention_time_min: 2.5, // 2.5 minutes
             precursors: vec![PrecursorInfo {
                 mz: 500.25,
                 charge: Some(2),
@@ -167,8 +167,8 @@ mod tests {
         assert_eq!(raw.file_id, 3);
         assert_eq!(raw.ms_level, 2);
         assert_eq!(raw.id, "42");
-        // retention_time_min is in seconds, sage wants minutes
-        let expected_rt = (120.5 / 60.0) as f32;
+        // retention_time_min is in minutes, sage scan_start_time is also in minutes
+        let expected_rt = 2.5_f32;
         assert!((raw.scan_start_time - expected_rt).abs() < 1e-5);
         assert_eq!(raw.representation, Representation::Centroid);
     }

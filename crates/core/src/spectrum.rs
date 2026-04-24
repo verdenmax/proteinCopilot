@@ -183,7 +183,7 @@ pub struct Spectrum {
     pub scan_number: u32,
     /// MS level of this spectrum.
     pub ms_level: MsLevel,
-    /// Retention time in seconds.
+    /// Retention time in minutes.
     pub retention_time_min: f64,
     /// Precursor information. DDA: typically 1 entry. DIA: 0 or 1 with wide
     /// isolation window. MS1: empty.

@@ -34,6 +34,14 @@ pub fn compute_median_u32(sorted: &[u32]) -> u32 {
     }
 }
 
+/// Common decoy protein accession prefixes used across proteomics tools.
+pub const DECOY_PREFIXES: &[&str] = &["REV_", "SHUF_", "DECOY_", "REVERSED_"];
+
+/// Returns `true` if the protein accession matches a known decoy prefix.
+pub fn is_decoy_accession(accession: &str) -> bool {
+    DECOY_PREFIXES.iter().any(|p| accession.starts_with(p))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -73,5 +81,16 @@ mod tests {
     fn median_u32_even() {
         assert_eq!(compute_median_u32(&[1, 3]), 1);
         assert_eq!(compute_median_u32(&[1, 3, 5, 7]), 3);
+    }
+
+    #[test]
+    fn decoy_accession_detection() {
+        assert!(is_decoy_accession("REV_P12345"));
+        assert!(is_decoy_accession("SHUF_Q9876"));
+        assert!(is_decoy_accession("DECOY_sp|P12345"));
+        assert!(is_decoy_accession("REVERSED_P12345"));
+        assert!(!is_decoy_accession("P12345"));
+        assert!(!is_decoy_accession("sp|P12345|HUMAN"));
+        assert!(!is_decoy_accession(""));
     }
 }

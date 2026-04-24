@@ -7,13 +7,11 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 use protein_copilot_core::protein_group::ProteinGroup;
+use protein_copilot_core::util::is_decoy_accession;
 use tracing::{debug, info};
 
 use crate::error::InferenceError;
 use crate::mapper::PeptideProteinMap;
-
-/// Decoy protein accession prefix.
-const DECOY_PREFIX: &str = "REV_";
 
 /// An intermediate group of indistinguishable proteins (identical peptide sets).
 #[derive(Debug)]
@@ -250,7 +248,7 @@ fn build_protein_groups(
             let is_decoy = group
                 .members
                 .iter()
-                .all(|acc| acc.starts_with(DECOY_PREFIX));
+                .all(|acc| is_decoy_accession(acc));
 
             ProteinGroup {
                 leader_accession,
@@ -312,7 +310,7 @@ mod tests {
         let peptide_is_decoy: HashMap<String, bool> = peptide_to_proteins
             .iter()
             .map(|(pep, prots)| {
-                let all_decoy = prots.iter().all(|acc| acc.starts_with(DECOY_PREFIX));
+                let all_decoy = prots.iter().all(|acc| is_decoy_accession(acc));
                 (pep.clone(), all_decoy)
             })
             .collect();

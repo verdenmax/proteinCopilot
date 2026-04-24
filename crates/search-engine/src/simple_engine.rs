@@ -45,20 +45,33 @@ impl SimpleSearchEngine {
         all_peptides: &[DigestedPeptide],
         psms: &mut Vec<Psm>,
     ) {
-        if spectrum.precursors.len() > 1 {
-            // DIA mode: multiple precursors, collect all matches
-            let matches = match_spectrum_all(
-                spectrum,
-                all_peptides,
-                &params.precursor_tolerance,
-                &params.fragment_tolerance,
-                &params.fixed_modifications,
-                &params.variable_modifications,
-                params.max_variable_modifications,
-            );
-            for m in &matches {
-                psms.push(build_psm(spectrum, m, &params.fixed_modifications));
+        // DIA detection: multiple precursors (post-extraction) OR wide isolation window
+        let is_dia = spectrum.precursors.len() > 1
+            || spectrum
+                .precursors
+                .first()
+                .and_then(|p| p.isolation_window.as_ref())
+                .map(|w| (w.lower_offset + w.upper_offset) > 5.0)
+                .unwrap_or(false);
+
+        if is_dia {
+            if spectrum.precursors.len() > 1 {
+                // DIA post-extraction: multiple precursors, collect all matches
+                let matches = match_spectrum_all(
+                    spectrum,
+                    all_peptides,
+                    &params.precursor_tolerance,
+                    &params.fragment_tolerance,
+                    &params.fixed_modifications,
+                    &params.variable_modifications,
+                    params.max_variable_modifications,
+                );
+                for m in &matches {
+                    psms.push(build_psm(spectrum, m, &params.fixed_modifications));
+                }
             }
+            // Raw DIA (wide window, not extracted): skip — cannot search without
+            // precursor extraction. The caller should run dia-extraction first.
         } else {
             // DDA mode: single precursor, use original function
             if let Some(m) = match_spectrum(
@@ -607,8 +620,7 @@ fn build_psm(
         mods.push(vm.clone());
     }
 
-    let is_decoy = m.peptide.protein_accession.starts_with("REV_")
-        || m.peptide.protein_accession.starts_with("SHUF_");
+    let is_decoy = protein_copilot_core::util::is_decoy_accession(&m.peptide.protein_accession);
 
     Psm {
         spectrum_scan: spectrum.scan_number,
