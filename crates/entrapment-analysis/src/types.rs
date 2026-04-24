@@ -340,6 +340,12 @@ pub struct MultiTargetProvenance {
     pub trap_precursor_mz_heavy: Option<f64>,
     /// Charge state of the trap PSM.
     pub trap_charge: i32,
+    /// Retention time of the trap PSM in minutes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trap_retention_time_min: Option<f64>,
+    /// q-value of the trap PSM identification.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trap_q_value: Option<f64>,
     /// Spectrum/raw file name.
     pub spectrum_file: String,
     /// All co-eluting target candidates (light + heavy).

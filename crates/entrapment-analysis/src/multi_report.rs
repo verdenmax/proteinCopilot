@@ -230,6 +230,14 @@ fn write_header(html: &mut String, prov: &MultiTargetProvenance) {
         Some(h) => format!("{}", h.scan_number),
         None => "N/A".to_string(),
     };
+    let rt_str = match prov.trap_retention_time_min {
+        Some(rt) => format!("{rt:.2} min"),
+        None => "N/A".to_string(),
+    };
+    let qval_str = match prov.trap_q_value {
+        Some(q) => format!("{q:.4e}"),
+        None => "N/A".to_string(),
+    };
 
     let _ = write!(
         html,
@@ -242,6 +250,8 @@ fn write_header(html: &mut String, prov: &MultiTargetProvenance) {
 <div><span class="label">Scan (Light):</span> <span class="value">{light_scan}</span></div>
 <div><span class="label">Scan (Heavy):</span> <span class="value">{heavy_scan}</span></div>
 <div><span class="label">Charge:</span> <span class="value">{charge}+</span></div>
+<div><span class="label">RT:</span> <span class="value">{rt}</span></div>
+<div><span class="label">q-value:</span> <span class="value">{qval}</span></div>
 <div><span class="label">Precursor m/z (Light):</span> <span class="value">{mz_light}</span></div>
 <div><span class="label">Precursor m/z (Heavy):</span> <span class="value">{mz_heavy}</span></div>
 <div><span class="label">Candidates:</span> <span class="value">{ncand}</span></div>
@@ -255,6 +265,8 @@ fn write_header(html: &mut String, prov: &MultiTargetProvenance) {
         light_scan = prov.light.scan_number,
         heavy_scan = heavy_scan_str,
         charge = prov.trap_charge,
+        rt = rt_str,
+        qval = qval_str,
         mz_light = light_mz_str,
         mz_heavy = heavy_mz_str,
         ncand = prov.candidates.len(),
@@ -272,7 +284,7 @@ fn write_candidate_table(html: &mut String, prov: &MultiTargetProvenance) {
         r#"<div class="section">
 <h2>Co-Eluting Target Candidates</h2>
 <table>
-<tr><th>#</th><th>Peptide</th><th>Protein</th><th>Label</th><th>Precursor m/z</th><th>Charge</th><th>RT Range (min)</th><th>Spectrum File</th><th>Matched Ions</th></tr>
+<tr><th>#</th><th>Peptide</th><th>Protein</th><th>Label</th><th>Precursor m/z</th><th>Charge</th><th>RT Range (min)</th><th>Modifications</th><th>Matched Ions</th></tr>
 "#,
     );
 
@@ -287,9 +299,19 @@ fn write_candidate_table(html: &mut String, prov: &MultiTargetProvenance) {
             } => format!("{:.4} (H: {:.4})", cand.precursor_mz, precursor_mz_heavy),
             LabelForm::Light => format!("{:.4}", cand.precursor_mz),
         };
+        // Format modifications: e.g. "@3 +57.0215, @7 +15.9949"
+        let mods_display = if cand.modifications.is_empty() {
+            "—".to_string()
+        } else {
+            cand.modifications
+                .iter()
+                .map(|(pos, delta)| format!("@{pos} {delta:+.4}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
         let _ = writeln!(
             html,
-            r#"<tr><td><span class="color-dot" style="background:{color}"></span>{idx}</td><td>{pep}</td><td>{prot}</td><td>{label}</td><td>{mz}</td><td>{z}+</td><td>{rt0:.2} – {rt1:.2}</td><td>{file}</td><td>{matched}</td></tr>"#,
+            r#"<tr><td><span class="color-dot" style="background:{color}"></span>{idx}</td><td>{pep}</td><td>{prot}</td><td>{label}</td><td>{mz}</td><td>{z}+</td><td>{rt0:.2} – {rt1:.2}</td><td>{mods}</td><td>{matched}</td></tr>"#,
             color = color,
             idx = i,
             pep = html_escape(&cand.peptide),
@@ -299,7 +321,7 @@ fn write_candidate_table(html: &mut String, prov: &MultiTargetProvenance) {
             z = cand.charge,
             rt0 = cand.rt_start,
             rt1 = cand.rt_stop,
-            file = html_escape(&prov.spectrum_file),
+            mods = html_escape(&mods_display),
             matched = matched,
         );
     }
@@ -824,13 +846,17 @@ th:hover {{ background: #e0e0e0; }}
 <th onclick="sortTable(0)">Peptide ⇅</th>
 <th onclick="sortTable(1)">File ⇅</th>
 <th onclick="sortTable(2)">Scan ⇅</th>
-<th onclick="sortTable(3)">m/z (L) ⇅</th>
-<th onclick="sortTable(4)">Charge ⇅</th>
-<th onclick="sortTable(5)">#Cand ⇅</th>
-<th onclick="sortTable(6)">TrapOnly ⇅</th>
-<th onclick="sortTable(7)">Shared ⇅</th>
-<th onclick="sortTable(8)">TargetOnly ⇅</th>
-<th onclick="sortTable(9)">Unassigned ⇅</th>
+<th onclick="sortTable(3)">RT (min) ⇅</th>
+<th onclick="sortTable(4)">q-value ⇅</th>
+<th onclick="sortTable(5)">m/z (L) ⇅</th>
+<th onclick="sortTable(6)">Charge ⇅</th>
+<th onclick="sortTable(7)">#Cand ⇅</th>
+<th onclick="sortTable(8)">L:TrapOnly ⇅</th>
+<th onclick="sortTable(9)">L:Shared ⇅</th>
+<th onclick="sortTable(10)">L:TargetOnly ⇅</th>
+<th onclick="sortTable(11)">H:TrapOnly ⇅</th>
+<th onclick="sortTable(12)">H:Shared ⇅</th>
+<th onclick="sortTable(13)">H:TargetOnly ⇅</th>
 <th>Report</th>
 </tr></thead>
 <tbody id="summary-tbody">
@@ -840,9 +866,17 @@ th:hover {{ background: #e0e0e0; }}
     );
 
     for prov in results {
-        let total = prov.light.trap_only_count + prov.light.shared_count + prov.light.target_only_count + prov.light.unassigned_count;
-        let shared_frac = if total > 0 {
-            f64::from(prov.light.shared_count) / f64::from(total)
+        // Chimeric detection: consider both light and heavy shared counts.
+        let light_total = prov.light.trap_only_count + prov.light.shared_count
+            + prov.light.target_only_count + prov.light.unassigned_count;
+        let heavy_shared = prov.heavy.as_ref().map_or(0, |h| h.shared_count);
+        let heavy_total = prov.heavy.as_ref().map_or(0, |h| {
+            h.trap_only_count + h.shared_count + h.target_only_count + h.unassigned_count
+        });
+        let combined_shared = prov.light.shared_count + heavy_shared;
+        let combined_total = light_total + heavy_total;
+        let shared_frac = if combined_total > 0 {
+            f64::from(combined_shared) / f64::from(combined_total)
         } else {
             0.0
         };
@@ -854,24 +888,44 @@ th:hover {{ background: #e0e0e0; }}
         } else {
             "N/A".to_string()
         };
+        let rt_str = match prov.trap_retention_time_min {
+            Some(rt) => format!("{rt:.2}"),
+            None => "—".to_string(),
+        };
+        let qval_str = match prov.trap_q_value {
+            Some(q) => format!("{q:.4e}"),
+            None => "—".to_string(),
+        };
+        let (h_to, h_sh, h_tgt) = match &prov.heavy {
+            Some(h) => (
+                h.trap_only_count.to_string(),
+                h.shared_count.to_string(),
+                h.target_only_count.to_string(),
+            ),
+            None => ("—".into(), "—".into(), "—".into()),
+        };
         let report_filename = format!(
             "provenance/{}_{}_scan{}.html",
             prov.spectrum_file, prov.trap_peptide, scan
         );
         let _ = writeln!(
             html,
-            r#"<tr{cls}><td>{pep}</td><td>{file}</td><td>{scan}</td><td>{mz}</td><td>{z}+</td><td>{ncand}</td><td>{to}</td><td>{sh}</td><td>{tgt}</td><td>{ua}</td><td><a href="{report}">view</a></td></tr>"#,
+            r#"<tr{cls}><td>{pep}</td><td>{file}</td><td>{scan}</td><td>{rt}</td><td>{qval}</td><td>{mz}</td><td>{z}+</td><td>{ncand}</td><td>{lto}</td><td>{lsh}</td><td>{ltgt}</td><td>{hto}</td><td>{hsh}</td><td>{htgt}</td><td><a href="{report}">view</a></td></tr>"#,
             cls = row_class,
             pep = html_escape(&prov.trap_peptide),
             file = html_escape(&prov.spectrum_file),
             scan = scan,
+            rt = rt_str,
+            qval = qval_str,
             mz = mz_str,
             z = prov.trap_charge,
             ncand = prov.candidates.len(),
-            to = prov.light.trap_only_count,
-            sh = prov.light.shared_count,
-            tgt = prov.light.target_only_count,
-            ua = prov.light.unassigned_count,
+            lto = prov.light.trap_only_count,
+            lsh = prov.light.shared_count,
+            ltgt = prov.light.target_only_count,
+            hto = h_to,
+            hsh = h_sh,
+            htgt = h_tgt,
             report = report_filename,
         );
     }
@@ -971,6 +1025,8 @@ mod tests {
             trap_precursor_mz: 547.789,
             trap_precursor_mz_heavy: Some(556.803),
             trap_charge: 2,
+            trap_retention_time_min: Some(35.42),
+            trap_q_value: Some(0.001),
             spectrum_file: "550_600_2Da_Rep1".to_string(),
             candidates: vec![CoElutingCandidate {
                 peptide: "STTSGHLVYK".to_string(),
@@ -1119,6 +1175,8 @@ mod tests {
             trap_precursor_mz: 500.0,
             trap_precursor_mz_heavy: None,
             trap_charge: 2,
+            trap_retention_time_min: None,
+            trap_q_value: None,
             spectrum_file: "test_run".to_string(),
             candidates: vec![],
             light: MirrorData {
@@ -1142,6 +1200,8 @@ mod tests {
             trap_precursor_mz: 300.0,
             trap_precursor_mz_heavy: None,
             trap_charge: 2,
+            trap_retention_time_min: None,
+            trap_q_value: None,
             spectrum_file: "test_run".to_string(),
             candidates: vec![],
             light: MirrorData {
@@ -1179,6 +1239,8 @@ mod tests {
             trap_precursor_mz: 450.0,
             trap_precursor_mz_heavy: Some(454.007),
             trap_charge: 2,
+            trap_retention_time_min: Some(31.0),
+            trap_q_value: Some(0.005),
             spectrum_file: "test_run".to_string(),
             candidates: vec![
                 CoElutingCandidate {

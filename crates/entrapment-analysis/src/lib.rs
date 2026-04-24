@@ -751,6 +751,8 @@ pub fn trace_multi_target_provenance(
                 trap_precursor_mz: cpsm.psm.precursor_mz.unwrap_or(0.0),
                 trap_precursor_mz_heavy,
                 trap_charge: cpsm.psm.charge.unwrap_or(0),
+                trap_retention_time_min: cpsm.psm.retention_time,
+                trap_q_value: cpsm.psm.q_value,
                 spectrum_file: run_name.clone(),
                 candidates,
                 light: light_mirror,
