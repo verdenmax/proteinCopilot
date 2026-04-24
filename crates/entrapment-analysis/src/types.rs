@@ -121,6 +121,10 @@ impl fmt::Display for SubstitutionType {
 // ---------------------------------------------------------------------------
 
 /// A unified PSM record normalised from any search-engine result format.
+///
+/// Extends [`protein_copilot_core::search_result::Psm`] with entrapment-specific
+/// fields (group, origin file). Used as the canonical input across all
+/// entrapment analysis stages.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UnifiedPsm {
     /// Stripped amino-acid sequence (no modifications / flanking residues).

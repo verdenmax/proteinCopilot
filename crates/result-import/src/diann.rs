@@ -43,12 +43,16 @@ impl DiannParser {
     }
 }
 
+/// Compiled regex for UniMod notation in DIA-NN modified sequences.
+static UNIMOD_RE: std::sync::LazyLock<Regex> =
+    std::sync::LazyLock::new(|| Regex::new(r"\(UniMod:(\d+)\)").expect("UNIMOD_RE is a valid regex literal"));
+
 /// Parse DIA-NN `Modified.Sequence` like `_AAAC(UniMod:4)DM(UniMod:35)K_`
 ///
 /// Returns `(clean_sequence, Vec<(position_1based, unimod_id)>)`.
 /// N-terminal modifications (before any residue) get position 0.
 fn parse_modified_sequence(modified_seq: &str) -> (String, Vec<(usize, u32)>) {
-    let re = Regex::new(r"\(UniMod:(\d+)\)").unwrap();
+    let re = &*UNIMOD_RE;
     let mut clean = String::new();
     let mut mods = Vec::new();
 

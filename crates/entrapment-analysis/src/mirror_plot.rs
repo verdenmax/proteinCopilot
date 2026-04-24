@@ -124,7 +124,7 @@ pub fn generate_mirror_html(provenance: &FragmentProvenance) -> String {
 <head>
     <title>Mirror Plot: {trap_seq} vs {target_seq}</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <script src="https://cdn.plot.ly/plotly-2.35.0.min.js"></script>
+    <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 </head>
 <body>
     <div id="mirror-plot" style="width:100%;height:600px;"></div>

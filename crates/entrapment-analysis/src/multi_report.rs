@@ -148,8 +148,9 @@ pub fn generate_multi_provenance_html(prov: &MultiTargetProvenance) -> String {
         r#"<!DOCTYPE html>
 <html><head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Provenance: {trap} (scan {scan})</title>
-<script src="https://cdn.plot.ly/plotly-2.35.0.min.js"></script>
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 {css}
 </head><body>
 "#,

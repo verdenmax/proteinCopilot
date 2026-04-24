@@ -967,6 +967,16 @@ struct RunState {
 /// Maximum number of cached runs before eviction.
 const MAX_CACHE_SIZE: usize = 100;
 
+/// DIA isolation window detection threshold (Da).
+/// Spectra with median isolation window wider than this are classified as DIA.
+const DIA_ISOLATION_WINDOW_THRESHOLD_DA: f64 = 5.0;
+
+/// Default RT tolerance (minutes) for auto-scanning MS2 lookup.
+const RT_AUTO_LOOKUP_TOLERANCE_MIN: f64 = 0.5;
+
+/// Default FDR threshold (1%) for protein inference filtering.
+const FDR_1PCT_THRESHOLD: f64 = 0.01;
+
 /// Maximum number of cached DIA extraction runs before eviction.
 /// Ordered DIA cache — insertion order tracked for FIFO eviction.
 /// When entries exceed `MAX_DIA_CACHE_SIZE` in memory, the oldest are spilled to
@@ -1762,12 +1772,20 @@ impl ProteinCopilotServer {
         // Raw DIA spectra have isolation window centers as precursor m/z, not real
         // precursors. Searching without extraction produces false positives.
         {
-            let first_path = Path::new(input.input_files.first().unwrap());
+            let first_path = match input.input_files.first() {
+                Some(p) => Path::new(p),
+                None => {
+                    return Err(mcp_err(
+                        ErrorCode::INVALID_PARAMS,
+                        "input_files is empty (internal error)",
+                    ));
+                }
+            };
             if let Ok(info) = protein_copilot_spectrum_io::detect_format(first_path) {
                 let reader = protein_copilot_spectrum_io::create_reader(&info);
                 if let Ok(summary) = reader.read_summary(first_path) {
                     if let Some(w) = summary.median_isolation_window_da {
-                        if w > 5.0 {
+                        if w > DIA_ISOLATION_WINDOW_THRESHOLD_DA {
                             return Err(mcp_err(
                                 ErrorCode::INVALID_PARAMS,
                                 format!(
@@ -2310,7 +2328,7 @@ impl ProteinCopilotServer {
                 let precursor_mz =
                     (base_mass + mod_mass + charge as f64 * PROTON_MASS) / charge as f64;
                 reader
-                    .find_by_rt(&spectrum_file, rt, precursor_mz, 0.5)
+                    .find_by_rt(&spectrum_file, rt, precursor_mz, RT_AUTO_LOOKUP_TOLERANCE_MIN)
                     .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?
                     .map(|(scan, _)| scan)
                     .ok_or_else(|| {
@@ -2939,7 +2957,7 @@ impl ProteinCopilotServer {
             if let Some(rt) = input.retention_time_min {
                 let reader = self.get_or_create_reader(&file_path)?;
                 reader
-                    .find_by_rt(&file_path, rt, precursor_mz, 0.5)
+                    .find_by_rt(&file_path, rt, precursor_mz, RT_AUTO_LOOKUP_TOLERANCE_MIN)
                     .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?
                     .map(|(scan, _)| scan)
                     .ok_or_else(|| {
@@ -3299,7 +3317,7 @@ impl ProteinCopilotServer {
         let total_decoy = final_groups.iter().filter(|g| g.is_decoy).count() as u64;
         let groups_at_1pct = final_groups
             .iter()
-            .filter(|g| !g.is_decoy && g.q_value.is_some_and(|q| q <= 0.01))
+            .filter(|g| !g.is_decoy && g.q_value.is_some_and(|q| q <= FDR_1PCT_THRESHOLD))
             .count() as u64;
         let unique_peptides_used = map.peptide_to_proteins.len() as u64;
 

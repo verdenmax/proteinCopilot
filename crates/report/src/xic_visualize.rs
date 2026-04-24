@@ -30,10 +30,19 @@ pub fn render_xic_html(
         }
     };
 
+    // HTML-escape the peptide sequence for safe embedding in the <title> tag.
+    // Modification notation may contain < > characters (e.g., PEPTM<ox>IDE).
+    let escaped_peptide = xic_data
+        .peptide_sequence
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;");
+
     let html = TEMPLATE
         .replace("/*__XIC_JSON__*/", &json)
         .replace("__PLOTLY_SRC__", &plotly_src)
-        .replace("__PEPTIDE_PLACEHOLDER__", &xic_data.peptide_sequence);
+        .replace("__PEPTIDE_PLACEHOLDER__", &escaped_peptide);
 
     if let Some(parent) = output_path.parent() {
         fs::create_dir_all(parent).map_err(|e| ReportError::IoError {

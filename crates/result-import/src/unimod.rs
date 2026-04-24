@@ -126,7 +126,9 @@ impl UnimodDb {
                             let key = std::str::from_utf8(attr.key.as_ref()).unwrap_or("");
                             let val = std::str::from_utf8(&attr.value).unwrap_or("");
                             if key == "site" && val.len() == 1 {
-                                let ch = val.chars().next().unwrap();
+                                let Some(ch) = val.chars().next() else {
+                                    continue;
+                                };
                                 if ch.is_ascii_uppercase() && !current_residues.contains(&ch) {
                                     current_residues.push(ch);
                                 }

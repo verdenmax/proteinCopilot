@@ -155,8 +155,9 @@ pub fn render_report(
         detail: format!("JSON serialization failed: {e}"),
     })?;
 
-    // Escape "</script>" sequences in JSON to prevent HTML injection (I5)
-    let safe_json = json.replace("</", "<\\/");
+    // Escape < and > in JSON to prevent HTML injection in <script> tags.
+    // Uses the same pattern as protein_copilot_report::escape_json_for_html().
+    let safe_json = json.replace('<', r"\u003c").replace('>', r"\u003e");
     let html = TEMPLATE.replace(DATA_PLACEHOLDER, &safe_json);
 
     if let Some(parent) = output_path.parent() {
