@@ -885,6 +885,43 @@ fn mcp_err(code: ErrorCode, err: impl std::fmt::Display) -> ErrorData {
     ErrorData::new(code, err.to_string(), None)
 }
 
+/// Find the observed precursor m/z from the closest MS1 scan.
+///
+/// In DIA mode the mzML `selected ion m/z` is the isolation window center,
+/// not the true observed precursor. This function searches MS1 scans near
+/// the target RT for the highest-intensity peak within `tol_ppm` of the
+/// theoretical precursor m/z.
+fn find_precursor_in_ms1(
+    ms1_scans: &[protein_copilot_xic::RawScan],
+    target_rt_min: f64,
+    theoretical_mz: f64,
+    tol_ppm: f64,
+) -> Option<f64> {
+    if ms1_scans.is_empty() {
+        return None;
+    }
+    // Find the MS1 scan closest to the target RT
+    let closest = ms1_scans
+        .iter()
+        .min_by(|a, b| {
+            let da = (a.retention_time_min - target_rt_min).abs();
+            let db = (b.retention_time_min - target_rt_min).abs();
+            da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+        })?;
+
+    let tol_da = theoretical_mz * tol_ppm * 1e-6;
+    let mut best_mz = None;
+    let mut best_int = 0.0_f64;
+
+    for (&mz, &intensity) in closest.mz_array.iter().zip(closest.intensity_array.iter()) {
+        if (mz - theoretical_mz).abs() <= tol_da && intensity > best_int {
+            best_mz = Some(mz);
+            best_int = intensity;
+        }
+    }
+    best_mz
+}
+
 /// Load FASTA sequences into a HashMap<accession, sequence>.
 fn load_fasta_sequences(fasta_path: &str) -> Result<HashMap<String, String>, String> {
     let content = std::fs::read_to_string(fasta_path)
@@ -2441,6 +2478,7 @@ impl ProteinCopilotServer {
         let plotly_mode = input
             .plotly_mode
             .unwrap_or(protein_copilot_xic::PlotlyMode::Cdn);
+        let annotation_theo_mz = annotation.theoretical_mz;
         let render_unified_without_xic = || -> Result<(), ErrorData> {
             let unified_data = protein_copilot_report::unified_types::UnifiedViewData {
                 source_file: source_file.clone(),
@@ -2501,17 +2539,51 @@ impl ProteinCopilotServer {
                             20.0,
                         ) {
                             Ok((xic_data, raw_scans, ion_metadata)) => {
+                                // Refine precursor_mz from MS1 scan (DIA window
+                                // center is not the true observed precursor m/z).
+                                let mut annotation = annotation.clone();
+                                if let Some(observed) = find_precursor_in_ms1(
+                                    &raw_scans.ms1_scans,
+                                    annotation.retention_time_min,
+                                    annotation.theoretical_mz,
+                                    20.0, // ppm tolerance
+                                ) {
+                                    annotation.precursor_mz = observed;
+                                    annotation.delta_mass_ppm = (observed
+                                        - annotation.theoretical_mz)
+                                        / annotation.theoretical_mz
+                                        * 1e6;
+                                }
+
+                                // Also refine heavy precursor delta from MS1
+                                if let Some(ref mut ha) = annotation.heavy_annotation {
+                                    let heavy_theo = ha.precursor_mz;
+                                    if let Some(obs_heavy) = find_precursor_in_ms1(
+                                        &raw_scans.ms1_scans,
+                                        annotation.retention_time_min,
+                                        heavy_theo,
+                                        20.0,
+                                    ) {
+                                        ha.delta_mass_ppm = Some(
+                                            (obs_heavy - heavy_theo) / heavy_theo * 1e6,
+                                        );
+                                    } else {
+                                        // No MS1 peak found → mark as unavailable
+                                        ha.delta_mass_ppm = None;
+                                    }
+                                }
+
                                 let unified_data =
                                     protein_copilot_report::unified_types::UnifiedViewData {
                                         source_file: source_file.clone(),
-                                        annotation: annotation.clone(),
+                                        annotation,
                                         xic: Some(xic_data),
                                         raw_scans: Some(raw_scans),
                                         ion_metadata,
                                         peptide_info: make_peptide_info(
                                             &peptide_seq,
                                             charge,
-                                            annotation.theoretical_mz,
+                                            annotation_theo_mz,
                                         ),
                                     };
 
