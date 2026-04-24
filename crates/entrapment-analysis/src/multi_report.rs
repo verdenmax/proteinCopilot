@@ -216,9 +216,14 @@ pub fn render_multi_provenance_report(
 // ---------------------------------------------------------------------------
 
 fn write_header(html: &mut String, prov: &MultiTargetProvenance) {
+    let light_mz_str = if prov.trap_precursor_mz > 0.0 {
+        format!("{:.4}", prov.trap_precursor_mz)
+    } else {
+        "N/A".to_string()
+    };
     let heavy_mz_str = match prov.trap_precursor_mz_heavy {
-        Some(mz) => format!("{mz:.4}"),
-        None => "N/A".to_string(),
+        Some(mz) if mz > 0.0 => format!("{mz:.4}"),
+        _ => "N/A".to_string(),
     };
     let heavy_scan_str = match &prov.heavy {
         Some(h) => format!("{}", h.scan_number),
@@ -236,7 +241,7 @@ fn write_header(html: &mut String, prov: &MultiTargetProvenance) {
 <div><span class="label">Scan (Light):</span> <span class="value">{light_scan}</span></div>
 <div><span class="label">Scan (Heavy):</span> <span class="value">{heavy_scan}</span></div>
 <div><span class="label">Charge:</span> <span class="value">{charge}+</span></div>
-<div><span class="label">Precursor m/z (Light):</span> <span class="value">{mz_light:.4}</span></div>
+<div><span class="label">Precursor m/z (Light):</span> <span class="value">{mz_light}</span></div>
 <div><span class="label">Precursor m/z (Heavy):</span> <span class="value">{mz_heavy}</span></div>
 <div><span class="label">Candidates:</span> <span class="value">{ncand}</span></div>
 <div><span class="label">Peaks:</span> <span class="value">{npeaks}</span></div>
@@ -249,7 +254,7 @@ fn write_header(html: &mut String, prov: &MultiTargetProvenance) {
         light_scan = prov.light.scan_number,
         heavy_scan = heavy_scan_str,
         charge = prov.trap_charge,
-        mz_light = prov.trap_precursor_mz,
+        mz_light = light_mz_str,
         mz_heavy = heavy_mz_str,
         ncand = prov.candidates.len(),
         npeaks = prov.light.annotated_peaks.len(),
@@ -302,11 +307,31 @@ fn write_candidate_table(html: &mut String, prov: &MultiTargetProvenance) {
 }
 
 fn count_target_matches_for_candidate(prov: &MultiTargetProvenance, candidate_index: usize) -> usize {
-    prov.light
+    let light_count = prov
+        .light
         .annotated_peaks
         .iter()
-        .filter(|p| p.target_matches.iter().any(|m| m.candidate_index == candidate_index))
-        .count()
+        .filter(|p| {
+            p.target_matches
+                .iter()
+                .any(|m| m.candidate_index == candidate_index)
+        })
+        .count();
+    let heavy_count = prov
+        .heavy
+        .as_ref()
+        .map(|h| {
+            h.annotated_peaks
+                .iter()
+                .filter(|p| {
+                    p.target_matches
+                        .iter()
+                        .any(|m| m.candidate_index == candidate_index)
+                })
+                .count()
+        })
+        .unwrap_or(0);
+    light_count + heavy_count
 }
 
 // ---------------------------------------------------------------------------
@@ -664,52 +689,79 @@ fn write_attribution_table(html: &mut String, prov: &MultiTargetProvenance) {
         r#"<div class="section">
 <h2>Trap Fragment Ion Attribution</h2>
 <p style="color:#666;font-size:0.85em;margin-top:0">Only peaks matching trap fragment ions are shown. Target matches indicate potential chimeric contamination.</p>
-<table>
-<tr><th>m/z</th><th>Rel. Intensity (%)</th><th>Trap Ion</th><th>Target Matches</th></tr>
 "#,
     );
 
-    let max_intensity = prov
-        .light
-        .annotated_peaks
-        .iter()
-        .map(|p| p.intensity)
-        .fold(0.0_f64, f64::max)
-        .max(1.0);
+    // Collect mirror datasets to render (Light always, Heavy if present).
+    let mirrors: Vec<(&str, &MirrorData)> = {
+        let mut v = vec![("Light", &prov.light)];
+        if let Some(ref heavy) = prov.heavy {
+            v.push(("Heavy", heavy));
+        }
+        v
+    };
 
-    // Only show peaks that match a trap fragment ion.
-    for peak in &prov.light.annotated_peaks {
-        let trap_label = match &peak.trap_ion {
-            Some(lbl) => lbl,
-            None => continue, // skip non-trap peaks
-        };
+    for (label, mirror) in &mirrors {
+        let max_intensity = mirror
+            .annotated_peaks
+            .iter()
+            .map(|p| p.intensity)
+            .fold(0.0_f64, f64::max)
+            .max(1.0);
 
-        let rel_int = peak.intensity / max_intensity * 100.0;
-        let origin = classify_peak(peak);
-        let css = origin_css_class(&origin);
+        // Only emit sub-header when both mirrors exist.
+        if mirrors.len() > 1 {
+            let _ = write!(
+                html,
+                r#"<h3 style="margin:12px 0 6px 0;font-size:0.95em;color:#555">{label} Scan ({scan})</h3>
+"#,
+                label = label,
+                scan = mirror.scan_number,
+            );
+        }
 
-        let target_desc = if peak.target_matches.is_empty() {
-            "— (trap unique)".to_string()
-        } else {
-            peak.target_matches
-                .iter()
-                .map(|m| format_target_match(m, prov))
-                .collect::<Vec<_>>()
-                .join("<br>")
-        };
-
-        let _ = writeln!(
+        let _ = write!(
             html,
-            r#"<tr><td>{mz:.4}</td><td>{rel:.1}</td><td class="{css}"><b>{trap}</b></td><td>{target}</td></tr>"#,
-            mz = peak.mz_observed,
-            rel = rel_int,
-            css = css,
-            trap = html_escape(trap_label),
-            target = target_desc,
+            r#"<table>
+<tr><th>m/z</th><th>Rel. Intensity (%)</th><th>Trap Ion</th><th>Target Matches</th></tr>
+"#,
         );
+
+        for peak in &mirror.annotated_peaks {
+            let trap_label = match &peak.trap_ion {
+                Some(lbl) => lbl,
+                None => continue,
+            };
+
+            let rel_int = peak.intensity / max_intensity * 100.0;
+            let origin = classify_peak(peak);
+            let css = origin_css_class(&origin);
+
+            let target_desc = if peak.target_matches.is_empty() {
+                "— (trap unique)".to_string()
+            } else {
+                peak.target_matches
+                    .iter()
+                    .map(|m| format_target_match(m, prov))
+                    .collect::<Vec<_>>()
+                    .join("<br>")
+            };
+
+            let _ = writeln!(
+                html,
+                r#"<tr><td>{mz:.4}</td><td>{rel:.1}</td><td class="{css}"><b>{trap}</b></td><td>{target}</td></tr>"#,
+                mz = peak.mz_observed,
+                rel = rel_int,
+                css = css,
+                trap = html_escape(trap_label),
+                target = target_desc,
+            );
+        }
+
+        let _ = write!(html, "</table>\n");
     }
 
-    let _ = write!(html, "</table>\n</div>\n");
+    let _ = write!(html, "</div>\n");
 }
 
 fn format_target_match(m: &TargetIonMatch, prov: &MultiTargetProvenance) -> String {
@@ -745,8 +797,16 @@ pub fn generate_provenance_summary_html(results: &[MultiTargetProvenance]) -> St
         r#"<!DOCTYPE html>
 <html><head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Provenance Summary</title>
 {css}
+<style>
+input[type="text"] {{ padding: 8px 12px; width: 300px; border: 1px solid #ddd; border-radius: 4px; margin-bottom: 12px; }}
+th {{ cursor: pointer; user-select: none; }}
+th:hover {{ background: #e0e0e0; }}
+.controls {{ margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }}
+.row-count {{ color: #888; font-size: 0.9em; }}
+</style>
 </head><body>
 <div class="header">
 <h1>Provenance Summary</h1>
@@ -754,8 +814,25 @@ pub fn generate_provenance_summary_html(results: &[MultiTargetProvenance]) -> St
 </div>
 <div class="section">
 <h2>All Analysed Trap PSMs</h2>
-<table>
-<tr><th>Peptide</th><th>File</th><th>Scan</th><th>m/z (L)</th><th>Charge</th><th>#Cand</th><th>TrapOnly</th><th>Shared</th><th>TargetOnly</th><th>Unassigned</th><th>Report</th></tr>
+<div class="controls">
+<input type="text" id="search-input" placeholder="Search peptide or file..." oninput="filterTable()">
+<span class="row-count" id="row-count"></span>
+</div>
+<table id="summary-table">
+<thead><tr>
+<th onclick="sortTable(0)">Peptide ⇅</th>
+<th onclick="sortTable(1)">File ⇅</th>
+<th onclick="sortTable(2)">Scan ⇅</th>
+<th onclick="sortTable(3)">m/z (L) ⇅</th>
+<th onclick="sortTable(4)">Charge ⇅</th>
+<th onclick="sortTable(5)">#Cand ⇅</th>
+<th onclick="sortTable(6)">TrapOnly ⇅</th>
+<th onclick="sortTable(7)">Shared ⇅</th>
+<th onclick="sortTable(8)">TargetOnly ⇅</th>
+<th onclick="sortTable(9)">Unassigned ⇅</th>
+<th>Report</th>
+</tr></thead>
+<tbody id="summary-tbody">
 "#,
         css = css_block(),
         n = results.len(),
@@ -771,18 +848,23 @@ pub fn generate_provenance_summary_html(results: &[MultiTargetProvenance]) -> St
         let row_class = if shared_frac > 0.30 { " class=\"chimeric\"" } else { "" };
 
         let scan = prov.light.scan_number;
+        let mz_str = if prov.trap_precursor_mz > 0.0 {
+            format!("{:.4}", prov.trap_precursor_mz)
+        } else {
+            "N/A".to_string()
+        };
         let report_filename = format!(
             "provenance/{}_{}_scan{}.html",
             prov.spectrum_file, prov.trap_peptide, scan
         );
         let _ = writeln!(
             html,
-            r#"<tr{cls}><td>{pep}</td><td>{file}</td><td>{scan}</td><td>{mz:.4}</td><td>{z}+</td><td>{ncand}</td><td>{to}</td><td>{sh}</td><td>{tgt}</td><td>{ua}</td><td><a href="{report}">view</a></td></tr>"#,
+            r#"<tr{cls}><td>{pep}</td><td>{file}</td><td>{scan}</td><td>{mz}</td><td>{z}+</td><td>{ncand}</td><td>{to}</td><td>{sh}</td><td>{tgt}</td><td>{ua}</td><td><a href="{report}">view</a></td></tr>"#,
             cls = row_class,
             pep = html_escape(&prov.trap_peptide),
             file = html_escape(&prov.spectrum_file),
             scan = scan,
-            mz = prov.trap_precursor_mz,
+            mz = mz_str,
             z = prov.trap_charge,
             ncand = prov.candidates.len(),
             to = prov.light.trap_only_count,
@@ -793,7 +875,73 @@ pub fn generate_provenance_summary_html(results: &[MultiTargetProvenance]) -> St
         );
     }
 
-    let _ = write!(html, "</table>\n</div>\n</body></html>");
+    let _ = write!(html, r#"</tbody>
+</table>
+</div>
+<script>
+var allRows = [];
+var sortCol = -1;
+var sortAsc = true;
+
+(function() {{
+    var tbody = document.getElementById('summary-tbody');
+    var trs = tbody.getElementsByTagName('tr');
+    for (var i = 0; i < trs.length; i++) {{
+        var cells = trs[i].getElementsByTagName('td');
+        var row = [];
+        for (var j = 0; j < cells.length; j++) row.push(cells[j].innerHTML);
+        allRows.push({{ cells: row, cls: trs[i].getAttribute('class') || '' }});
+    }}
+    updateCount(allRows.length);
+}})();
+
+function updateCount(n) {{
+    document.getElementById('row-count').textContent = n + ' rows';
+}}
+
+function filterTable() {{
+    var query = (document.getElementById('search-input').value || '').toLowerCase();
+    var filtered = allRows.filter(function(r) {{
+        if (!query) return true;
+        var text = (r.cells[0] + ' ' + r.cells[1]).toLowerCase();
+        return text.indexOf(query) !== -1;
+    }});
+    renderRows(filtered);
+}}
+
+function renderRows(rows) {{
+    var tbody = document.getElementById('summary-tbody');
+    var html = '';
+    for (var i = 0; i < rows.length; i++) {{
+        var r = rows[i];
+        var cls = r.cls ? ' class="' + r.cls + '"' : '';
+        html += '<tr' + cls + '>';
+        for (var j = 0; j < r.cells.length; j++) html += '<td>' + r.cells[j] + '</td>';
+        html += '</tr>';
+    }}
+    tbody.innerHTML = html;
+    updateCount(rows.length);
+}}
+
+function sortTable(col) {{
+    if (sortCol === col) {{ sortAsc = !sortAsc; }} else {{ sortCol = col; sortAsc = true; }}
+    allRows.sort(function(a, b) {{
+        var va = a.cells[col] || '';
+        var vb = b.cells[col] || '';
+        // strip HTML tags for comparison
+        va = va.replace(/<[^>]*>/g, '');
+        vb = vb.replace(/<[^>]*>/g, '');
+        var na = parseFloat(va);
+        var nb = parseFloat(vb);
+        if (!isNaN(na) && !isNaN(nb)) return sortAsc ? na - nb : nb - na;
+        if (va < vb) return sortAsc ? -1 : 1;
+        if (va > vb) return sortAsc ? 1 : -1;
+        return 0;
+    }});
+    filterTable();
+}}
+</script>
+</body></html>"#);
 
     html
 }

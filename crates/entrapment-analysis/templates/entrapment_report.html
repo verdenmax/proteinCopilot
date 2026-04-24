@@ -72,21 +72,26 @@
             <table id="psm-table">
                 <thead><tr>
                     <th onclick="sortTable(0)">Peptide ⇅</th>
-                    <th onclick="sortTable(1)">Group ⇅</th>
-                    <th onclick="sortTable(2)">Level ⇅</th>
-                    <th onclick="sortTable(3)">Best Target ⇅</th>
-                    <th onclick="sortTable(4)">Mismatches ⇅</th>
-                    <th onclick="sortTable(5)">Δ Mass (Da) ⇅</th>
-                    <th onclick="sortTable(6)">Target Protein ⇅</th>
-                    <th onclick="sortTable(7)">Diff Positions ⇅</th>
-                    <th onclick="sortTable(8)">Sub Type ⇅</th>
-                    <th onclick="sortTable(9)">Edit Dist ⇅</th>
-                    <th onclick="sortTable(10)">Alignment ⇅</th>
-                    <th onclick="sortTable(11)">Trap Matched ⇅</th>
-                    <th onclick="sortTable(12)">Target Matched ⇅</th>
-                    <th onclick="sortTable(13)">Shared Ions ⇅</th>
-                    <th onclick="sortTable(14)">Shared Ratio ⇅</th>
-                    <th onclick="sortTable(15)">Chimeric ⇅</th>
+                    <th onclick="sortTable(1)">Charge ⇅</th>
+                    <th onclick="sortTable(2)">m/z ⇅</th>
+                    <th onclick="sortTable(3)">q-value ⇅</th>
+                    <th onclick="sortTable(4)">File ⇅</th>
+                    <th onclick="sortTable(5)">Scan ⇅</th>
+                    <th onclick="sortTable(6)">Group ⇅</th>
+                    <th onclick="sortTable(7)">Level ⇅</th>
+                    <th onclick="sortTable(8)">Best Target ⇅</th>
+                    <th onclick="sortTable(9)">Mismatches ⇅</th>
+                    <th onclick="sortTable(10)">Δ Mass (Da) ⇅</th>
+                    <th onclick="sortTable(11)">Target Protein ⇅</th>
+                    <th onclick="sortTable(12)">Diff Positions ⇅</th>
+                    <th onclick="sortTable(13)">Sub Type ⇅</th>
+                    <th onclick="sortTable(14)">Edit Dist ⇅</th>
+                    <th onclick="sortTable(15)">Alignment ⇅</th>
+                    <th onclick="sortTable(16)">Trap Matched ⇅</th>
+                    <th onclick="sortTable(17)">Target Matched ⇅</th>
+                    <th onclick="sortTable(18)">Shared Ions ⇅</th>
+                    <th onclick="sortTable(19)">Shared Ratio ⇅</th>
+                    <th onclick="sortTable(20)">Chimeric ⇅</th>
                 </tr></thead>
                 <tbody id="psm-tbody"></tbody>
             </table>
@@ -210,6 +215,11 @@
         allRows = psms.map(function(p) {
             return [
                 p.peptide || '',
+                p.charge || '',
+                p.precursor_mz || '',
+                p.q_value || '',
+                p.spectrum_file || '',
+                p.scan_number || '',
                 p.group || '',
                 p.level || '',
                 p.best_target_peptide || '',
@@ -235,24 +245,29 @@
         var html = '';
         for (var i = 0; i < rows.length; i++) {
             var r = rows[i];
-            var lvlClass = 'level-' + r[2];
+            var lvlClass = 'level-' + r[7];
             html += '<tr>' +
                 '<td style="font-family:monospace">' + escHtml(r[0]) + '</td>' +
                 '<td>' + escHtml(r[1]) + '</td>' +
-                '<td class="' + lvlClass + '">' + escHtml(r[2]) + '</td>' +
-                '<td style="font-family:monospace">' + escHtml(r[3]) + '</td>' +
-                '<td>' + escHtml(r[4]) + '</td>' +
-                '<td>' + formatDeltaMass(r[5]) + '</td>' +
-                '<td style="font-size:0.85em">' + escHtml(r[6]) + '</td>' +
-                '<td style="font-size:0.85em">' + escHtml(r[7]) + '</td>' +
-                '<td>' + escHtml(r[8]) + '</td>' +
+                '<td>' + escHtml(r[2]) + '</td>' +
+                '<td>' + escHtml(r[3]) + '</td>' +
+                '<td style="font-size:0.85em">' + escHtml(r[4]) + '</td>' +
+                '<td>' + escHtml(r[5]) + '</td>' +
+                '<td>' + escHtml(r[6]) + '</td>' +
+                '<td class="' + lvlClass + '">' + escHtml(r[7]) + '</td>' +
+                '<td style="font-family:monospace">' + escHtml(r[8]) + '</td>' +
                 '<td>' + escHtml(r[9]) + '</td>' +
-                '<td style="font-size:0.85em">' + escHtml(r[10]) + '</td>' +
-                '<td>' + escHtml(r[11]) + '</td>' +
-                '<td>' + escHtml(r[12]) + '</td>' +
+                '<td>' + formatDeltaMass(r[10]) + '</td>' +
+                '<td style="font-size:0.85em">' + escHtml(r[11]) + '</td>' +
+                '<td style="font-size:0.85em">' + escHtml(r[12]) + '</td>' +
                 '<td>' + escHtml(r[13]) + '</td>' +
                 '<td>' + escHtml(r[14]) + '</td>' +
-                '<td>' + escHtml(r[15]) + '</td>' +
+                '<td style="font-size:0.85em">' + escHtml(r[15]) + '</td>' +
+                '<td>' + escHtml(r[16]) + '</td>' +
+                '<td>' + escHtml(r[17]) + '</td>' +
+                '<td>' + escHtml(r[18]) + '</td>' +
+                '<td>' + escHtml(r[19]) + '</td>' +
+                '<td>' + escHtml(r[20]) + '</td>' +
                 '</tr>';
         }
         tbody.innerHTML = html;
@@ -269,9 +284,9 @@
         var query = (document.getElementById('search-input').value || '').toLowerCase();
         var levelVal = document.getElementById('level-filter').value;
         var filtered = allRows.filter(function(r) {
-            if (levelVal && r[2] !== levelVal) return false;
+            if (levelVal && r[7] !== levelVal) return false;
             if (query) {
-                var haystack = (r[0] + ' ' + r[3] + ' ' + r[6]).toLowerCase();
+                var haystack = (r[0] + ' ' + r[8] + ' ' + r[11] + ' ' + r[4]).toLowerCase();
                 if (haystack.indexOf(query) === -1) return false;
             }
             return true;

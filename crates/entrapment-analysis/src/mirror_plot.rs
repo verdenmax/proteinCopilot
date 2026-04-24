@@ -123,6 +123,7 @@ pub fn generate_mirror_html(provenance: &FragmentProvenance) -> String {
 <html>
 <head>
     <title>Mirror Plot: {trap_seq} vs {target_seq}</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <script src="https://cdn.plot.ly/plotly-2.35.0.min.js"></script>
 </head>
 <body>
@@ -244,6 +245,7 @@ fn escape_js(s: &str) -> String {
         .replace('"', "\\\"")
         .replace('\n', "\\n")
         .replace('\r', "\\r")
+        .replace("</", "<\\/")
 }
 
 // ---------------------------------------------------------------------------
