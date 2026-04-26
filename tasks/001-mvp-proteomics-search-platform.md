@@ -3,7 +3,7 @@
 > **文件名**：`prd-mvp-proteomics-search.md`
 > **版本**：1.0
 > **创建日期**：2026-03-27
-> **状态**：In Progress — M1.1 ✅ M1.2 ✅ M1.3 ✅ M1.4 ✅ M1.5 ✅ M1.6 ✅ M1.7 ✅（704 tests, 0 warnings）— MVP 完成 + Post-MVP 功能（异步搜索优化、搜索历史持久化、谱图注释可视化）+ DIA 数据支持（前体提取 + 搜索集成 + 端到端工作流 + 单谱图母离子提取）+ Biology Audit 完成 + BUG-1~9 已修复（碎片离子固定修饰 + DIA precursor m/z + Sage RT 单位 + PPM 零值保护 + DIA 搜索安全 + 未打分 PSM + RT 标签 + Decoy 检测统一化）+ 16 MCP Tools + FW-1 ✅ ProteinNTerm 修饰过滤 + FW-2 ✅ 可变修饰枚举 + FW-3 ✅ ppm 碎片离子容差 + FW-4 ✅ 多电荷碎片离子 + FW-6 ✅ 原生 FDR 计算（fdr crate + decoy 生成 + q-value 单调化）+ XIC 可视化（xic crate + extract_xic tool + SILAC 重标轻重离子 + Plotly.js HTML）+ 索引谱图读取（IndexedMzMLReader / IndexedMgfReader + scan offset 随机访问）+ 外部搜索结果导入（result-import crate + import_search_results tool + DIA-NN parquet / custom JSON / RT 扫描匹配）+ 统一标注+XIC 视图（客户端 SILAC 引擎 + 逐离子 L/H 开关 + DDA 自动跳过 XIC）+ M2.0 ✅ Sage 搜索引擎集成（sage-core v0.15.0 库集成 + rayon 并行打分 + LDA rescoring + spectrum/peptide/protein FDR）+ M2.2 ✅ 独立 FDR 计算 + M2.3 ✅ 蛋白推断（Parsimony + Razor）+ M2.4 ✅ FASTA 数据库管理 + RT 二分查找优化（ScanIndex + PCIX v2 + find_by_rt O(log N) + collect_ms2_info 零 I/O）+ ✅ 陷阱库分析 v1+v2（L0-L4 分级 + Levenshtein edit distance + k-mer 预筛 + SubstitutionType 注释 + HTML 报告 + CLI + 3 MCP tools）+ ✅ 陷阱库分析 v3（碎片离子溯源 + 嵌合谱检测 + UniMod 修饰 + RT-based scan lookup + 镜像图可视化）+ ✅ 陷阱库分析 v4（多目标碎片溯源 + CoElutionIndex + 轻重标 SILAC 搜索 + DIA 双扫描镜像 + MirrorData 结构 + Per-PSM HTML 报告增强 + 噪声过滤 + 边界修复）+ ✅ 跨模块流程审计（DIA precursor 全链路修复 + SILAC 轻重标 MS2 分离验证 + 740+ tests）
+> **状态**：In Progress — M1.1 ✅ M1.2 ✅ M1.3 ✅ M1.4 ✅ M1.5 ✅ M1.6 ✅ M1.7 ✅（838 tests, 0 warnings）— MVP 完成 + Post-MVP 功能（异步搜索优化、搜索历史持久化、谱图注释可视化）+ DIA 数据支持（前体提取 + 搜索集成 + 端到端工作流 + 单谱图母离子提取）+ Biology Audit 完成 + BUG-1~16 已修复（碎片离子固定修饰 + DIA precursor m/z + Sage RT 单位 + PPM 零值保护 + DIA 搜索安全 + 未打分 PSM + RT 标签 + Decoy 检测统一化 + unwrap 安全化 + HTML 注入防护 + Plotly 版本统一 + 魔法数字常量化）+ 28 MCP Tools + FW-1 ✅ ProteinNTerm 修饰过滤 + FW-2 ✅ 可变修饰枚举 + FW-3 ✅ ppm 碎片离子容差 + FW-4 ✅ 多电荷碎片离子 + FW-6 ✅ 原生 FDR 计算（fdr crate + decoy 生成 + q-value 单调化）+ XIC 可视化（xic crate + extract_xic tool + SILAC 重标轻重离子 + Plotly.js HTML）+ 索引谱图读取（IndexedMzMLReader / IndexedMgfReader + scan offset 随机访问）+ 外部搜索结果导入（result-import crate + import_search_results tool + DIA-NN parquet / custom JSON / RT 扫描匹配）+ 统一标注+XIC 视图（客户端 SILAC 引擎 + 逐离子 L/H 开关 + DDA 自动跳过 XIC）+ M2.0 ✅ Sage 搜索引擎集成（sage-core v0.15.0 库集成 + rayon 并行打分 + LDA rescoring + spectrum/peptide/protein FDR）+ M2.2 ✅ 独立 FDR 计算 + M2.3 ✅ 蛋白推断（Parsimony + Razor）+ M2.4 ✅ FASTA 数据库管理 + RT 二分查找优化（ScanIndex + PCIX v2 + find_by_rt O(log N) + collect_ms2_info 零 I/O）+ ✅ 陷阱库分析 v1+v2（L0-L4 分级 + Levenshtein edit distance + k-mer 预筛 + SubstitutionType 注释 + HTML 报告 + CLI + 3 MCP tools）+ ✅ 陷阱库分析 v3（碎片离子溯源 + 嵌合谱检测 + UniMod 修饰 + RT-based scan lookup + 镜像图可视化）+ ✅ 陷阱库分析 v4（多目标碎片溯源 + CoElutionIndex + 轻重标 SILAC 搜索 + DIA 双扫描镜像 + MirrorData 结构 + Per-PSM HTML 报告增强 + 噪声过滤 + 边界修复）+ ✅ 跨模块流程审计（DIA precursor 全链路修复 + SILAC 轻重标 MS2 分离验证）+ ✅ 代码审计修复（unwrap 安全化 + HTML 注入防护 + Plotly.js 2.35.2 统一 + 魔法数字常量化）+ ✅ 溯源报告增强（RT + q-value + 修饰展示 + Heavy 计数 + 嵌合检测改进）
 
 ---
 
@@ -998,6 +998,9 @@ M1.7 (集成验证)    ← 需要所有 MVP Milestone
 | 2026-04-17 | M2.0 Sage 搜索引擎集成完成；M2.2/M2.3 状态更新为 ✅；M2.4 更新为部分完成（Sage done）；FR-3 状态更新；562 tests | Sage 集成 + 代码审查 + 边界修复 |
 | 2026-04-18 | M2.5 失败诊断完成；M2.6 RT 二分查找优化完成（ScanIndex + PCIX v2 + find_by_rt + 3 bug fix）；704 tests | RT 性能优化 + 代码审计 |
 | 2026-04-21 | 跨模块流程审计完成：BUG-2~9 新增修复（DIA precursor m/z 全链路修复 + Sage RT 单位 + PPM 零值保护 + DIA 搜索安全守卫 + result-import NaN score + xic.html RT 标签 + Decoy 检测统一化）；core::util 新增 is_decoy_accession()；SILAC 轻重标 MS2 分离验证通过；740+ tests | 跨模块流程审计 + DIA 安全修复 + 模板修正 |
+| 2026-04-22 | 陷阱库 HTML 报告修复 7 项（BUG-10：Heavy 离子归属修正 + 列数修正 + JSON 转义增强 + Plotly 2.35.2 + RT 列新增 + JS 索引同步 + viewport meta）| entrapment 报告质量审计 |
+| 2026-04-24 | 代码审计修复（BUG-11~16）：tools.rs unwrap 安全化 + unimod.rs unwrap 安全化 + diann.rs Regex LazyLock + xic_visualize.rs 肽段 HTML 转义 + entrapment report.rs JSON 转义增强 + 3 个魔法数字常量化（DIA_ISOLATION_WINDOW_THRESHOLD_DA / RT_AUTO_LOOKUP_TOLERANCE_MIN / FDR_1PCT_THRESHOLD）；Plotly.js 全项目统一 2.35.2；838 tests | 五模块并行代码审计 + 修复 |
+| 2026-04-24 | 溯源报告增强：MultiTargetProvenance 新增 trap_retention_time_min + trap_q_value 字段；Per-PSM header 展示 RT 和 q-value；Summary 表新增 Heavy 计数列（H:TrapOnly/H:Shared/H:TargetOnly）；Candidate 表替换冗余 Spectrum File 为 Modifications 列；嵌合检测改用轻+重合并 shared fraction | 溯源报告数据完整性增强 |
 
 ---
 
@@ -1129,6 +1132,13 @@ M1.7 (集成验证)    ← 需要所有 MVP Milestone
 | BUG-7 | **result-import 未打分 PSM score=0.0** | `converter.rs` 将 `score: None` 转为 `0.0`，FDR 无法区分未打分和真实零分。改为 `f64::NAN`，FDR 的 `is_finite()` 检查自然过滤 | ✅ 已修复 |
 | BUG-8 | **xic.html RT 单位标签错误** | xic.html 模板第 30 行 RT 显示标签从 `s`（秒）修正为 `min`（分钟），与内部 `retention_time_min` 一致 | ✅ 已修复 |
 | BUG-9 | **Decoy 检测硬编码 REV_/SHUF_** | 新增 `core::util::is_decoy_accession()` 统一检测函数，支持 REV_/SHUF_/DECOY_/REVERSED_ 四种前缀。`simple_engine.rs`、`mapper.rs`、`parsimony.rs` 统一调用 | ✅ 已修复 |
+| BUG-10 | **entrapment HTML Heavy 离子归属错误** | Heavy mirror 从 `target_peptide` 改为 `trap_peptide` + `shift_ions_heavy()`；Heavy `matched_count` 使用 `heavy.matched_peaks` 而非 light 的值；mirror_plot.rs 同步修复 | ✅ 已修复 |
+| BUG-11 | **tools.rs L1765 unwrap 崩溃** | `match` 替代 `get_result().unwrap()`，失败返回结构化 ErrorData | ✅ 已修复 |
+| BUG-12 | **unimod.rs L129 unwrap 崩溃** | `if let` 替代 `unwrap()`，解析失败跳过而非 panic | ✅ 已修复 |
+| BUG-13 | **diann.rs Regex::new().unwrap()** | 改为 `LazyLock` 静态编译，零运行时 panic 风险 | ✅ 已修复 |
+| BUG-14 | **xic_visualize.rs 肽段注入风险** | 肽段序列在写入 HTML `<title>` 前进行 HTML 转义（`<>&"` → 实体） | ✅ 已修复 |
+| BUG-15 | **entrapment report.rs JSON 转义不完整** | 从仅 `</` 转义升级为全 `<>` → `\u003c\u003e` 转义，与 xic 模块对齐 | ✅ 已修复 |
+| BUG-16 | **tools.rs 魔法数字硬编码** | 提取为命名常量：`DIA_ISOLATION_WINDOW_THRESHOLD_DA=5.0`、`RT_AUTO_LOOKUP_TOLERANCE_MIN=0.5`、`FDR_1PCT_THRESHOLD=0.01` | ✅ 已修复 |
 
 ### Post-MVP 已完成功能 ✅
 
