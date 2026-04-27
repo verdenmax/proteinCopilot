@@ -256,6 +256,8 @@ fn trim_peaks_to_window(
 /// Uses the 1.5-pass strategy:
 /// - Pass 0: `read_spectrum(target_scan)` → get RT and isolation window
 /// - Pass 1: `for_each_spectrum()` → stream all spectra, extract intensities
+#[deprecated(note = "Use extract_xic_unified() instead — index-planned reads, single call")]
+#[allow(deprecated)]
 pub fn extract_xic(
     file_path: &Path,
     target_scan: u32,
@@ -665,6 +667,8 @@ pub fn extract_xic(
 ///
 /// MS1 peaks are trimmed to ±`ms1_mz_window_da` around `precursor_mz`
 /// to control embedded data volume.
+#[deprecated(note = "Use extract_xic_unified() instead — merged into single call")]
+#[allow(deprecated)]
 #[allow(clippy::too_many_arguments)]
 pub fn extract_xic_with_raw(
     file_path: &Path,
