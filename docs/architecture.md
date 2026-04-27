@@ -239,10 +239,12 @@ pub trait SpectrumReader: Send + Sync {
     fn read_spectrum(&self, path: &Path, scan: u32) -> Result<Spectrum, SpectrumIoError>;
     fn for_each_spectrum(&self, path: &Path, handler: &mut dyn FnMut(Spectrum) -> Result<bool, SpectrumIoError>) -> Result<u32, SpectrumIoError>;
     fn list_ms2_meta(&self, path: &Path) -> Result<Vec<Ms2ScanMeta>, SpectrumIoError>;
+    fn list_scan_meta(&self, path: &Path) -> Result<Vec<ScanMetaInfo>, SpectrumIoError>;
     fn find_by_rt(&self, path: &Path, rt_min: f64, precursor_mz: f64, rt_tolerance_min: f64) -> Result<Option<(u32, f64)>, SpectrumIoError>;
 }
 
 pub struct Ms2ScanMeta { pub scan_number: u32, pub rt_min: f64, pub isolation_window: Option<(f64, f64, f64)> }
+pub struct ScanMetaInfo { pub scan_number: u32, pub ms_level: u8, pub rt_min: f64, pub isolation_window: Option<(f64, f64, f64)> }
 pub struct MgfReader;            // impl SpectrumReader
 pub struct MzMLReader;           // impl SpectrumReader
 pub struct IndexedMzMLReader;    // impl SpectrumReader（O(1) 随机访问 + O(log N) RT 查找）
@@ -255,20 +257,57 @@ pub fn create_reader(info: &SpectrumFileInfo) -> Box<dyn SpectrumReader>;
 
 | 模块 | 功能 |
 |------|------|
+| `reader.rs` | SpectrumReader trait + ScanMetaInfo + Ms2ScanMeta 类型定义 |
 | `index.rs` | ScanMeta + ScanIndex（RT 排序索引 + find_by_rt 二分查找 + 字节扫描元数据提取） |
 | `disk_cache.rs` | PCIX v2 磁盘缓存（46B/entry 二进制格式，含 RT + ms_level + 隔离窗口） |
 | `indexed_mzml.rs` | IndexedMzMLReader（两层策略：PCIX v2 缓存 → 字节扫描构建） |
+| `indexed_mgf.rs` | IndexedMgfReader（MGF 索引读取器） |
 | `mgf.rs` | MGF 格式解析器 |
 | `mzml.rs` | mzML 流式解析器 |
 
 **依赖**：`core`, `quick-xml`（mzML 解析）, `base64`（mzML binary data）, `flate2`（zlib 解压）, `memchr`（SIMD 字节扫描）
+
+**索引与磁盘缓存架构**：
+
+```text
+mzML 文件首次打开
+    │
+    ├─ 检查 .idx 磁盘缓存（PCIX v2 二进制）
+    │   ├─ 命中且 size+mtime 匹配 → 直接加载 ScanIndex（毫秒级）
+    │   └─ 缺失或过期 ↓
+    │
+    ├─ SIMD 字节扫描构建 ScanIndex
+    │   └─ 提取每个 <spectrum> 的 byte_offset / RT / ms_level / isolation_window
+    │
+    └─ 写入 .idx 磁盘缓存（下次秒开）
+
+ScanIndex 内存结构：
+    entries: HashMap<scan_number(u32) → ScanMeta>
+    rt_sorted: Vec<(rt_seconds, scan_number)>  // 预排序，支持 O(log N) RT 二分查找
+
+ScanMeta 每条记录：
+    ├── offset:           u64                    // 文件字节偏移 → O(1) seek
+    ├── rt_seconds:       f64                    // 保留时间（秒）
+    ├── ms_level:         u8                     // 1=MS1, 2=MS2
+    └── isolation_window: Option<(f64,f64,f64)>  // (target_mz, lower, upper)
+
+PCIX v2 磁盘格式（.mzML.idx 后缀）：
+    [magic: "PCIX" 4B] [version: u8=2]
+    [source_file_size: u64] [source_file_mtime: u64]
+    [entry_count: u32]
+    [entries × N: scan_number(u32) + offset(u64) + rt(f64)
+                  + ms_level(u8) + has_isolation(u8)
+                  + target_mz(f64) + lower(f64) + upper(f64)]  // 每条 46B
+```
 
 **设计原则**：
 - Reader trait 使得未来增加新格式（mzXML, .raw）只需新增实现
 - 大文件使用 streaming 解析（逐条读取，不一次性加载全部谱图到内存）
 - IndexedMzMLReader 两层索引策略：PCIX v2 缓存 → 字节扫描构建（跳过 native index）
 - `find_by_rt()` O(log N) 二分查找：RT 容差窗口 + 隔离窗口/前体 m/z 匹配
-- `list_ms2_meta()` 从内存 ScanIndex 直接迭代，零 I/O
+- `list_ms2_meta()` 从内存 ScanIndex 直接迭代 MS2 scan，零 I/O
+- `list_scan_meta()` 从内存 ScanIndex 迭代所有 scan（MS1+MS2），供 XIC 索引规划使用。IndexedMzMLReader/IndexedMgfReader 直接读内存索引（亚毫秒）；默认实现回退到 `for_each_spectrum()` 流式扫描
+- MCP Server 的 `reader_cache`（LRU 容量 8）缓存 IndexedMzMLReader 实例，同一文件的连续操作跳过所有索引加载开销
 - 格式检测通过文件扩展名（大小写不敏感）
 - 解析后自动按 m/z 升序排序（真实数据可能无序）
 - mzML 保留时间自动单位转换（分钟→秒）
@@ -652,14 +691,16 @@ mcp-server/src/
 
 ### 3.9 `xic`（lib crate）
 
-**职责**：从 mzML 原始数据提取碎片离子的 XIC（Extracted Ion Chromatogram），支持 SILAC 重标记轻重离子对。同时提供客户端 SILAC 所需的 raw scan 数据和离子元数据。
+**职责**：从 mzML 原始数据提取碎片离子的 XIC（Extracted Ion Chromatogram），支持 SILAC 重标记轻重离子对。同时提供客户端 SILAC 所需的 raw scan 数据和离子元数据。利用 spectrum-io 索引实现定向读取，避免全文件扫描。
 
 **对外暴露**：
 ```text
 xic::
-├── extract::extract_xic()           ← 核心函数：肽段 + mzML → XicData
-├── extract::extract_xic_with_raw()  ← 增强版：+ RawScanData + IonMetadataEntry
+├── extract::extract_xic_unified()   ← 统一核心函数：索引规划 + 单遍定向读取
+├── extract::extract_xic()           ← [已弃用] 旧版全文件流式扫描
+├── extract::extract_xic_with_raw()  ← [已弃用] 旧版增强版（第二遍全文件扫描）
 ├── XicData / XicTrace / XicDataPoint
+├── XicUnifiedResult                 ← 统一结果：XicData + RawScanData + IonMetadataEntry
 ├── IonMetadataEntry                 ← 离子 K/R 计数（供客户端 SILAC 重计算）
 ├── RawScanData / RawScan            ← MS1/MS2 原始峰数组（嵌入 HTML 供 JS 使用）
 ├── ExtractionParams                 ← 提取参数（tolerance, n_cycles, top_n_ions 等）
@@ -670,11 +711,36 @@ xic::
 **依赖**：`core`, `spectrum-io`
 **不依赖**：`rmcp`（纯 library）
 
+**索引规划式 XIC 提取（extract_xic_unified）**：
+
+```text
+优化前（两遍全文件扫描）：
+  extract_xic()         → for_each_spectrum() 遍历 100,000+ 谱图 (~120s)
+  extract_xic_with_raw() → 再次遍历 100,000+ 谱图 (~120s)
+  总计 ~240s / 每个标注
+
+优化后（索引规划 + 定向读取）：
+  extract_xic_unified() → 单次调用，<1s
+
+流程：
+  1. read_spectrum(target_scan) → 获取目标 RT、隔离窗口
+  2. list_scan_meta() → 从内存索引获取全部 scan 元数据（亚毫秒，零 I/O）
+  3. 索引规划：
+     ├─ MS2 轻标：筛选 same_isolation_window()，取目标 scan ±n_cycles
+     ├─ MS2 重标（DIA+SILAC）：筛选包含 heavy_precursor_mz 的窗口，按 RT 取 ±n_cycles
+     └─ MS1：筛选覆盖轻+重 MS2 RT 范围的 MS1 scan
+  4. 仅读取 ~30 个目标 scan（O(1) indexed seek）
+  5. 一次性输出 XicData + RawScanData + IonMetadataEntry
+```
+
 **设计要点**：
 - MS2 fragment XIC 通过 `same_isolation_window()` 匹配同窗 MS2 扫描（DIA 多点、DDA 单点）
 - MS1 precursor XIC 从全扫描中按 m/z 窗口提取（DDA/DIA 均可用）
-- `extract_xic_with_raw()` 额外输出修剪后的 raw peaks 和 `compute_ion_metadata()` 的 K/R 计数，供 unified HTML 模板的客户端 SILAC 引擎使用
-- MS1 修剪窗口根据肽段 K/R 数量和电荷态动态计算，确保 SILAC 重标前体不被截断
+- `extract_xic_unified()` 接受 `&dyn SpectrumReader`，MCP Server 传入 `reader_cache` LRU 缓存的 `Arc<dyn SpectrumReader>`
+- 单次调用替代旧版两遍扫描模式，输出 `XicUnifiedResult` 包含 XIC 数据 + raw peaks + 离子元数据
+- DIA 重标窗口规划：`heavy_mz` 在 `[target_mz - lower, target_mz + upper]` 范围内匹配
+- DDA 重标：与轻标相同 scan，无需独立窗口规划
+- 动态 MS1 修剪窗口根据肽段 K/R 数量和电荷态动态计算，确保 SILAC 重标前体不被截断
 - DDA 无隔离窗口时，对 raw MS2 克隆使用 ±300s RT 近邻预过滤防止内存暴涨
 - 入口处验证目标扫描必须为 MS2 级别
 
@@ -1270,3 +1336,11 @@ entrapment-cli 是独立二进制，仅依赖 entrapment-analysis。
 > - Candidate 表替换冗余 Spectrum File 列为 Modifications 列
 > - 嵌合检测改用轻+重合并 shared fraction
 > - 838 tests，0 warnings
+>
+> **XIC 索引规划式提取已完成（2026-04-27）：**
+> - spectrum-io: 新增 `ScanMetaInfo` + `list_scan_meta()` trait 方法，IndexedMzMLReader/IndexedMgfReader 从内存索引读取（亚毫秒）
+> - xic: 新增 `extract_xic_unified()` 单次调用替代两遍全文件扫描，读取量从 100,000+ scan → ~30 scan，耗时从 ~240s → <1s
+> - mcp-server: `annotate_spectrum` 和 `extract_xic` tool 已切换至统一函数
+> - 旧版 `extract_xic()` / `extract_xic_with_raw()` 标记为 `#[deprecated]`
+> - 索引缓存体系：PCIX v2 磁盘缓存（.mzML.idx）+ reader_cache LRU（容量 8）双层加速
+> - 详见 `docs/superpowers/specs/2026-04-27-xic-indexed-extraction-design.md`
