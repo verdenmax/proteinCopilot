@@ -184,6 +184,22 @@ impl SpectrumReader for IndexedMzMLReader {
             })
             .collect())
     }
+
+    fn list_scan_meta(
+        &self,
+        _path: &Path,
+    ) -> Result<Vec<crate::reader::ScanMetaInfo>, SpectrumIoError> {
+        Ok(self
+            .index
+            .iter_meta()
+            .map(|(&scan, meta)| crate::reader::ScanMetaInfo {
+                scan_number: scan,
+                ms_level: meta.ms_level,
+                rt_min: meta.rt_seconds / 60.0,
+                isolation_window: meta.isolation_window,
+            })
+            .collect())
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -570,5 +586,35 @@ mod tests {
                 reader2.index().get_offset(scan),
             );
         }
+    }
+
+    #[test]
+    fn list_scan_meta_returns_all_scans() {
+        let path =
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/small.mzml");
+        let reader = IndexedMzMLReader::open(&path).unwrap();
+        let metas = reader.list_scan_meta(&path).unwrap();
+
+        // small.mzml has scans
+        assert!(!metas.is_empty(), "should return scan metadata");
+
+        let ms2_count = metas.iter().filter(|m| m.ms_level == 2).count();
+        assert!(ms2_count > 0, "should have MS2 scans");
+
+        // MS2 scans should have isolation windows
+        for m in metas.iter().filter(|m| m.ms_level == 2) {
+            assert!(
+                m.isolation_window.is_some(),
+                "MS2 scan {} should have isolation window",
+                m.scan_number
+            );
+        }
+
+        // Total should match index size
+        assert_eq!(
+            metas.len(),
+            reader.index().len(),
+            "list_scan_meta count must match index size"
+        );
     }
 }

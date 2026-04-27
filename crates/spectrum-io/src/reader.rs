@@ -14,6 +14,22 @@ pub struct Ms2ScanMeta {
     pub isolation_window: Option<(f64, f64, f64)>,
 }
 
+/// Scan metadata for XIC planning and batch read optimization.
+///
+/// Contains the minimum metadata needed to plan targeted reads:
+/// which scans to read based on ms_level, RT range, and isolation window.
+#[derive(Debug, Clone)]
+pub struct ScanMetaInfo {
+    /// Scan number (1-based).
+    pub scan_number: u32,
+    /// MS level: 1 = MS1, 2 = MS2.
+    pub ms_level: u8,
+    /// Retention time in minutes.
+    pub rt_min: f64,
+    /// Isolation window as (target_mz, lower_offset, upper_offset). None for MS1.
+    pub isolation_window: Option<(f64, f64, f64)>,
+}
+
 /// Unified interface for reading spectrum files.
 ///
 /// Each supported format (mgf, mzML) implements this trait.
@@ -77,6 +93,40 @@ pub trait SpectrumReader: Send + Sync {
                 }
             })
             .collect())
+    }
+
+    /// Returns metadata for all scans (MS1 + MS2).
+    ///
+    /// Used by XIC extraction to plan targeted reads: identify which scans
+    /// match the target isolation window and RT range, then read only those.
+    ///
+    /// Default implementation streams all spectra (slow for large files).
+    /// [`crate::IndexedMzMLReader`] overrides to read from in-memory index
+    /// — zero I/O, sub-millisecond even for 100k+ scans.
+    fn list_scan_meta(&self, path: &Path) -> Result<Vec<ScanMetaInfo>, SpectrumIoError> {
+        use protein_copilot_core::spectrum::MsLevel;
+
+        let mut metas = Vec::new();
+        self.for_each_spectrum(path, &mut |spec| {
+            let iso = spec.precursors.first().and_then(|p| {
+                p.isolation_window
+                    .as_ref()
+                    .map(|w| (w.target_mz, w.lower_offset, w.upper_offset))
+            });
+            let ms_level = match spec.ms_level {
+                MsLevel::MS1 => 1,
+                MsLevel::MS2 => 2,
+                MsLevel::Other(n) => n,
+            };
+            metas.push(ScanMetaInfo {
+                scan_number: spec.scan_number,
+                ms_level,
+                rt_min: spec.retention_time_min,
+                isolation_window: iso,
+            });
+            Ok(true)
+        })?;
+        Ok(metas)
     }
 
     /// Find the best MS2 scan matching a given RT and precursor m/z.

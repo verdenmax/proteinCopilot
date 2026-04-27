@@ -34,6 +34,7 @@ pub use error::SpectrumIoError;
 pub use indexed_mgf::IndexedMgfReader;
 pub use indexed_mzml::IndexedMzMLReader;
 pub use reader::SpectrumReader;
+pub use reader::ScanMetaInfo;
 
 use std::path::Path;
 

@@ -84,6 +84,22 @@ impl SpectrumReader for IndexedMgfReader {
     ) -> Result<u32, SpectrumIoError> {
         MgfReader.for_each_spectrum(path, handler)
     }
+
+    fn list_scan_meta(
+        &self,
+        _path: &Path,
+    ) -> Result<Vec<crate::reader::ScanMetaInfo>, SpectrumIoError> {
+        Ok(self
+            .index
+            .iter_meta()
+            .map(|(&scan, meta)| crate::reader::ScanMetaInfo {
+                scan_number: scan,
+                ms_level: meta.ms_level,
+                rt_min: meta.rt_seconds / 60.0,
+                isolation_window: meta.isolation_window,
+            })
+            .collect())
+    }
 }
 
 // ---------------------------------------------------------------------------
