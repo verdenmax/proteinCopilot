@@ -204,18 +204,23 @@ tools:
 
 ### 性能关键：scan number 优先于 RT 查找
 
-**`annotate_spectrum` 内部包含 XIC 提取，XIC 需要全文件流式扫描（大文件 >5GB 耗时 100-150s/次）。**
-因此，标注前获取准确的 scan number 至关重要：
+**所有标注操作均已索引化优化，单次标注 <2s（含 XIC 提取）。**
 
-1. **有搜索结果时（最快）**：先 `import_search_results` 或 `run_search` 获取 run_id，然后 `export_results` 得到 PSM 列表（含 scan number）。直接用 `scan_number` 调用标注，跳过 RT 查找。
-2. **手动模式用 scan_number（推荐）**：如果已知 scan number，直接传入。`IndexedMzMLReader` 有磁盘索引缓存（`.mzML.idx`），**单 scan 查找是 O(1) seek**，毫秒级完成。
-3. **RT 查找（最慢，仅作后备）**：`scan_number=0 + retention_time_min` 模式需要先构建/加载索引再二分查找，首次打开大文件可能需要数十秒。
+1. **有搜索结果时（最快）**：先 `import_search_results` 或 `run_search` 获取 run_id，然后 `export_results` 得到 PSM 列表（含 scan number）。直接用 `scan_number` 调用标注。
+2. **手动模式用 scan_number（推荐）**：`IndexedMzMLReader` 有磁盘索引缓存（`.mzML.idx`），**单 scan 查找是 O(1) seek**，毫秒级完成。
+3. **RT 查找（后备）**：`scan_number=0 + retention_time_min` 模式需要索引二分查找，仍然很快。
 
-**批量标注时特别注意**：
-- 每次 `annotate_spectrum` 调用都会全文件扫描提取 XIC，N 个肽段 = N 次全文件扫描
-- 对于 7.5GB mzML，12 个肽段 ≈ 25 分钟（每个 ~120s）
-- 优先使用 `export_results` 一次性获取所有 scan number，避免逐个通过 RT 查找
-- MCP client 超时设置（`.mcp.json` 中的 `timeout`）可能不够，大文件建议 ≥ 600s
+**批量标注**：
+- 每次 `annotate_spectrum` 调用 <2s（XIC 通过 `extract_xic_unified()` 索引定向读取 ~30 scan）
+- 顺序调用即可，服务端 reader_cache LRU（容量 8）自动复用索引
+- 先用 `export_results` 一次性获取所有 scan number，避免逐个通过 RT 查找
+
+### 索引体系
+
+- **内存索引**：`ScanIndex`（`HashMap<scan_number → ScanMeta>`）+ RT 预排序数组
+- **磁盘缓存**：`.mzML.idx`（PCIX v2 二进制，46B/entry），记录每个 scan 的 byte_offset / RT / ms_level / isolation_window
+- **reader_cache**：MCP Server LRU 缓存（容量 8），缓存 IndexedMzMLReader 实例
+- **XIC 规划**：`list_scan_meta()` 从内存索引查询全部 scan 元数据（亚毫秒），筛选后定向 `read_spectrum()` O(1) seek
 
 ### 普通标注（非 SILAC）
   - 用户说"看一下 scan 1234 的匹配情况"

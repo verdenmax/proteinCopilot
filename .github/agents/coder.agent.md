@@ -128,3 +128,27 @@ pub enum SpectrumIoError {
 3. **MCP Tool 集成**：在 `mcp-server/src/tools.rs` 暴露为 Tool
 4. **测试**：单元测试在模块内，集成测试在 `integration-tests/`
 5. **验证**：`cargo clippy --workspace` 零警告，`cargo test --workspace` 全通过
+
+## spectrum-io 文件读取规范
+
+### 读取器选择（优先级从高到低）
+
+| 场景 | 推荐方式 | 说明 |
+|------|---------|------|
+| MCP Server tool 中读取谱图 | `self.get_or_create_reader(path)` | LRU 缓存（容量 8）+ IndexedMzMLReader |
+| Library crate 中需要 `read_spectrum()` | `create_indexed_reader(path)` | 有 `.mzML.idx` 磁盘缓存 |
+| Library crate 中仅需 `for_each_spectrum()` | `create_indexed_reader(path)` | 索引不影响 streaming，但缓存了元数据 |
+| 测试代码 | `create_reader(&info)` | 测试用小文件，索引开销不值得 |
+
+### 禁止模式
+
+- ❌ 在 MCP tool 中使用 `create_reader()` — 必须用 `get_or_create_reader()`
+- ❌ 使用 `read_all()` 仅为读取单个 scan — 用 `read_spectrum(path, scan_no)` O(1) seek
+- ❌ 使用 `for_each_spectrum()` 仅为查询 scan 元数据 — 用 `list_scan_meta()` 或 `list_ms2_meta()` 从内存索引读取
+
+### 索引体系
+
+- `ScanIndex`：内存 HashMap，scan_number → (byte_offset, RT, ms_level, isolation_window)
+- `.mzML.idx`：PCIX v2 磁盘缓存（46B/entry），首次打开自动创建
+- `reader_cache`：MCP Server LRU 缓存（容量 8），同一文件复用 IndexedMzMLReader
+- `list_scan_meta()`：从 ScanIndex 读取全部 scan 元数据（亚毫秒，零 I/O）
