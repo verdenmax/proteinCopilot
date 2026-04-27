@@ -180,3 +180,18 @@ pub struct RawScan {
     /// Intensity values (parallel to mz_array).
     pub intensity_array: Vec<f64>,
 }
+
+/// Combined result from unified XIC extraction.
+///
+/// Replaces the separate outputs of the old `extract_xic()` and
+/// `extract_xic_with_raw()` functions. Contains XIC traces, raw scan
+/// data for client-side SILAC recomputation, and ion metadata.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct XicUnifiedResult {
+    /// XIC trace data (MS1 precursor + MS2 fragment traces, light + heavy).
+    pub xic_data: XicData,
+    /// Raw peak arrays from scans in the XIC window.
+    pub raw_scans: RawScanData,
+    /// Ion metadata with K/R counts for client-side SILAC calculation.
+    pub ion_metadata: Vec<IonMetadataEntry>,
+}
