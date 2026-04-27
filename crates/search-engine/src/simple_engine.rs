@@ -285,13 +285,12 @@ impl SimpleSearchEngine {
         report("Scanning spectrum summaries", 0.12);
         let mut total_ms2_spectra: u64 = 0;
         for file_path in input_files {
-            let info = protein_copilot_spectrum_io::detect_format(file_path).map_err(|e| {
+            let reader = protein_copilot_spectrum_io::create_indexed_reader(file_path).map_err(|e| {
                 let detail = e.to_string();
                 diagnostics.fail_stage(&detail);
                 diagnostics.set_error(ErrorCategory::InputData, &detail);
                 SearchEngineError::IoError { detail }
             })?;
-            let reader = protein_copilot_spectrum_io::create_reader(&info);
             let summary = reader.read_summary(file_path).map_err(|e| {
                 let detail = e.to_string();
                 diagnostics.fail_stage(&detail);
@@ -315,13 +314,12 @@ impl SimpleSearchEngine {
         let mut psms: Vec<Psm> = Vec::new();
 
         for file_path in input_files {
-            let info = protein_copilot_spectrum_io::detect_format(file_path).map_err(|e| {
+            let reader = protein_copilot_spectrum_io::create_indexed_reader(file_path).map_err(|e| {
                 let detail = e.to_string();
                 diagnostics.fail_stage(&detail);
                 diagnostics.set_error(ErrorCategory::InputData, &detail);
                 SearchEngineError::IoError { detail }
             })?;
-            let reader = protein_copilot_spectrum_io::create_reader(&info);
             let mut handler = |spectrum: Spectrum| {
                 if spectrum.ms_level != MsLevel::MS2 {
                     return Ok(true);

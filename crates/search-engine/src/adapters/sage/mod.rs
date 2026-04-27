@@ -85,15 +85,14 @@ impl SearchEngineAdapter for SageAdapter {
     ) -> Result<SearchResult, CoreError> {
         let mut all_spectra: Vec<Spectrum> = Vec::new();
         for path in input_files {
-            let file_info = protein_copilot_spectrum_io::detect_format(path).map_err(|e| {
+            let reader = protein_copilot_spectrum_io::create_indexed_reader(path).map_err(|e| {
                 CoreError::SearchEngineError {
                     engine: "Sage".into(),
-                    detail: format!("Failed to detect format for {}: {}", path.display(), e),
+                    detail: format!("Failed to create indexed reader for {}: {}", path.display(), e),
                     suggestion: "Check that the input file exists and is a valid mzML/mgf file"
                         .into(),
                 }
             })?;
-            let reader = protein_copilot_spectrum_io::create_reader(&file_info);
             let spectra = reader
                 .read_all(path)
                 .map_err(|e| CoreError::SearchEngineError {
