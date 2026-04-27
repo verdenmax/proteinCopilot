@@ -2538,8 +2538,6 @@ impl ProteinCopilotServer {
 
         let mut render_mode = "annotation";
         if is_mzml {
-            // mzML → first do a lightweight XIC probe. Only collect raw scan
-            // payloads when the XIC is actually worth rendering.
             let xic_params = protein_copilot_xic::ExtractionParams {
                 mz_tolerance: input.extraction_tolerance.unwrap_or(MassTolerance {
                     value: 20.0,
@@ -2551,7 +2549,11 @@ impl ProteinCopilotServer {
                 intensity_rule: protein_copilot_xic::IntensityRule::MaxInWindow,
             };
 
-            match protein_copilot_xic::extract::extract_xic(
+            // Get cached indexed reader for O(1) scan lookups
+            let cached_reader = self.get_or_create_reader(&spectrum_file)?;
+
+            match protein_copilot_xic::extract::extract_xic_unified(
+                cached_reader.as_ref(),
                 &spectrum_file,
                 resolved_scan,
                 &peptide_seq,
@@ -2559,100 +2561,78 @@ impl ProteinCopilotServer {
                 annotation.theoretical_mz,
                 &modifications,
                 &xic_params,
+                20.0,
             ) {
-                Ok(xic_preview) => {
-                    // Check if fragment XIC is meaningful: DDA produces at most
-                    // 1 matching MS2 scan per fragment (unique isolation window),
-                    // while DIA cycles through shared windows → multiple points.
-                    let xic_meaningful = xic_preview
+                Ok(unified_result) => {
+                    let xic_meaningful = unified_result
+                        .xic_data
                         .fragment_xic_traces
                         .first()
                         .map(|t| t.data_points.len() > 1)
                         .unwrap_or(false);
 
                     if xic_meaningful {
-                        match protein_copilot_xic::extract::extract_xic_with_raw(
-                            &spectrum_file,
-                            resolved_scan,
-                            &peptide_seq,
-                            charge,
+                        // Refine precursor_mz from MS1 scan
+                        let mut annotation = annotation.clone();
+                        if let Some(observed) = find_precursor_in_ms1(
+                            &unified_result.raw_scans.ms1_scans,
+                            annotation.retention_time_min,
                             annotation.theoretical_mz,
-                            &modifications,
-                            &xic_params,
                             20.0,
                         ) {
-                            Ok((xic_data, raw_scans, ion_metadata)) => {
-                                // Refine precursor_mz from MS1 scan (DIA window
-                                // center is not the true observed precursor m/z).
-                                let mut annotation = annotation.clone();
-                                if let Some(observed) = find_precursor_in_ms1(
-                                    &raw_scans.ms1_scans,
-                                    annotation.retention_time_min,
-                                    annotation.theoretical_mz,
-                                    20.0, // ppm tolerance
-                                ) {
-                                    annotation.precursor_mz = observed;
-                                    annotation.delta_mass_ppm = (observed
-                                        - annotation.theoretical_mz)
-                                        / annotation.theoretical_mz
-                                        * 1e6;
-                                }
+                            annotation.precursor_mz = observed;
+                            annotation.delta_mass_ppm = (observed
+                                - annotation.theoretical_mz)
+                                / annotation.theoretical_mz
+                                * 1e6;
+                        }
 
-                                // Also refine heavy precursor delta from MS1
-                                if let Some(ref mut ha) = annotation.heavy_annotation {
-                                    let heavy_theo = ha.precursor_mz;
-                                    if let Some(obs_heavy) = find_precursor_in_ms1(
-                                        &raw_scans.ms1_scans,
-                                        annotation.retention_time_min,
-                                        heavy_theo,
-                                        20.0,
-                                    ) {
-                                        ha.delta_mass_ppm = Some(
-                                            (obs_heavy - heavy_theo) / heavy_theo * 1e6,
-                                        );
-                                    } else {
-                                        // No MS1 peak found → mark as unavailable
-                                        ha.delta_mass_ppm = None;
-                                    }
-                                }
-
-                                let unified_data =
-                                    protein_copilot_report::unified_types::UnifiedViewData {
-                                        source_file: source_file.clone(),
-                                        annotation,
-                                        xic: Some(xic_data),
-                                        raw_scans: Some(raw_scans),
-                                        ion_metadata,
-                                        peptide_info: make_peptide_info(
-                                            &peptide_seq,
-                                            charge,
-                                            annotation_theo_mz,
-                                        ),
-                                    };
-
-                                ReportGenerator::render_unified(
-                                    &unified_data,
-                                    &out_path,
-                                    plotly_mode,
-                                )
-                                .map_err(|e| {
-                                    mcp_core_err(protein_copilot_core::error::CoreError::from(e))
-                                })?;
-                                render_mode = "unified+xic";
-                            }
-                            Err(_) => {
-                                render_unified_without_xic()?;
-                                render_mode = "unified";
+                        // Also refine heavy precursor delta from MS1
+                        if let Some(ref mut ha) = annotation.heavy_annotation {
+                            let heavy_theo = ha.precursor_mz;
+                            if let Some(obs_heavy) = find_precursor_in_ms1(
+                                &unified_result.raw_scans.ms1_scans,
+                                annotation.retention_time_min,
+                                heavy_theo,
+                                20.0,
+                            ) {
+                                ha.delta_mass_ppm = Some(
+                                    (obs_heavy - heavy_theo) / heavy_theo * 1e6,
+                                );
+                            } else {
+                                ha.delta_mass_ppm = None;
                             }
                         }
+
+                        let unified_data =
+                            protein_copilot_report::unified_types::UnifiedViewData {
+                                source_file: source_file.clone(),
+                                annotation,
+                                xic: Some(unified_result.xic_data),
+                                raw_scans: Some(unified_result.raw_scans),
+                                ion_metadata: unified_result.ion_metadata,
+                                peptide_info: make_peptide_info(
+                                    &peptide_seq,
+                                    charge,
+                                    annotation_theo_mz,
+                                ),
+                            };
+
+                        ReportGenerator::render_unified(
+                            &unified_data,
+                            &out_path,
+                            plotly_mode,
+                        )
+                        .map_err(|e| {
+                            mcp_core_err(protein_copilot_core::error::CoreError::from(e))
+                        })?;
+                        render_mode = "unified+xic";
                     } else {
-                        // XIC not meaningful (likely DDA) → unified without XIC
                         render_unified_without_xic()?;
                         render_mode = "unified";
                     }
                 }
                 Err(_) => {
-                    // XIC extraction failed → unified without XIC
                     render_unified_without_xic()?;
                     render_mode = "unified";
                 }
@@ -2989,8 +2969,10 @@ impl ProteinCopilotServer {
                 .unwrap_or(protein_copilot_xic::IntensityRule::MaxInWindow),
         };
 
-        // Extract XIC
-        let xic_data = protein_copilot_xic::extract::extract_xic(
+        // Extract XIC via unified (index-planned) path
+        let cached_reader = self.get_or_create_reader(&file_path)?;
+        let unified_result = protein_copilot_xic::extract::extract_xic_unified(
+            cached_reader.as_ref(),
             &file_path,
             resolved_scan,
             &peptide,
@@ -2998,8 +2980,10 @@ impl ProteinCopilotServer {
             precursor_mz,
             &modifications,
             &params,
+            20.0,
         )
         .map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, e.to_string()))?;
+        let xic_data = unified_result.xic_data;
 
         // Render HTML
         let out_path = input
