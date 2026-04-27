@@ -24,6 +24,10 @@ tools:
   - download_database
   - get_database_info
   - diagnose_search
+  - classify_entrapment_hits
+  - analyze_entrapment_stats
+  - find_similar_targets
+  - annotate_provenance
 ---
 
 # 蛋白质质谱搜索助手
@@ -282,6 +286,22 @@ annotate_spectrum(
   pFind .spectra, custom JSON) and match to mzML scans. Returns a run_id for use
   with annotate_spectrum, extract_xic, and generate_summary.
 
+- **classify_entrapment_hits**: 对 trap 数据库 PSM 进行同源性分类。读取搜索结果文件，
+  应用 YAML config 中的 target/trap 规则，消化 target FASTA，将每个 trap PSM 分类为
+  L0（完全匹配）到 L4（无同源目标）。可选 mzml_dir 参数启用碎片离子溯源。
+  输出 classified.tsv、entrapment_report.html 等文件。
+
+- **analyze_entrapment_stats**: 对 classify_entrapment_hits 的输出进行统计分析。
+  返回 level 分布、蛋白家族聚类、delta-mass 分析。用于解释 entrapment 分类结果。
+
+- **find_similar_targets**: 查找与给定肽段序列相似的 target 肽段。使用编辑距离
+  （同长 Hamming、异长 Levenshtein）比对，返回最近匹配及质量差、替换类型标注。
+  用于深入调查单个 trap PSM 的同源性。
+
+- **annotate_provenance**: 单谱图碎片离子来源溯源。生成 mirror plot HTML，
+  显示哪些峰来自 trap 肽段、target 肽段、两者共有（shared）或未匹配（unassigned）。
+  用于可视化验证 trap PSM 的碎片离子归属。
+
 ### DIA Data Workflow
 1. Use `read_spectra` to check if data is DIA (wide isolation windows, median > 5 Da)
 2. Call `extract_dia_precursors` to extract candidate precursors from MS1
@@ -304,8 +324,9 @@ annotate_spectrum(
    - **SILAC（必须传，否则结果错误）**：`extract_xic(run_id=xxx, scan_number=1234, label_type={"Silac": {"heavy_k_delta": 8.014199, "heavy_r_delta": 10.008269}})`
 4. SILAC XIC 输出：MS1 轻+重母离子色谱，MS2 碎片离子双轨色谱（实线轻标/虚线重标）
 
-**⚠️ 性能注意**：`extract_xic` 和 `annotate_spectrum` 内的 XIC 提取都需要全文件流式扫描。
-大文件（>5GB）每次调用耗时 100-150s。`annotate_spectrum` 已包含 XIC，通常不需要额外调用 `extract_xic`。
+**性能**：XIC 提取已索引优化（`extract_xic_unified`），单次调用 ~100ms（索引就绪后）。
+首次打开新 mzML 文件需构建索引（7.5GB 约 8s），索引持久化为 `.mzML.idx` 后永久缓存。
+`annotate_spectrum` 已包含 XIC，通常不需要额外调用 `extract_xic`。批量标注可顺序调用，无需特殊超时。
 
 ### External Results Import Workflow
 1. 用户提供外部搜索结果文件（DIA-NN .parquet, pFind .spectra, 自定义 JSON）
@@ -318,6 +339,28 @@ annotate_spectrum(
 1. Call `extract_spectrum_precursors` with file path and scan number
 2. Review: which MS1 was used, correlation method, extracted precursors
 3. Optionally use `get_spectrum` to see raw peak data
+
+### Entrapment Analysis Workflow
+
+Entrapment 分析用于评估搜索引擎的假阳性控制质量：向数据库中添加已知不存在的 trap 蛋白，
+检查搜索结果中有多少 trap PSM 通过了 FDR 阈值，并分析它们与真实 target 蛋白的同源性。
+
+1. **准备 YAML config**：定义 target/trap 规则（哪些 accession 前缀是 target、哪些是 trap）
+2. **分类**：`classify_entrapment_hits(results_file=xxx, config_file=yyy, target_fasta=zzz)`
+   - 可选：`mzml_dir` 参数启用碎片离子溯源（判断 trap PSM 是否来自嵌合谱图）
+   - 输出 classified.tsv（每个 trap PSM 标注 L0-L4 级别）和 entrapment_report.html
+3. **统计分析**：`analyze_entrapment_stats(classified_file=output/entrapment/classified.tsv)`
+   - 返回 level 分布、蛋白家族聚类、delta-mass 分析
+4. **深入调查**（可选）：
+   - `find_similar_targets(peptide="XXXK", target_fasta=zzz)` — 查找 trap 肽段的同源 target
+   - `annotate_provenance(file_path=xxx.mzML, scan_number=1234, trap_sequence="XXXK")` — 碎片离子溯源可视化
+
+**分类级别说明**：
+- **L0**：trap 肽段在 target 蛋白组中有完全匹配（razor 肽段错误）
+- **L1**：存在 ≤2 个氨基酸替换的 target 同源肽段（近同源假阳性）
+- **L2**：存在同源但替换 >2 的 target 肽段
+- **L3**：有 target 同源蛋白但无肽段级同源
+- **L4**：无任何 target 同源（真正的假阳性）
 
 ## 领域知识
 
