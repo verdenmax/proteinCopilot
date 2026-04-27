@@ -1349,9 +1349,7 @@ impl ProteinCopilotServer {
     ) -> Result<Json<SpectrumSummary>, ErrorData> {
         validate_file_path(&input.file_path)?;
         let path = Path::new(&input.file_path);
-        let info = protein_copilot_spectrum_io::detect_format(path)
-            .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
-        let reader = protein_copilot_spectrum_io::create_reader(&info);
+        let reader = self.get_or_create_reader(path)?;
         let summary = reader
             .read_summary(path)
             .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
@@ -1392,9 +1390,7 @@ impl ProteinCopilotServer {
         } else if let Some(ref fp) = input.file_path {
             validate_file_path(fp)?;
             let path = std::path::Path::new(fp);
-            let info = protein_copilot_spectrum_io::detect_format(path)
-                .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
-            let reader = protein_copilot_spectrum_io::create_reader(&info);
+            let reader = self.get_or_create_reader(path)?;
             reader
                 .read_summary(path)
                 .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?
@@ -1736,9 +1732,7 @@ impl ProteinCopilotServer {
                 .first()
                 .ok_or_else(|| mcp_err(ErrorCode::INVALID_PARAMS, "input_files is empty"))?;
             let path = Path::new(first_file);
-            let info = protein_copilot_spectrum_io::detect_format(path)
-                .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
-            let reader = protein_copilot_spectrum_io::create_reader(&info);
+            let reader = self.get_or_create_reader(path)?;
             let summary = reader
                 .read_summary(path)
                 .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
@@ -1781,8 +1775,7 @@ impl ProteinCopilotServer {
                     ));
                 }
             };
-            if let Ok(info) = protein_copilot_spectrum_io::detect_format(first_path) {
-                let reader = protein_copilot_spectrum_io::create_reader(&info);
+            if let Ok(reader) = self.get_or_create_reader(first_path) {
                 if let Ok(summary) = reader.read_summary(first_path) {
                     if let Some(w) = summary.median_isolation_window_da {
                         if w > DIA_ISOLATION_WINDOW_THRESHOLD_DA {
@@ -2679,9 +2672,7 @@ impl ProteinCopilotServer {
     ) -> Result<Json<DiaExtractionOutput>, ErrorData> {
         validate_file_path(&input.file_path)?;
         let path = Path::new(&input.file_path);
-        let info = protein_copilot_spectrum_io::detect_format(path)
-            .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
-        let reader = protein_copilot_spectrum_io::create_reader(&info);
+        let reader = self.get_or_create_reader(path)?;
         let spectra = reader
             .read_all(path)
             .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
@@ -2770,12 +2761,42 @@ impl ProteinCopilotServer {
         validate_file_path(&input.file_path)?;
         validate_scan_number(input.scan_number)?;
         let path = Path::new(&input.file_path);
-        let info = protein_copilot_spectrum_io::detect_format(path)
+        let reader = self.get_or_create_reader(path)?;
+
+        // Read target MS2 via O(1) indexed seek
+        let target_ms2 = reader
+            .read_spectrum(path, input.scan_number)
             .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
-        let reader = protein_copilot_spectrum_io::create_reader(&info);
-        let spectra = reader
-            .read_all(path)
+        if target_ms2.ms_level != protein_copilot_core::spectrum::MsLevel::MS2 {
+            return Err(mcp_err(
+                ErrorCode::INVALID_PARAMS,
+                format!(
+                    "scan {} is not MS2 (ms_level={:?})",
+                    input.scan_number, target_ms2.ms_level
+                ),
+            ));
+        }
+        let target_rt_min = target_ms2.retention_time_min;
+
+        // Use index to find nearby MS1 scans (±1 minute RT window)
+        let scan_metas = reader
+            .list_scan_meta(path)
             .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
+        const MS1_RT_WINDOW_MIN: f64 = 1.0;
+        let nearby_ms1_scans: Vec<u32> = scan_metas
+            .iter()
+            .filter(|m| m.ms_level == 1 && (m.rt_min - target_rt_min).abs() <= MS1_RT_WINDOW_MIN)
+            .map(|m| m.scan_number)
+            .collect();
+
+        // Read only the needed spectra
+        let mut spectra = Vec::with_capacity(nearby_ms1_scans.len() + 1);
+        spectra.push(target_ms2);
+        for scan_no in &nearby_ms1_scans {
+            if let Ok(s) = reader.read_spectrum(path, *scan_no) {
+                spectra.push(s);
+            }
+        }
 
         let mut extractor = IsotopePatternExtractor::default();
         if let Some(min_c) = input.min_charge {
@@ -3342,9 +3363,7 @@ impl ProteinCopilotServer {
 
         // 2. Read spectrum summary from first file
         let first_path = Path::new(&input.input_files[0]);
-        let info = protein_copilot_spectrum_io::detect_format(first_path)
-            .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
-        let reader = protein_copilot_spectrum_io::create_reader(&info);
+        let reader = self.get_or_create_reader(first_path)?;
         let summary = reader
             .read_summary(first_path)
             .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
