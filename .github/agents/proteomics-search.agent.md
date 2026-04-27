@@ -202,6 +202,21 @@ tools:
 
 当用户想查看某一张谱图的匹配详情时：
 
+### 性能关键：scan number 优先于 RT 查找
+
+**`annotate_spectrum` 内部包含 XIC 提取，XIC 需要全文件流式扫描（大文件 >5GB 耗时 100-150s/次）。**
+因此，标注前获取准确的 scan number 至关重要：
+
+1. **有搜索结果时（最快）**：先 `import_search_results` 或 `run_search` 获取 run_id，然后 `export_results` 得到 PSM 列表（含 scan number）。直接用 `scan_number` 调用标注，跳过 RT 查找。
+2. **手动模式用 scan_number（推荐）**：如果已知 scan number，直接传入。`IndexedMzMLReader` 有磁盘索引缓存（`.mzML.idx`），**单 scan 查找是 O(1) seek**，毫秒级完成。
+3. **RT 查找（最慢，仅作后备）**：`scan_number=0 + retention_time_min` 模式需要先构建/加载索引再二分查找，首次打开大文件可能需要数十秒。
+
+**批量标注时特别注意**：
+- 每次 `annotate_spectrum` 调用都会全文件扫描提取 XIC，N 个肽段 = N 次全文件扫描
+- 对于 7.5GB mzML，12 个肽段 ≈ 25 分钟（每个 ~120s）
+- 优先使用 `export_results` 一次性获取所有 scan number，避免逐个通过 RT 查找
+- MCP client 超时设置（`.mcp.json` 中的 `timeout`）可能不够，大文件建议 ≥ 600s
+
 ### 普通标注（非 SILAC）
   - 用户说"看一下 scan 1234 的匹配情况"
     → 调用 `annotate_spectrum(run_id=xxx, scan_number=1234)`
@@ -284,11 +299,15 @@ annotate_spectrum(
    - **SILAC（必须传，否则结果错误）**：`extract_xic(run_id=xxx, scan_number=1234, label_type={"Silac": {"heavy_k_delta": 8.014199, "heavy_r_delta": 10.008269}})`
 4. SILAC XIC 输出：MS1 轻+重母离子色谱，MS2 碎片离子双轨色谱（实线轻标/虚线重标）
 
+**⚠️ 性能注意**：`extract_xic` 和 `annotate_spectrum` 内的 XIC 提取都需要全文件流式扫描。
+大文件（>5GB）每次调用耗时 100-150s。`annotate_spectrum` 已包含 XIC，通常不需要额外调用 `extract_xic`。
+
 ### External Results Import Workflow
 1. 用户提供外部搜索结果文件（DIA-NN .parquet, pFind .spectra, 自定义 JSON）
 2. 确认 mzML 文件所在目录
 3. 调用 `import_search_results(result_file=xxx, mzml_dir=yyy)`
 4. 使用返回的 run_id 进行后续分析：`annotate_spectrum`、`extract_xic`、`generate_summary`
+5. **批量标注前**：先 `export_results(run_id=xxx, output_dir=yyy)` 导出 PSM.tsv，从中获取每个肽段的 scan number、charge、modifications，然后逐个传入 `annotate_spectrum`（避免 RT 查找，直接用 scan number）
 
 ### Single Spectrum Inspection
 1. Call `extract_spectrum_precursors` with file path and scan number
