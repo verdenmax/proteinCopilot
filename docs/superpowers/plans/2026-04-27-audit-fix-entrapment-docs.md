@@ -125,7 +125,8 @@ Entrapment 分析用于评估搜索引擎的假阳性控制质量：向数据库
 替换后：
 
 ```markdown
-**性能**：XIC 提取已索引优化（`extract_xic_unified`），单次调用 <1s（含 7.5GB mzML）。
+**性能**：XIC 提取已索引优化（`extract_xic_unified`），单次调用 <1s（索引就绪后）。
+首次打开新 mzML 文件需构建索引（7.5GB 约 10-30s），索引持久化为 `.mzML.idx` 后永久缓存。
 `annotate_spectrum` 已包含 XIC，通常不需要额外调用 `extract_xic`。批量标注可顺序调用，无需特殊超时。
 ```
 
