@@ -182,6 +182,7 @@ impl SimpleSearchEngine {
         on_progress: &dyn Fn(SearchProgress),
         diagnostics: &mut SearchDiagnostics,
     ) -> Result<SearchResult, SearchEngineError> {
+        // Keep: feeds SearchProgress.elapsed_sec / MCP client
         let start = Instant::now();
         let run_id = Uuid::new_v4();
 
@@ -353,6 +354,7 @@ impl SimpleSearchEngine {
         report("Reading spectra", 0.15);
         let mut processed_ms2_spectra: u64 = 0;
         let mut psms: Vec<Psm> = Vec::new();
+        // Keep: feeds hot-loop progress logging (rate + ETA)
         let stream_loop_start = Instant::now();
         let stream_progress_interval: u64 = 500;
 
@@ -465,9 +467,16 @@ impl SimpleSearchEngine {
             return Err(SearchEngineError::NoInputSpectra);
         }
         let total_spectra = ms2_spectra.len();
+        if total_spectra > 100_000 {
+            tracing::warn!(
+                spectra = total_spectra,
+                "high spectrum count in memory — consider streaming mode"
+            );
+        }
         let mut psms: Vec<Psm> = Vec::new();
 
         let progress_interval = 500;
+        // Keep: feeds hot-loop progress logging (rate + ETA)
         let loop_start = Instant::now();
         for (i, spectrum) in ms2_spectra.iter().enumerate() {
             if i % 50 == 0 || i + 1 == total_spectra {

@@ -121,6 +121,7 @@ impl SearchEngineAdapter for SageAdapter {
         diagnostics: &mut SearchDiagnostics,
     ) -> Result<SearchResult, CoreError> {
         tracing::info!(engine = "Sage", "sage_search started");
+        // Keep: feeds SearchProgress.elapsed_sec / MCP client
         let start = Instant::now();
         let run_id = Uuid::new_v4();
 

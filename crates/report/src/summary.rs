@@ -77,6 +77,15 @@ pub(crate) fn generate_summary(result: &SearchResult) -> SearchResultSummary {
         "summary generated"
     );
 
+    if identification_rate < 0.10 {
+        tracing::warn!(
+            id_rate = format!("{:.1}%", identification_rate * 100.0),
+            psms_1pct = psms_at_1pct_fdr,
+            total_spectra = total_spectra,
+            "low identification rate — check search parameters or database"
+        );
+    }
+
     SearchResultSummary {
         total_spectra_searched: total_spectra,
         total_psms,

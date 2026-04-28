@@ -1604,6 +1604,7 @@ impl ProteinCopilotServer {
                 });
 
             let handle = tokio::spawn(async move {
+                // Keep: feeds PanicGuard + SearchProgress.elapsed_sec / MCP client
                 let start = Instant::now();
 
                 // Panic guard: on abnormal exit, sets status to "Failed: task panicked"
@@ -1910,6 +1911,7 @@ impl ProteinCopilotServer {
             });
 
         let handle = tokio::spawn(async move {
+            // Keep: feeds PanicGuard + SearchProgress.elapsed_sec / MCP client
             let start = Instant::now();
 
             // Panic guard: on abnormal exit, sets status to "Failed: task panicked"
@@ -3142,6 +3144,7 @@ impl ProteinCopilotServer {
     ) -> Result<Json<ImportResult>, ErrorData> {
         let _span = tracing::info_span!("mcp_tool", name = "import_search_results").entered();
         tracing::info!(result_file = %input.result_file, "started");
+        // Keep: feeds RunMetadata.duration_sec / MCP client
         let start = Instant::now();
         let result_path = PathBuf::from(&input.result_file);
         let mzml_dir = PathBuf::from(&input.mzml_dir);

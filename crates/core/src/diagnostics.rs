@@ -130,6 +130,7 @@ impl SearchDiagnostics {
 
     /// Mark the beginning of a named stage.
     pub fn begin_stage(&mut self, name: &str) {
+        // Keep: feeds SearchDiagnostics stage timing (MCP client-facing)
         self.current_stage_start = Some(Instant::now());
         self.current_stage_name = Some(name.to_string());
     }
