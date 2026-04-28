@@ -5,7 +5,7 @@
 
 use rmcp::transport::stdio;
 use rmcp::ServiceExt;
-use tracing_subscriber::EnvFilter;
+use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 mod history;
 mod tools;
@@ -15,10 +15,36 @@ use tools::ProteinCopilotServer;
 #[tokio::main]
 async fn main() {
     // Initialize tracing (respects RUST_LOG env var)
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env())
-        .with_writer(std::io::stderr)
-        .init();
+    // PROTEIN_LOG_JSON=1 switches to structured JSON output
+    let env_filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new("info"));
+
+    let use_json = std::env::var("PROTEIN_LOG_JSON").map_or(false, |v| v == "1");
+
+    if use_json {
+        tracing_subscriber::registry()
+            .with(env_filter)
+            .with(
+                fmt::layer()
+                    .json()
+                    .with_writer(std::io::stderr)
+                    .with_span_events(fmt::format::FmtSpan::CLOSE)
+                    .with_target(true)
+                    .with_timer(fmt::time::uptime()),
+            )
+            .init();
+    } else {
+        tracing_subscriber::registry()
+            .with(env_filter)
+            .with(
+                fmt::layer()
+                    .with_writer(std::io::stderr)
+                    .with_span_events(fmt::format::FmtSpan::CLOSE)
+                    .with_target(true)
+                    .with_timer(fmt::time::uptime()),
+            )
+            .init();
+    }
 
     tracing::info!("Starting ProteinCopilot MCP Server");
 
