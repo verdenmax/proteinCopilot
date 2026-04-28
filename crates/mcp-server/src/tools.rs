@@ -3279,6 +3279,20 @@ impl ProteinCopilotServer {
             }
         };
 
+        // Apply run_filter for formats that don't handle it internally (e.g. pFind TSV)
+        if let Some(ref filter) = input.run_filter {
+            let before = psms.len();
+            psms.retain(|p| p.raw_name == *filter);
+            if before != psms.len() {
+                tracing::info!(
+                    run_filter = %filter,
+                    before = before,
+                    after = psms.len(),
+                    "applied run_filter to imported PSMs"
+                );
+            }
+        }
+
         if psms.is_empty() {
             return Err(mcp_err(
                 ErrorCode::INVALID_PARAMS,
