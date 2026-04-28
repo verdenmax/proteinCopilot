@@ -1408,7 +1408,13 @@ impl ProteinCopilotServer {
         Parameters(input): Parameters<RecommendParamsInput>,
     ) -> Result<Json<AiDecision<SearchParams>>, ErrorData> {
         let _span = tracing::info_span!("mcp_tool", name = "recommend_params").entered();
-        tracing::info!("started");
+        tracing::info!(
+            file = input.file_path.as_deref().unwrap_or("none"),
+            database = input.database_path.as_deref().unwrap_or("none"),
+            has_summary = input.summary.is_some(),
+            has_hints = input.hints.is_some(),
+            "started"
+        );
         // Get summary: use provided summary or read from file_path
         let summary = if let Some(s) = input.summary {
             s
@@ -1470,6 +1476,13 @@ impl ProteinCopilotServer {
             engine = input.params.as_ref().and_then(|p| p.engine.as_deref()).unwrap_or("auto"),
             files = input.input_files.len(),
             dia_run_id = input.dia_run_id.as_deref().unwrap_or("none"),
+            database = input.params.as_ref().map(|p| p.database_path.as_str()).or(input.database_path.as_deref()).unwrap_or("auto"),
+            enzyme = ?input.params.as_ref().map(|p| &p.enzyme),
+            precursor_tol = ?input.params.as_ref().map(|p| &p.precursor_tolerance),
+            fragment_tol = ?input.params.as_ref().map(|p| &p.fragment_tolerance),
+            missed_cleavages = input.params.as_ref().map(|p| p.missed_cleavages).unwrap_or(0),
+            fixed_mods = input.params.as_ref().map(|p| p.fixed_modifications.len()).unwrap_or(0),
+            var_mods = input.params.as_ref().map(|p| p.variable_modifications.len()).unwrap_or(0),
             "started"
         );
         drop(_enter);
@@ -2184,7 +2197,11 @@ impl ProteinCopilotServer {
         Parameters(input): Parameters<ExportResultsInput>,
     ) -> Result<Json<ExportResultsOutput>, ErrorData> {
         let _span = tracing::info_span!("mcp_tool", name = "export_results").entered();
-        tracing::info!(output_dir = %input.output_dir, "started");
+        tracing::info!(
+            output_dir = %input.output_dir,
+            run_id = input.run_id.as_deref().unwrap_or("direct"),
+            "started"
+        );
         let result = self.get_result(&input.result, &input.run_id)?;
         let output_dir = Path::new(&input.output_dir);
 
@@ -2220,7 +2237,11 @@ impl ProteinCopilotServer {
         Parameters(input): Parameters<ListSearchesInput>,
     ) -> Json<ListSearchesResponse> {
         let _span = tracing::info_span!("mcp_tool", name = "list_searches").entered();
-        tracing::info!("started");
+        tracing::info!(
+            status_filter = input.status_filter.as_deref().unwrap_or("all"),
+            limit = input.limit.unwrap_or(20),
+            "started"
+        );
         let limit = input.limit.unwrap_or(20) as usize;
         let mut entries = crate::history::load_all();
 
@@ -2291,7 +2312,14 @@ impl ProteinCopilotServer {
         Parameters(input): Parameters<AnnotateSpectrumInput>,
     ) -> Result<Json<AnnotateResult>, ErrorData> {
         let _span = tracing::info_span!("mcp_tool", name = "annotate_spectrum").entered();
-        tracing::info!(scan = input.scan_number, "started");
+        tracing::info!(
+            scan = input.scan_number,
+            peptide = input.peptide_sequence.as_deref().unwrap_or("from_psm"),
+            charge = input.charge.unwrap_or(0),
+            run_id = input.run_id.as_deref().unwrap_or("none"),
+            file = input.file_path.as_deref().unwrap_or("none"),
+            "started"
+        );
         use protein_copilot_core::search_params::{MassTolerance, Modification, ToleranceUnit};
 
         // Allow scan_number=0 only when retention_time_min is provided for auto-lookup
@@ -2748,7 +2776,14 @@ impl ProteinCopilotServer {
         Parameters(input): Parameters<ExtractDiaPrecursorsInput>,
     ) -> Result<Json<DiaExtractionOutput>, ErrorData> {
         let _span = tracing::info_span!("mcp_tool", name = "extract_dia_precursors").entered();
-        tracing::info!(file = %input.file_path, "started");
+        tracing::info!(
+            file = %input.file_path,
+            output_mode = %input.output_mode,
+            min_charge = input.min_charge.unwrap_or(2),
+            max_charge = input.max_charge.unwrap_or(5),
+            acquisition_mode = input.acquisition_mode.as_deref().unwrap_or("auto"),
+            "started"
+        );
         validate_file_path(&input.file_path)?;
         let path = Path::new(&input.file_path);
         let reader = self.get_or_create_reader(path)?;
@@ -2964,7 +2999,15 @@ impl ProteinCopilotServer {
         #[allow(unused_variables)] Parameters(input): Parameters<ExtractXicInput>,
     ) -> Result<Json<ExtractXicResult>, ErrorData> {
         let _span = tracing::info_span!("mcp_tool", name = "extract_xic").entered();
-        tracing::info!(scan = input.scan_number, peptide = input.peptide_sequence.as_deref().unwrap_or("from_run"), "started");
+        tracing::info!(
+            scan = input.scan_number,
+            peptide = input.peptide_sequence.as_deref().unwrap_or("from_run"),
+            charge = input.charge.unwrap_or(0),
+            precursor_mz = input.precursor_mz.unwrap_or(0.0),
+            run_id = input.run_id.as_deref().unwrap_or("none"),
+            file = input.file_path.as_deref().unwrap_or("none"),
+            "started"
+        );
         use protein_copilot_core::search_params::{MassTolerance, ToleranceUnit};
 
         // Allow scan_number=0 when retention_time_min is provided
@@ -3143,7 +3186,15 @@ impl ProteinCopilotServer {
         Parameters(input): Parameters<ImportSearchResultsInput>,
     ) -> Result<Json<ImportResult>, ErrorData> {
         let _span = tracing::info_span!("mcp_tool", name = "import_search_results").entered();
-        tracing::info!(result_file = %input.result_file, "started");
+        tracing::info!(
+            result_file = %input.result_file,
+            mzml_dir = %input.mzml_dir,
+            format = %input.format,
+            filter_qvalue = input.filter_qvalue,
+            rt_tolerance_min = input.rt_tolerance_min,
+            run_filter = input.run_filter.as_deref().unwrap_or("none"),
+            "started"
+        );
         // Keep: feeds RunMetadata.duration_sec / MCP client
         let start = Instant::now();
         let result_path = PathBuf::from(&input.result_file);
@@ -3357,7 +3408,12 @@ impl ProteinCopilotServer {
         Parameters(input): Parameters<InferProteinsInput>,
     ) -> Result<Json<InferenceResult>, ErrorData> {
         let _span = tracing::info_span!("mcp_tool", name = "infer_proteins").entered();
-        tracing::info!(run_id = input.run_id.as_deref().unwrap_or("direct"), "started");
+        tracing::info!(
+            run_id = input.run_id.as_deref().unwrap_or("direct"),
+            q_value_threshold = input.q_value_threshold.unwrap_or(0.01),
+            fasta_path = input.fasta_path.as_deref().unwrap_or("none"),
+            "started"
+        );
         // Validate q_value_threshold
         if let Some(q) = input.q_value_threshold {
             if q.is_nan() || q.is_infinite() || !(0.0..=1.0).contains(&q) {
@@ -3448,7 +3504,13 @@ impl ProteinCopilotServer {
     ) -> Result<Json<PrepareSearchOutput>, ErrorData> {
         let _span = tracing::info_span!("mcp_tool", name = "prepare_search");
         let _enter = _span.enter();
-        tracing::info!(files = input.input_files.len(), "started");
+        tracing::info!(
+            files = input.input_files.len(),
+            organism = input.organism.as_deref().unwrap_or("none"),
+            database = input.database_path.as_deref().unwrap_or("auto"),
+            engine = input.engine.as_deref().unwrap_or("auto"),
+            "started"
+        );
         drop(_enter);
         // 1. Validate input_files
         if input.input_files.is_empty() {
@@ -3705,7 +3767,14 @@ impl ProteinCopilotServer {
         Parameters(input): Parameters<ClassifyEntrapmentHitsInput>,
     ) -> Result<Json<ClassifyEntrapmentOutput>, ErrorData> {
         let _span = tracing::info_span!("mcp_tool", name = "classify_entrapment_hits").entered();
-        tracing::info!(results_file = %input.results_file, "started");
+        tracing::info!(
+            results_file = %input.results_file,
+            config_file = %input.config_file,
+            target_fasta = %input.target_fasta,
+            mzml_dir = input.mzml_dir.as_deref().unwrap_or("none"),
+            output_dir = input.output_dir.as_deref().unwrap_or("default"),
+            "started"
+        );
         use protein_copilot_entrapment_analysis::{
             config::EntrapmentConfig,
             loader::{self, ResultFormat},
@@ -3943,7 +4012,12 @@ impl ProteinCopilotServer {
         Parameters(input): Parameters<FindSimilarTargetsInput>,
     ) -> Result<Json<FindSimilarTargetsOutput>, ErrorData> {
         let _span = tracing::info_span!("mcp_tool", name = "find_similar_targets").entered();
-        tracing::info!(peptide = %input.peptide, "started");
+        tracing::info!(
+            peptide = %input.peptide,
+            target_fasta = %input.target_fasta,
+            max_mismatches = input.max_mismatches.unwrap_or(2),
+            "started"
+        );
         use protein_copilot_entrapment_analysis::{
             config::SimilarityConfig,
             digest::TargetDigestIndex,
@@ -4011,7 +4085,14 @@ impl ProteinCopilotServer {
         Parameters(input): Parameters<AnnotateProvenanceInput>,
     ) -> Result<Json<AnnotateProvenanceOutput>, ErrorData> {
         let _span = tracing::info_span!("mcp_tool", name = "annotate_provenance").entered();
-        tracing::info!(scan = input.scan_number, trap_sequence = %input.trap_sequence, "started");
+        tracing::info!(
+            scan = input.scan_number,
+            trap_sequence = %input.trap_sequence,
+            target_sequence = %input.target_sequence,
+            file = %input.file_path,
+            fragment_tolerance_ppm = input.fragment_tolerance_ppm,
+            "started"
+        );
         use protein_copilot_core::search_params::{MassTolerance, ToleranceUnit};
         use protein_copilot_entrapment_analysis::mirror_plot::render_mirror_plot;
         use protein_copilot_entrapment_analysis::provenance::trace_provenance;
