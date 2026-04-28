@@ -6,6 +6,7 @@
 
 pub mod diann_parquet;
 pub mod generic_tsv;
+pub mod pfind_tsv;
 
 use std::path::Path;
 
@@ -23,6 +24,8 @@ pub enum ResultFormat {
     DiannParquet,
     /// Generic tab-/delimiter-separated text format.
     GenericTsv,
+    /// pFind result TSV format (auto-detected via header probe).
+    PFindTsv,
 }
 
 impl ResultFormat {
@@ -40,7 +43,13 @@ impl ResultFormat {
 
         match ext.as_str() {
             "parquet" => Ok(Self::DiannParquet),
-            "tsv" | "txt" => Ok(Self::GenericTsv),
+            "tsv" | "txt" => {
+                if pfind_tsv::detect(path) {
+                    Ok(Self::PFindTsv)
+                } else {
+                    Ok(Self::GenericTsv)
+                }
+            }
             other => Err(EntrapmentError::LoaderError {
                 format: other.to_string(),
                 detail: format!(
@@ -64,6 +73,7 @@ pub fn load_psms(
 ) -> Result<Vec<UnifiedPsm>, EntrapmentError> {
     match format {
         ResultFormat::DiannParquet => diann_parquet::load_diann_parquet(path),
+        ResultFormat::PFindTsv => pfind_tsv::load_pfind_tsv(path),
         ResultFormat::GenericTsv => {
             let default_map = TsvColumnMap::default();
             let map = tsv_config.unwrap_or(&default_map);
