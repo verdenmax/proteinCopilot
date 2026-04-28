@@ -10,6 +10,7 @@ pub mod custom_json;
 pub mod diann;
 pub mod error;
 pub mod pfind;
+pub mod pfind_tsv;
 pub mod scan_matcher;
 pub mod unimod;
 
@@ -91,6 +92,7 @@ pub enum ImportFormat {
     CustomJson,
     DiannParquet,
     PFindSpectra,
+    PFindTsv,
 }
 
 /// Detect format from file extension.
@@ -99,6 +101,15 @@ pub fn detect_format(path: &Path) -> Result<ImportFormat, ResultImportError> {
         Some("json") => Ok(ImportFormat::CustomJson),
         Some("parquet") => Ok(ImportFormat::DiannParquet),
         Some("spectra") => Ok(ImportFormat::PFindSpectra),
+        Some("tsv") | Some("txt") => {
+            if pfind_tsv::detect(path) {
+                Ok(ImportFormat::PFindTsv)
+            } else {
+                Err(ResultImportError::FormatDetectionFailed {
+                    path: path.to_path_buf(),
+                })
+            }
+        }
         _ => Err(ResultImportError::FormatDetectionFailed {
             path: path.to_path_buf(),
         }),
@@ -137,5 +148,23 @@ mod tests {
     #[test]
     fn detect_format_unknown() {
         assert!(detect_format(Path::new("data.csv")).is_err());
+    }
+
+    #[test]
+    fn detect_format_pfind_tsv() {
+        let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/pfind_sample.tsv");
+        if fixture.exists() {
+            assert_eq!(
+                detect_format(&fixture).unwrap(),
+                ImportFormat::PFindTsv
+            );
+        }
+    }
+
+    #[test]
+    fn detect_format_tsv_non_pfind() {
+        // A non-existent .tsv file should fail detection
+        assert!(detect_format(Path::new("/nonexistent/random.tsv")).is_err());
     }
 }

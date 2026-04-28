@@ -19,6 +19,7 @@ tracing = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
 quick-xml = { workspace = true }
+csv = "1"
 regex = "1"
 arrow = { version = "54", default-features = false, features = ["prettyprint"] }
 parquet = { version = "54", default-features = false, features = ["arrow", "zstd", "snap", "lz4"] }
