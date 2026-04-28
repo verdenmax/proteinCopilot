@@ -38,6 +38,7 @@ use protein_copilot_result_import::{
     converter::build_search_result,
     custom_json::CustomJsonParser,
     diann::DiannParser,
+    pfind_tsv::PFindTsvParser,
     scan_matcher::{match_scans, ScanMatcherConfig},
     unimod::UnimodDb,
     ImportFormat, ImportResult, ResultParser,
@@ -630,9 +631,9 @@ struct PreparedDatabaseInfo {
 /// Input for the import_search_results tool.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct ImportSearchResultsInput {
-    /// Path to external search result file (.json, .parquet, .spectra).
+    /// Path to external search result file (.json, .parquet, .spectra, .tsv).
     result_file: String,
-    /// Result file format. 'auto' detects from extension. Options: auto, custom_json, diann_parquet, pfind_spectra.
+    /// Result file format. 'auto' detects from extension. Options: auto, custom_json, diann_parquet, pfind_spectra, pfind_tsv.
     #[serde(default = "default_import_format")]
     format: String,
     /// Directory containing mzML files. File association: raw_name + '.mzML'.
@@ -3240,11 +3241,12 @@ impl ProteinCopilotServer {
             "custom_json" => ImportFormat::CustomJson,
             "diann_parquet" => ImportFormat::DiannParquet,
             "pfind_spectra" => ImportFormat::PFindSpectra,
+            "pfind_tsv" => ImportFormat::PFindTsv,
             other => {
                 return Err(mcp_err(
                     ErrorCode::INVALID_PARAMS,
                     format!(
-                        "unknown format: '{other}'. Supported: auto, custom_json, diann_parquet, pfind_spectra"
+                        "unknown format: '{other}'. Supported: auto, custom_json, diann_parquet, pfind_spectra, pfind_tsv"
                     ),
                 ));
             }
@@ -3267,8 +3269,13 @@ impl ProteinCopilotServer {
                 return Err(mcp_err(
                     ErrorCode::INVALID_PARAMS,
                     "pFind .spectra format import is not yet supported. \
-                     Supported formats: custom_json, diann_parquet",
+                     Supported formats: custom_json, diann_parquet, pfind_tsv",
                 ));
+            }
+            ImportFormat::PFindTsv => {
+                PFindTsvParser
+                    .parse(&result_path, &unimod)
+                    .map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, e.to_string()))?
             }
         };
 
@@ -3279,21 +3286,51 @@ impl ProteinCopilotServer {
             ));
         }
 
-        // Scan matching
-        let config = ScanMatcherConfig {
-            rt_tolerance_min: input.rt_tolerance_min,
-            mzml_dir: mzml_dir.clone(),
-        };
+        // Scan matching — skip if all PSMs already have scan numbers (e.g. pFind TSV)
+        let all_scans_present = psms.iter().all(|p| p.matched_scan.is_some());
 
-        let match_report = match_scans(&mut psms, &config, &|path| {
-            protein_copilot_spectrum_io::create_indexed_reader(path).map_err(|e| {
-                protein_copilot_result_import::ResultImportError::SpectrumIo(format!(
-                    "failed to open {}: {e}",
-                    path.display(),
-                ))
+        let match_report = if all_scans_present {
+            // pFind TSV already has scan numbers — build MatchReport directly
+            let mut per_file = std::collections::HashMap::new();
+            for psm in &psms {
+                let entry = per_file
+                    .entry(psm.raw_name.clone())
+                    .or_insert(protein_copilot_result_import::FileMatchStats {
+                        total: 0,
+                        matched: 0,
+                        ms2_count: 0,
+                    });
+                entry.total += 1;
+                entry.matched += 1;
+            }
+            tracing::info!(
+                psm_count = psms.len(),
+                "all PSMs have scan numbers — skipping RT-based scan matching"
+            );
+            protein_copilot_result_import::MatchReport {
+                total_psms: psms.len(),
+                matched: psms.len(),
+                unmatched: 0,
+                median_rt_delta_min: 0.0,
+                max_rt_delta_min: 0.0,
+                per_file,
+            }
+        } else {
+            // Normal path: RT-based scan matching
+            let config = ScanMatcherConfig {
+                rt_tolerance_min: input.rt_tolerance_min,
+                mzml_dir: mzml_dir.clone(),
+            };
+            match_scans(&mut psms, &config, &|path| {
+                protein_copilot_spectrum_io::create_indexed_reader(path).map_err(|e| {
+                    protein_copilot_result_import::ResultImportError::SpectrumIo(format!(
+                        "failed to open {}: {e}",
+                        path.display(),
+                    ))
+                })
             })
-        })
-        .map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, e.to_string()))?;
+            .map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, e.to_string()))?
+        };
 
         if match_report.matched == 0 {
             return Err(mcp_err(
@@ -3336,6 +3373,7 @@ impl ProteinCopilotServer {
             ImportFormat::CustomJson => "custom_json",
             ImportFormat::DiannParquet => "diann_parquet",
             ImportFormat::PFindSpectra => "pfind_spectra",
+            ImportFormat::PFindTsv => "pfind_tsv",
         };
         let (mut search_result, import_result) =
             build_search_result(&psms, match_report, format_name, mzml_files);
@@ -3788,6 +3826,7 @@ impl ProteinCopilotServer {
         let format = match input.format.as_deref() {
             Some("diann_parquet") => ResultFormat::DiannParquet,
             Some("generic_tsv") => ResultFormat::GenericTsv,
+            Some("pfind_tsv") => ResultFormat::PFindTsv,
             _ => ResultFormat::from_path(std::path::Path::new(&input.results_file))
                 .map_err(|e| ErrorData::new(ErrorCode::INVALID_PARAMS, format!("{e}"), None))?,
         };
