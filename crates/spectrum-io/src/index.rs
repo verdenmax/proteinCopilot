@@ -625,7 +625,8 @@ pub fn build_index_by_byte_scan(path: &Path) -> Result<ScanIndex, SpectrumIoErro
         }
     })?;
 
-    let mut reader = BufReader::with_capacity(256 * 1024, file);
+    const BUF_CAPACITY: usize = 256 * 1024;
+    let mut reader = BufReader::with_capacity(BUF_CAPACITY, file);
     let needle = b"<spectrum ";
     let mut entries: HashMap<u32, ScanMeta> = HashMap::new();
     let mut fallback_scan: u32 = 0;
@@ -653,9 +654,10 @@ pub fn build_index_by_byte_scan(path: &Path) -> Result<ScanIndex, SpectrumIoErro
             let local_pos = search_start + pos;
             let remaining = buf_len - local_pos;
 
-            if remaining < TAG_MIN_CONTENT && buf_len >= TAG_MIN_CONTENT + needle.len() {
-                // Not enough content to parse tag reliably at buffer boundary;
-                // skip and let the overlap bring it back in the next fill.
+            // Only skip near-boundary tags when the buffer is at full capacity,
+            // meaning more data may follow. When `buf_len < BUF_CAPACITY` we are
+            // at the tail of the file — process with whatever bytes remain.
+            if remaining < TAG_MIN_CONTENT && buf_len >= BUF_CAPACITY {
                 break;
             }
 
