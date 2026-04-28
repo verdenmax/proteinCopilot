@@ -3590,7 +3590,7 @@ impl ProteinCopilotServer {
         use protein_copilot_entrapment_analysis::{
             config::EntrapmentConfig,
             loader::{self, ResultFormat},
-            output::{self, RunMetadata},
+            output::{self, EntrapmentRunMetadata},
             EntrapmentAnalyzer,
         };
 
@@ -3650,7 +3650,7 @@ impl ProteinCopilotServer {
         output::write_razor_errors_tsv(&classified, &out_dir.join("razor_errors.tsv"))
             .map_err(|e| ErrorData::new(ErrorCode::INTERNAL_ERROR, format!("{e}"), None))?;
 
-        let metadata = RunMetadata {
+        let metadata = EntrapmentRunMetadata {
             tool_version: env!("CARGO_PKG_VERSION").to_string(),
             run_timestamp: chrono::Utc::now().to_rfc3339(),
             input_file: input.results_file.clone(),
@@ -3733,9 +3733,11 @@ impl ProteinCopilotServer {
             })?
             .clone();
 
-        let level_idx = headers.iter().position(|h| h == "level");
-        let delta_idx = headers.iter().position(|h| h == "delta_mass_da");
-        let target_protein_idx = headers.iter().position(|h| h == "best_target_protein");
+        use protein_copilot_entrapment_analysis::output::columns;
+
+        let level_idx = headers.iter().position(|h| h == columns::LEVEL);
+        let delta_idx = headers.iter().position(|h| h == columns::DELTA_MASS_DA);
+        let target_protein_idx = headers.iter().position(|h| h == columns::BEST_TARGET_PROTEIN);
 
         let mut level_counts = std::collections::HashMap::<String, usize>::new();
         let mut delta_masses: Vec<f64> = Vec::new();

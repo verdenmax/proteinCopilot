@@ -16,7 +16,7 @@ use protein_copilot_entrapment_analysis::config::{EntrapmentConfig, SimilarityCo
 use protein_copilot_entrapment_analysis::digest::TargetDigestIndex;
 use protein_copilot_entrapment_analysis::loader::{self, ResultFormat};
 use protein_copilot_entrapment_analysis::output::{
-    file_sha256, write_classified_tsv, write_razor_errors_tsv, write_run_metadata, RunMetadata,
+    file_sha256, write_classified_tsv, write_razor_errors_tsv, write_run_metadata, EntrapmentRunMetadata,
 };
 use protein_copilot_entrapment_analysis::report;
 use protein_copilot_entrapment_analysis::similarity::classify_single;
@@ -252,7 +252,7 @@ fn run_analyze(
 
     let config_snapshot = serde_json::to_value(&config).unwrap_or(serde_json::Value::Null);
 
-    let metadata = RunMetadata {
+    let metadata = EntrapmentRunMetadata {
         tool_version: env!("CARGO_PKG_VERSION").to_owned(),
         run_timestamp: chrono::Utc::now().to_rfc3339(),
         input_file: results_path.display().to_string(),

@@ -24,7 +24,7 @@ pub struct SearchProgress {
     pub estimated_remaining_sec: Option<f64>,
 
     /// Error classification (set only when status starts with "Failed").
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error_category: Option<crate::diagnostics::ErrorCategory>,
 
     /// Whether detailed diagnostics are available via diagnose_search.
@@ -42,4 +42,30 @@ pub type ProgressCallback = Box<dyn Fn(SearchProgress) + Send + Sync>;
 /// A no-op progress callback for cases where progress reporting is not needed.
 pub fn noop_progress() -> ProgressCallback {
     Box::new(|_| {})
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn search_progress_roundtrip_without_error_category() {
+        let progress = SearchProgress {
+            run_id: Uuid::new_v4(),
+            status: "Running".to_string(),
+            stage: Some("Matching spectra".to_string()),
+            progress_pct: Some(0.5),
+            elapsed_sec: 12.3,
+            estimated_remaining_sec: None,
+            error_category: None,
+            has_diagnostics: false,
+        };
+
+        let json = serde_json::to_string(&progress).unwrap();
+        assert!(!json.contains("error_category"), "None field should be skipped");
+
+        let restored: SearchProgress = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.status, "Running");
+        assert!(restored.error_category.is_none());
+    }
 }

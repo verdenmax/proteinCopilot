@@ -5,7 +5,7 @@
 //! verifies classification levels, provenance counts, chimera flag, and output.
 
 use protein_copilot_entrapment_analysis::config::EntrapmentConfig;
-use protein_copilot_entrapment_analysis::output::{write_classified_tsv, write_run_metadata, RunMetadata};
+use protein_copilot_entrapment_analysis::output::{write_classified_tsv, write_run_metadata, EntrapmentRunMetadata};
 use protein_copilot_entrapment_analysis::provenance::{trace_provenance, IonOrigin};
 use protein_copilot_entrapment_analysis::report;
 use protein_copilot_entrapment_analysis::{
@@ -520,7 +520,7 @@ fn test_e2e_output_files() {
     assert!(html.len() > 100, "HTML report should have substantial content");
 
     // Write run metadata
-    let metadata = RunMetadata {
+    let metadata = EntrapmentRunMetadata {
         tool_version: "test".to_string(),
         run_timestamp: "2025-01-01T00:00:00Z".to_string(),
         input_file: "test.tsv".to_string(),

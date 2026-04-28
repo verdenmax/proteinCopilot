@@ -51,7 +51,7 @@ pub struct TargetIon {
 /// - `MaxInWindow`: m/z of the highest-intensity peak
 /// - `SumInWindow`: m/z of the peak closest to `target_mz`
 /// - `NearestPeak`: m/z of the nearest peak
-pub fn extract_intensity(
+pub(crate) fn extract_intensity(
     target_mz: f64,
     exp_mz: &[f64],
     exp_int: &[f64],
@@ -124,7 +124,7 @@ pub fn extract_intensity(
 ///
 /// Uses fixed tolerances: center m/z within 1.0 Da and width within 20%.
 /// These values are suitable for typical DIA window schemes (e.g., SWATH).
-pub fn same_isolation_window(a: &IsolationWindow, b: &IsolationWindow) -> bool {
+pub(crate) fn same_isolation_window(a: &IsolationWindow, b: &IsolationWindow) -> bool {
     let a_lo = a.target_mz - a.lower_offset;
     let a_hi = a.target_mz + a.upper_offset;
     let b_lo = b.target_mz - b.lower_offset;
@@ -195,7 +195,7 @@ pub fn build_target_ions(
 /// For each target ion, counts the K and R residues in the fragment
 /// (prefix for b-ions, suffix for y-ions) so the browser can compute
 /// heavy m/z shifts client-side.
-pub fn compute_ion_metadata(ions: &[TargetIon], peptide: &str) -> Vec<crate::IonMetadataEntry> {
+pub(crate) fn compute_ion_metadata(ions: &[TargetIon], peptide: &str) -> Vec<crate::IonMetadataEntry> {
     let chars: Vec<char> = peptide.chars().collect();
     let n = chars.len();
 
@@ -258,7 +258,7 @@ fn trim_peaks_to_window(
 /// - Pass 1: `for_each_spectrum()` → stream all spectra, extract intensities
 #[deprecated(note = "Use extract_xic_unified() instead — index-planned reads, single call")]
 #[allow(deprecated)]
-pub fn extract_xic(
+pub(crate) fn extract_xic(
     file_path: &Path,
     target_scan: u32,
     peptide_sequence: &str,
@@ -670,7 +670,7 @@ pub fn extract_xic(
 #[deprecated(note = "Use extract_xic_unified() instead — merged into single call")]
 #[allow(deprecated)]
 #[allow(clippy::too_many_arguments)]
-pub fn extract_xic_with_raw(
+pub(crate) fn extract_xic_with_raw(
     file_path: &Path,
     target_scan: u32,
     peptide_sequence: &str,

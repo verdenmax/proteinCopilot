@@ -22,7 +22,7 @@ use crate::types::{ClassifiedPsm, DiscriminabilityLevel, LevelCounts, PsmGroup};
 ///
 /// Serialised as JSON alongside result files for reproducibility.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RunMetadata {
+pub struct EntrapmentRunMetadata {
     /// Crate version string (from `env!("CARGO_PKG_VERSION")`).
     pub tool_version: String,
     /// ISO 8601 timestamp of the analysis run.
@@ -97,6 +97,36 @@ pub fn file_sha256(path: &Path) -> Result<String, EntrapmentError> {
 /// `substitution_type` is always present (defaults to `None` variant).
 /// Provenance columns (`trap_matched`, `target_matched`, `shared_ions`,
 /// `shared_ratio`, `is_chimeric`) are empty when provenance is not traced.
+/// Column names for the classified entrapment TSV output.
+///
+/// Used by both `write_classified_tsv` (writer) and MCP tool
+/// `analyze_entrapment_stats` (reader) to keep column names in sync.
+pub mod columns {
+    pub const PEPTIDE: &str = "peptide";
+    pub const CHARGE: &str = "charge";
+    pub const PRECURSOR_MZ: &str = "precursor_mz";
+    pub const RETENTION_TIME: &str = "retention_time";
+    pub const SCAN_NUMBER: &str = "scan_number";
+    pub const SPECTRUM_FILE: &str = "spectrum_file";
+    pub const PROTEIN_IDS: &str = "protein_ids";
+    pub const Q_VALUE: &str = "q_value";
+    pub const GROUP: &str = "group";
+    pub const LEVEL: &str = "level";
+    pub const BEST_TARGET_PEPTIDE: &str = "best_target_peptide";
+    pub const BEST_TARGET_PROTEIN: &str = "best_target_protein";
+    pub const MISMATCHES: &str = "mismatches";
+    pub const DELTA_MASS_DA: &str = "delta_mass_da";
+    pub const DIFF_POSITIONS: &str = "diff_positions";
+    pub const SUBSTITUTION_TYPE: &str = "substitution_type";
+    pub const EDIT_DISTANCE: &str = "edit_distance";
+    pub const ALIGNMENT_DETAIL: &str = "alignment_detail";
+    pub const TRAP_MATCHED: &str = "trap_matched";
+    pub const TARGET_MATCHED: &str = "target_matched";
+    pub const SHARED_IONS: &str = "shared_ions";
+    pub const SHARED_RATIO: &str = "shared_ratio";
+    pub const IS_CHIMERIC: &str = "is_chimeric";
+}
+
 pub fn write_classified_tsv(psms: &[ClassifiedPsm], path: &Path) -> Result<(), EntrapmentError> {
     let file = File::create(path).map_err(|e| EntrapmentError::IoError {
         path: path.to_path_buf(),
@@ -106,29 +136,29 @@ pub fn write_classified_tsv(psms: &[ClassifiedPsm], path: &Path) -> Result<(), E
 
     // Header
     wtr.write_record([
-        "peptide",
-        "charge",
-        "precursor_mz",
-        "retention_time",
-        "scan_number",
-        "spectrum_file",
-        "protein_ids",
-        "q_value",
-        "group",
-        "level",
-        "best_target_peptide",
-        "best_target_protein",
-        "mismatches",
-        "delta_mass_da",
-        "diff_positions",
-        "substitution_type",
-        "edit_distance",
-        "alignment_detail",
-        "trap_matched",
-        "target_matched",
-        "shared_ions",
-        "shared_ratio",
-        "is_chimeric",
+        columns::PEPTIDE,
+        columns::CHARGE,
+        columns::PRECURSOR_MZ,
+        columns::RETENTION_TIME,
+        columns::SCAN_NUMBER,
+        columns::SPECTRUM_FILE,
+        columns::PROTEIN_IDS,
+        columns::Q_VALUE,
+        columns::GROUP,
+        columns::LEVEL,
+        columns::BEST_TARGET_PEPTIDE,
+        columns::BEST_TARGET_PROTEIN,
+        columns::MISMATCHES,
+        columns::DELTA_MASS_DA,
+        columns::DIFF_POSITIONS,
+        columns::SUBSTITUTION_TYPE,
+        columns::EDIT_DISTANCE,
+        columns::ALIGNMENT_DETAIL,
+        columns::TRAP_MATCHED,
+        columns::TARGET_MATCHED,
+        columns::SHARED_IONS,
+        columns::SHARED_RATIO,
+        columns::IS_CHIMERIC,
     ])
     .map_err(|e| EntrapmentError::OutputError {
         detail: format!("failed to write TSV header to {}: {e}", path.display()),
@@ -246,7 +276,7 @@ pub fn write_razor_errors_tsv(psms: &[ClassifiedPsm], path: &Path) -> Result<(),
 // ---------------------------------------------------------------------------
 
 /// Write run metadata as pretty-printed JSON (2-space indent).
-pub fn write_run_metadata(metadata: &RunMetadata, path: &Path) -> Result<(), EntrapmentError> {
+pub fn write_run_metadata(metadata: &EntrapmentRunMetadata, path: &Path) -> Result<(), EntrapmentError> {
     let json =
         serde_json::to_string_pretty(metadata).map_err(|e| EntrapmentError::OutputError {
             detail: format!("failed to serialise run metadata: {e}"),
@@ -512,7 +542,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("create temp dir");
         let path = dir.path().join("metadata.json");
 
-        let metadata = RunMetadata {
+        let metadata = EntrapmentRunMetadata {
             tool_version: "0.1.0".to_owned(),
             run_timestamp: "2025-01-15T12:00:00Z".to_owned(),
             input_file: "results.tsv".to_owned(),
