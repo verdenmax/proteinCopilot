@@ -120,6 +120,7 @@ impl SearchEngineAdapter for SageAdapter {
         on_progress: ProgressCallback,
         diagnostics: &mut SearchDiagnostics,
     ) -> Result<SearchResult, CoreError> {
+        tracing::info!(engine = "Sage", "sage_search started");
         let start = Instant::now();
         let run_id = Uuid::new_v4();
 
@@ -142,6 +143,7 @@ impl SearchEngineAdapter for SageAdapter {
         }
 
         let total_spectra = ms2_spectra.len();
+        tracing::info!(spectrum_count = total_spectra, "MS2 spectra filtered");
 
         // Convert Spectrum → sage RawSpectrum
         let raw_spectra: Vec<sage_core::spectrum::RawSpectrum> = ms2_spectra
@@ -519,6 +521,12 @@ impl SearchEngineAdapter for SageAdapter {
             error_category: None,
             has_diagnostics: false,
         });
+
+        tracing::info!(
+            psms = psms.len(),
+            duration_sec = duration,
+            "sage_search complete"
+        );
 
         Ok(SearchResult {
             run_id,

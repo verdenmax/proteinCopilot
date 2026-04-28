@@ -28,6 +28,8 @@ pub struct ScoredPsm {
 /// 2. Walk down: at each position, FDR = decoys_so_far / targets_so_far
 /// 3. Walk back up: enforce monotonicity (q = min(current_fdr, next_q))
 pub fn calculate_fdr(psms: &[ScoredPsm]) -> Result<Vec<(usize, f64)>, FdrError> {
+    let _span = tracing::info_span!("calculate_fdr", psm_count = psms.len()).entered();
+
     if psms.is_empty() {
         return Err(FdrError::NoPsms);
     }
@@ -75,6 +77,14 @@ pub fn calculate_fdr(psms: &[ScoredPsm]) -> Result<Vec<(usize, f64)>, FdrError> 
         .zip(q_values.iter())
         .map(|(psm, &q)| (psm.index, q))
         .collect();
+
+    let passing = result.iter().filter(|(_, q)| *q <= 0.01).count();
+    tracing::info!(
+        target = targets,
+        decoy = decoys,
+        psms_at_1pct = passing,
+        "FDR calculated"
+    );
 
     Ok(result)
 }

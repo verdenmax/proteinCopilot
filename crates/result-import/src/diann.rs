@@ -115,6 +115,10 @@ fn resolve_modification(
 
 impl ResultParser for DiannParser {
     fn parse(&self, path: &Path, unimod: &UnimodDb) -> Result<Vec<ImportedPsm>, ResultImportError> {
+        let _span = tracing::info_span!("parse_diann",
+            file = %path.display(),
+        ).entered();
+
         if !path.exists() {
             return Err(ResultImportError::FileNotFound {
                 path: path.to_path_buf(),

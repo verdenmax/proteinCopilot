@@ -215,60 +215,36 @@ impl SimpleSearchEngine {
         // Step 2: Read FASTA database and digest
         report("Reading FASTA database", 0.02);
         diagnostics.begin_stage("fasta_parsing");
-        let fasta_path = Path::new(&params.database_path);
-        let proteins = parse_fasta(fasta_path).inspect_err(|e| {
-            diagnostics.fail_stage(&e.to_string());
-            diagnostics.set_error(ErrorCategory::Database, &e.to_string());
-        })?;
+        let proteins = {
+            let _span = tracing::info_span!("parse_fasta",
+                path = %params.database_path,
+                protein_count = tracing::field::Empty,
+            ).entered();
+            let fasta_path = Path::new(&params.database_path);
+            let proteins = parse_fasta(fasta_path).inspect_err(|e| {
+                diagnostics.fail_stage(&e.to_string());
+                diagnostics.set_error(ErrorCategory::Database, &e.to_string());
+            })?;
+            tracing::Span::current().record("protein_count", proteins.len() as u64);
+            tracing::info!("FASTA parsed");
+            proteins
+        };
         diagnostics.end_stage(Some(proteins.len() as u64));
 
         report("Digesting proteins", 0.08);
         diagnostics.begin_stage("digestion");
         let mut all_peptides: Vec<DigestedPeptide> = Vec::new();
-        for protein in &proteins {
-            let peptides = digest_with_length(
-                &protein.sequence,
-                &protein.accession,
-                &params.enzyme,
-                params.missed_cleavages,
-                params.min_peptide_length,
-                params.max_peptide_length,
-            );
-            all_peptides.extend(peptides);
-        }
+        {
+            let _span = tracing::info_span!("digest",
+                proteins = proteins.len(),
+                enzyme = ?params.enzyme,
+                peptide_count = tracing::field::Empty,
+            ).entered();
 
-        if all_peptides.is_empty() {
-            let detail = format!(
-                "no candidate peptides generated from {} proteins \
-                 (all peptides may be shorter than {} or longer than {} residues)",
-                proteins.len(),
-                params.min_peptide_length,
-                params.max_peptide_length,
-            );
-            diagnostics.fail_stage(&detail);
-            diagnostics.set_error(ErrorCategory::Database, &detail);
-            return Err(SearchEngineError::ExecutionError { detail });
-        }
-
-        // Generate and digest decoy database if strategy is active
-        if params.decoy_strategy != DecoyStrategy::None {
-            report("Generating decoy database", 0.10);
-            let target_tuples: Vec<(String, String, String)> = proteins
-                .iter()
-                .map(|p| {
-                    (
-                        p.accession.clone(),
-                        p.description.clone(),
-                        p.sequence.clone(),
-                    )
-                })
-                .collect();
-            let decoy_proteins =
-                protein_copilot_fdr::generate_decoys(&target_tuples, params.decoy_strategy);
-            for decoy in &decoy_proteins {
+            for protein in &proteins {
                 let peptides = digest_with_length(
-                    &decoy.sequence,
-                    &decoy.accession,
+                    &protein.sequence,
+                    &protein.accession,
                     &params.enzyme,
                     params.missed_cleavages,
                     params.min_peptide_length,
@@ -276,12 +252,59 @@ impl SimpleSearchEngine {
                 );
                 all_peptides.extend(peptides);
             }
+
+            if all_peptides.is_empty() {
+                let detail = format!(
+                    "no candidate peptides generated from {} proteins \
+                     (all peptides may be shorter than {} or longer than {} residues)",
+                    proteins.len(),
+                    params.min_peptide_length,
+                    params.max_peptide_length,
+                );
+                diagnostics.fail_stage(&detail);
+                diagnostics.set_error(ErrorCategory::Database, &detail);
+                return Err(SearchEngineError::ExecutionError { detail });
+            }
+
+            // Generate and digest decoy database if strategy is active
+            if params.decoy_strategy != DecoyStrategy::None {
+                report("Generating decoy database", 0.10);
+                let target_tuples: Vec<(String, String, String)> = proteins
+                    .iter()
+                    .map(|p| {
+                        (
+                            p.accession.clone(),
+                            p.description.clone(),
+                            p.sequence.clone(),
+                        )
+                    })
+                    .collect();
+                let decoy_proteins =
+                    protein_copilot_fdr::generate_decoys(&target_tuples, params.decoy_strategy);
+                for decoy in &decoy_proteins {
+                    let peptides = digest_with_length(
+                        &decoy.sequence,
+                        &decoy.accession,
+                        &params.enzyme,
+                        params.missed_cleavages,
+                        params.min_peptide_length,
+                        params.max_peptide_length,
+                    );
+                    all_peptides.extend(peptides);
+                }
+            }
+
+            tracing::Span::current().record("peptide_count", all_peptides.len() as u64);
+            tracing::info!("digestion complete");
         }
         diagnostics.end_stage(Some(all_peptides.len() as u64));
 
         // Step 3: Pre-scan file summaries so we can stream spectra during search
         // while preserving progress reporting and final summary counts.
         diagnostics.begin_stage("matching");
+        let _match_span = tracing::info_span!("match_spectra",
+            spectrum_count = tracing::field::Empty,
+        ).entered();
         report("Scanning spectrum summaries", 0.12);
         let mut total_ms2_spectra: u64 = 0;
         for file_path in input_files {
@@ -308,6 +331,8 @@ impl SimpleSearchEngine {
             );
             return Err(SearchEngineError::NoInputSpectra);
         }
+
+        tracing::Span::current().record("spectrum_count", total_ms2_spectra);
 
         report("Reading spectra", 0.15);
         let mut processed_ms2_spectra: u64 = 0;
@@ -351,6 +376,7 @@ impl SimpleSearchEngine {
                     SearchEngineError::IoError { detail }
                 })?;
         }
+        tracing::info!(psm_candidates = psms.len(), "matching complete");
         diagnostics.end_stage(Some(total_ms2_spectra));
 
         self.finalize_search_result(

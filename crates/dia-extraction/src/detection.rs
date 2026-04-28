@@ -36,11 +36,15 @@ pub fn detect_acquisition_mode(spectra: &[Spectrum], threshold_da: f64) -> Acqui
 
     let median = median_f64(&widths);
 
-    if median > threshold_da {
+    let detected_mode = if median > threshold_da {
         AcquisitionMode::DIA
     } else {
         AcquisitionMode::DDA
-    }
+    };
+
+    tracing::info!(mode = ?detected_mode, "acquisition mode detected");
+
+    detected_mode
 }
 
 /// Separates spectra into MS1 and MS2 groups by reference.

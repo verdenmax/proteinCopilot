@@ -77,7 +77,12 @@ impl EntrapmentAnalyzer {
 
     /// Classify a batch of PSMs.
     pub fn classify_all(&self, psms: &[UnifiedPsm]) -> Result<Vec<ClassifiedPsm>, EntrapmentError> {
-        psms.iter().map(|psm| self.classify(psm)).collect()
+        let _span = tracing::info_span!("classify_all", psm_count = psms.len()).entered();
+        let result: Result<Vec<ClassifiedPsm>, EntrapmentError> = psms.iter().map(|psm| self.classify(psm)).collect();
+        if let Ok(ref classified) = result {
+            tracing::info!(classified_count = classified.len(), "entrapment classification complete");
+        }
+        result
     }
 
     /// Compute summary statistics from a set of classified PSMs.

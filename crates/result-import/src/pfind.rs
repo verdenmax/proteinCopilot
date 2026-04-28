@@ -17,6 +17,10 @@ impl ResultParser for PFindParser {
         path: &Path,
         _unimod: &UnimodDb,
     ) -> Result<Vec<ImportedPsm>, ResultImportError> {
+        let _span = tracing::info_span!("parse_pfind",
+            file = %path.display(),
+        ).entered();
+
         if !path.exists() {
             return Err(ResultImportError::FileNotFound {
                 path: path.to_path_buf(),

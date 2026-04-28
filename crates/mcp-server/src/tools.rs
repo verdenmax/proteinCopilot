@@ -1364,12 +1364,15 @@ impl ProteinCopilotServer {
         &self,
         Parameters(input): Parameters<ReadSpectraInput>,
     ) -> Result<Json<SpectrumSummary>, ErrorData> {
+        let _span = tracing::info_span!("mcp_tool", name = "read_spectra").entered();
+        tracing::info!(file = %input.file_path, "started");
         validate_file_path(&input.file_path)?;
         let path = Path::new(&input.file_path);
         let reader = self.get_or_create_reader(path)?;
         let summary = reader
             .read_summary(path)
             .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
+        tracing::info!(ms1 = summary.ms1_count, ms2 = summary.ms2_count, total = summary.total_spectra, "completed");
         Ok(Json(summary))
     }
 
@@ -1382,6 +1385,8 @@ impl ProteinCopilotServer {
         &self,
         Parameters(input): Parameters<GetSpectrumInput>,
     ) -> Result<Json<Spectrum>, ErrorData> {
+        let _span = tracing::info_span!("mcp_tool", name = "get_spectrum").entered();
+        tracing::info!(file = %input.file_path, scan = input.scan_number, "started");
         validate_file_path(&input.file_path)?;
         validate_scan_number(input.scan_number)?;
         let path = Path::new(&input.file_path);
@@ -1389,6 +1394,7 @@ impl ProteinCopilotServer {
         let spectrum = reader
             .read_spectrum(path, input.scan_number)
             .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
+        tracing::info!("completed");
         Ok(Json(spectrum))
     }
 
@@ -1401,6 +1407,8 @@ impl ProteinCopilotServer {
         &self,
         Parameters(input): Parameters<RecommendParamsInput>,
     ) -> Result<Json<AiDecision<SearchParams>>, ErrorData> {
+        let _span = tracing::info_span!("mcp_tool", name = "recommend_params").entered();
+        tracing::info!("started");
         // Get summary: use provided summary or read from file_path
         let summary = if let Some(s) = input.summary {
             s
@@ -1428,6 +1436,7 @@ impl ProteinCopilotServer {
             decision.decision.database_path = db_path.clone();
         }
 
+        tracing::info!(enzyme = ?decision.decision.enzyme, confidence = decision.confidence, "completed");
         Ok(Json(decision))
     }
 
@@ -1437,8 +1446,12 @@ impl ProteinCopilotServer {
         description = "List all built-in search parameter presets (standard, phospho, TMT, SILAC, open search). Each preset includes name, description, parameters, and applicable scenarios."
     )]
     fn list_presets(&self) -> Json<PresetsResponse> {
+        let _span = tracing::info_span!("mcp_tool", name = "list_presets").entered();
+        tracing::info!("started");
+        let presets = ParamRecommender::list_presets();
+        tracing::info!(count = presets.len(), "completed");
         Json(PresetsResponse {
-            presets: ParamRecommender::list_presets(),
+            presets,
         })
     }
 
@@ -1451,6 +1464,15 @@ impl ProteinCopilotServer {
         &self,
         Parameters(input): Parameters<RunSearchInput>,
     ) -> Result<Json<SearchStarted>, ErrorData> {
+        let _span = tracing::info_span!("mcp_tool", name = "run_search");
+        let _enter = _span.enter();
+        tracing::info!(
+            engine = input.params.as_ref().and_then(|p| p.engine.as_deref()).unwrap_or("auto"),
+            files = input.input_files.len(),
+            dia_run_id = input.dia_run_id.as_deref().unwrap_or("none"),
+            "started"
+        );
+        drop(_enter);
         // -------------------------------------------------------------------
         // DIA branch: use cached spectra from extract_dia_precursors
         // -------------------------------------------------------------------
@@ -1710,6 +1732,7 @@ impl ProteinCopilotServer {
                 }
             }
 
+            tracing::info!(run_id = %run_id, "completed");
             return Ok(Json(SearchStarted {
                 run_id: run_id.to_string(),
                 status: "Running".to_string(),
@@ -2011,6 +2034,7 @@ impl ProteinCopilotServer {
             }
         }
 
+        tracing::info!(run_id = %run_id, "completed");
         Ok(Json(SearchStarted {
             run_id: run_id.to_string(),
             status: "Running".to_string(),
@@ -2028,6 +2052,8 @@ impl ProteinCopilotServer {
         &self,
         Parameters(input): Parameters<GetSearchStatusInput>,
     ) -> Result<Json<SearchProgress>, ErrorData> {
+        let _span = tracing::info_span!("mcp_tool", name = "get_search_status").entered();
+        tracing::info!(run_id = %input.run_id, "started");
         let id = Uuid::parse_str(&input.run_id)
             .map_err(|_| mcp_err(ErrorCode::INVALID_PARAMS, "invalid run_id format"))?;
         let cache = self
@@ -2037,6 +2063,7 @@ impl ProteinCopilotServer {
         let state = cache
             .get(&id)
             .ok_or_else(|| mcp_err(ErrorCode::INVALID_PARAMS, format!("run_id {id} not found — it may have been evicted from the cache (max 100 recent runs are kept)")))?;
+        tracing::info!(status = %state.progress.status, "completed");
         Ok(Json(state.progress.clone()))
     }
 
@@ -2049,6 +2076,8 @@ impl ProteinCopilotServer {
         &self,
         Parameters(input): Parameters<CancelSearchInput>,
     ) -> Result<Json<SearchProgress>, ErrorData> {
+        let _span = tracing::info_span!("mcp_tool", name = "cancel_search").entered();
+        tracing::info!(run_id = %input.run_id, "started");
         let id = Uuid::parse_str(&input.run_id)
             .map_err(|_| mcp_err(ErrorCode::INVALID_PARAMS, "invalid run_id format"))?;
         let mut cache = self
@@ -2075,6 +2104,7 @@ impl ProteinCopilotServer {
         state.progress.stage = Some("Cancelled by user".to_string());
         state.progress.progress_pct = None;
 
+        tracing::info!("completed");
         Ok(Json(state.progress.clone()))
     }
 
@@ -2084,6 +2114,10 @@ impl ProteinCopilotServer {
         description = "Check available search engines and their health status. Returns engine name, version, supported features, and availability."
     )]
     async fn check_engine(&self) -> Json<EngineStatus> {
+        let _span = tracing::info_span!("mcp_tool", name = "check_engine");
+        let _enter = _span.enter();
+        tracing::info!("started");
+        drop(_enter);
         let engines = self.registry.list_available();
         let all_engines = engines.clone();
         if let Some(info) = engines.first() {
@@ -2099,12 +2133,14 @@ impl ProteinCopilotServer {
                     reason: "engine not found".to_string(),
                 }
             };
+            tracing::info!("completed");
             Json(EngineStatus {
                 engine: info.clone(),
                 status,
                 all_engines,
             })
         } else {
+            tracing::info!("completed");
             Json(EngineStatus {
                 engine: protein_copilot_core::engine::EngineInfo {
                     name: "none".to_string(),
@@ -2128,8 +2164,12 @@ impl ProteinCopilotServer {
         &self,
         Parameters(input): Parameters<GenerateSummaryInput>,
     ) -> Result<Json<SearchResultSummary>, ErrorData> {
+        let _span = tracing::info_span!("mcp_tool", name = "generate_summary").entered();
+        tracing::info!(run_id = input.run_id.as_deref().unwrap_or("direct"), "started");
         let result = self.get_result(&input.result, &input.run_id)?;
-        Ok(Json(ReportGenerator::generate_summary(&result)))
+        let summary = ReportGenerator::generate_summary(&result);
+        tracing::info!(psms_1pct = summary.psms_at_1pct_fdr, id_rate = summary.identification_rate, "completed");
+        Ok(Json(summary))
     }
 
     /// Export search results as TSV and JSON files.
@@ -2141,6 +2181,8 @@ impl ProteinCopilotServer {
         &self,
         Parameters(input): Parameters<ExportResultsInput>,
     ) -> Result<Json<ExportResultsOutput>, ErrorData> {
+        let _span = tracing::info_span!("mcp_tool", name = "export_results").entered();
+        tracing::info!(output_dir = %input.output_dir, "started");
         let result = self.get_result(&input.result, &input.run_id)?;
         let output_dir = Path::new(&input.output_dir);
 
@@ -2159,6 +2201,7 @@ impl ProteinCopilotServer {
             "run_metadata.json".to_string(),
         ];
 
+        tracing::info!("completed");
         Ok(Json(ExportResultsOutput {
             output_dir: output_dir.display().to_string(),
             files,
@@ -2174,6 +2217,8 @@ impl ProteinCopilotServer {
         &self,
         Parameters(input): Parameters<ListSearchesInput>,
     ) -> Json<ListSearchesResponse> {
+        let _span = tracing::info_span!("mcp_tool", name = "list_searches").entered();
+        tracing::info!("started");
         let limit = input.limit.unwrap_or(20) as usize;
         let mut entries = crate::history::load_all();
 
@@ -2230,6 +2275,7 @@ impl ProteinCopilotServer {
         }
         entries.sort_by(|a, b| b.created_at.cmp(&a.created_at));
         entries.truncate(limit);
+        tracing::info!(count = entries.len(), "completed");
         Json(ListSearchesResponse { searches: entries })
     }
 
@@ -2242,6 +2288,8 @@ impl ProteinCopilotServer {
         &self,
         Parameters(input): Parameters<AnnotateSpectrumInput>,
     ) -> Result<Json<AnnotateResult>, ErrorData> {
+        let _span = tracing::info_span!("mcp_tool", name = "annotate_spectrum").entered();
+        tracing::info!(scan = input.scan_number, "started");
         use protein_copilot_core::search_params::{MassTolerance, Modification, ToleranceUnit};
 
         // Allow scan_number=0 only when retention_time_min is provided for auto-lookup
@@ -2662,6 +2710,7 @@ impl ProteinCopilotServer {
                 .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
         }
 
+        tracing::info!("completed");
         Ok(Json(AnnotateResult {
             output_path: out_path.display().to_string(),
             scan_number: annotation.scan_number,
@@ -2696,6 +2745,8 @@ impl ProteinCopilotServer {
         &self,
         Parameters(input): Parameters<ExtractDiaPrecursorsInput>,
     ) -> Result<Json<DiaExtractionOutput>, ErrorData> {
+        let _span = tracing::info_span!("mcp_tool", name = "extract_dia_precursors").entered();
+        tracing::info!(file = %input.file_path, "started");
         validate_file_path(&input.file_path)?;
         let path = Path::new(&input.file_path);
         let reader = self.get_or_create_reader(path)?;
@@ -2772,6 +2823,7 @@ impl ProteinCopilotServer {
             ),
         };
 
+        tracing::info!(candidates = output.total_precursors_extracted, "completed");
         Ok(Json(output))
     }
 
@@ -2784,6 +2836,8 @@ impl ProteinCopilotServer {
         &self,
         Parameters(input): Parameters<ExtractSpectrumPrecursorsInput>,
     ) -> Result<Json<SingleSpectrumExtractionResult>, ErrorData> {
+        let _span = tracing::info_span!("mcp_tool", name = "extract_spectrum_precursors").entered();
+        tracing::info!(file = %input.file_path, scan = input.scan_number, "started");
         validate_file_path(&input.file_path)?;
         validate_scan_number(input.scan_number)?;
         let path = Path::new(&input.file_path);
@@ -2847,6 +2901,7 @@ impl ProteinCopilotServer {
         let result = extract_single_spectrum_precursors(&spectra, input.scan_number, &extractor)
             .map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, e))?;
 
+        tracing::info!(candidates = result.precursors.len(), "completed");
         Ok(Json(result))
     }
 
@@ -2859,6 +2914,8 @@ impl ProteinCopilotServer {
         &self,
         Parameters(input): Parameters<GetDiaCacheStatusInput>,
     ) -> Result<Json<DiaCacheStatusOutput>, ErrorData> {
+        let _span = tracing::info_span!("mcp_tool", name = "get_dia_cache_status").entered();
+        tracing::info!(dia_run_id = %input.dia_run_id, "started");
         let dia_uuid = Uuid::parse_str(&input.dia_run_id)
             .map_err(|_| mcp_err(ErrorCode::INVALID_PARAMS, "invalid dia_run_id format"))?;
 
@@ -2891,6 +2948,7 @@ impl ProteinCopilotServer {
             },
         };
 
+        tracing::info!(location = %output.location, "completed");
         Ok(Json(output))
     }
 
@@ -2903,6 +2961,8 @@ impl ProteinCopilotServer {
         &self,
         #[allow(unused_variables)] Parameters(input): Parameters<ExtractXicInput>,
     ) -> Result<Json<ExtractXicResult>, ErrorData> {
+        let _span = tracing::info_span!("mcp_tool", name = "extract_xic").entered();
+        tracing::info!(scan = input.scan_number, peptide = input.peptide_sequence.as_deref().unwrap_or("from_run"), "started");
         use protein_copilot_core::search_params::{MassTolerance, ToleranceUnit};
 
         // Allow scan_number=0 when retention_time_min is provided
@@ -3060,6 +3120,7 @@ impl ProteinCopilotServer {
             ms2_count,
         );
 
+        tracing::info!("completed");
         Ok(Json(ExtractXicResult {
             output_path: out_path.to_string_lossy().to_string(),
             ms2_scan_count: ms2_count,
@@ -3079,6 +3140,8 @@ impl ProteinCopilotServer {
         &self,
         Parameters(input): Parameters<ImportSearchResultsInput>,
     ) -> Result<Json<ImportResult>, ErrorData> {
+        let _span = tracing::info_span!("mcp_tool", name = "import_search_results").entered();
+        tracing::info!(result_file = %input.result_file, "started");
         let start = Instant::now();
         let result_path = PathBuf::from(&input.result_file);
         let mzml_dir = PathBuf::from(&input.mzml_dir);
@@ -3273,6 +3336,7 @@ impl ProteinCopilotServer {
         };
         crate::history::save_entry(&history_entry);
 
+        tracing::info!(psm_count = import_result.imported_psm_count, "completed");
         Ok(Json(import_result))
     }
 
@@ -3289,6 +3353,8 @@ impl ProteinCopilotServer {
         &self,
         Parameters(input): Parameters<InferProteinsInput>,
     ) -> Result<Json<InferenceResult>, ErrorData> {
+        let _span = tracing::info_span!("mcp_tool", name = "infer_proteins").entered();
+        tracing::info!(run_id = input.run_id.as_deref().unwrap_or("direct"), "started");
         // Validate q_value_threshold
         if let Some(q) = input.q_value_threshold {
             if q.is_nan() || q.is_infinite() || !(0.0..=1.0).contains(&q) {
@@ -3352,6 +3418,7 @@ impl ProteinCopilotServer {
             .count() as u64;
         let unique_peptides_used = map.peptide_to_proteins.len() as u64;
 
+        tracing::info!(groups = groups_at_1pct, "completed");
         Ok(Json(InferenceResult {
             groups: final_groups,
             razor_map,
@@ -3376,6 +3443,10 @@ impl ProteinCopilotServer {
         &self,
         Parameters(input): Parameters<PrepareSearchInput>,
     ) -> Result<Json<PrepareSearchOutput>, ErrorData> {
+        let _span = tracing::info_span!("mcp_tool", name = "prepare_search");
+        let _enter = _span.enter();
+        tracing::info!(files = input.input_files.len(), "started");
+        drop(_enter);
         // 1. Validate input_files
         if input.input_files.is_empty() {
             return Err(mcp_err(
@@ -3484,6 +3555,7 @@ impl ProteinCopilotServer {
             ));
         }
 
+        tracing::info!(engine = params.engine.as_deref().unwrap_or("auto"), database = %params.database_path, "completed");
         Ok(Json(PrepareSearchOutput {
             params,
             reasoning: decision.explanation,
@@ -3508,9 +3580,14 @@ impl ProteinCopilotServer {
         &self,
         Parameters(input): Parameters<ListDatabasesInput>,
     ) -> Result<Json<ListDatabasesOutput>, ErrorData> {
+        let _span = tracing::info_span!("mcp_tool", name = "list_databases").entered();
+        tracing::info!("started");
         let cache_dir = default_cache_dir(&input.cache_dir);
         protein_copilot_fasta_db::list_databases(&cache_dir)
-            .map(|dbs| Json(ListDatabasesOutput { databases: dbs }))
+            .map(|dbs| {
+                tracing::info!(count = dbs.len(), "completed");
+                Json(ListDatabasesOutput { databases: dbs })
+            })
             .map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, e))
     }
 
@@ -3523,12 +3600,17 @@ impl ProteinCopilotServer {
         &self,
         Parameters(input): Parameters<DownloadDatabaseInput>,
     ) -> Result<Json<protein_copilot_fasta_db::DownloadDatabaseResult>, ErrorData> {
+        let _span = tracing::info_span!("mcp_tool", name = "download_database");
+        let _enter = _span.enter();
+        tracing::info!(database_id = %input.database_id, "started");
+        drop(_enter);
         let cache_dir = default_cache_dir(&input.cache_dir);
         let force = input.force.unwrap_or(false);
-        protein_copilot_fasta_db::download_database(&input.database_id, &cache_dir, force)
+        let result = protein_copilot_fasta_db::download_database(&input.database_id, &cache_dir, force)
             .await
-            .map(Json)
-            .map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, e))
+            .map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, e))?;
+        tracing::info!(path = %result.path, "completed");
+        Ok(Json(result))
     }
 
     /// Get detailed info about a cached FASTA database.
@@ -3540,10 +3622,13 @@ impl ProteinCopilotServer {
         &self,
         Parameters(input): Parameters<GetDatabaseInfoInput>,
     ) -> Result<Json<protein_copilot_fasta_db::DatabaseInfo>, ErrorData> {
+        let _span = tracing::info_span!("mcp_tool", name = "get_database_info").entered();
+        tracing::info!(database_id = %input.database_id, "started");
         let cache_dir = default_cache_dir(&input.cache_dir);
-        protein_copilot_fasta_db::get_database_info(&input.database_id, &cache_dir)
-            .map(Json)
-            .map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, e))
+        let info = protein_copilot_fasta_db::get_database_info(&input.database_id, &cache_dir)
+            .map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, e))?;
+        tracing::info!("completed");
+        Ok(Json(info))
     }
 
     /// Get diagnostic report for a search run.
@@ -3555,6 +3640,8 @@ impl ProteinCopilotServer {
         &self,
         Parameters(input): Parameters<DiagnoseSearchInput>,
     ) -> Result<Json<DiagnoseSearchOutput>, ErrorData> {
+        let _span = tracing::info_span!("mcp_tool", name = "diagnose_search").entered();
+        tracing::info!(run_id = %input.run_id, "started");
         let id = Uuid::parse_str(&input.run_id).map_err(|_| {
             mcp_err(
                 ErrorCode::INVALID_PARAMS,
@@ -3588,6 +3675,7 @@ impl ProteinCopilotServer {
             )
         })?;
 
+        tracing::info!("completed");
         Ok(Json(DiagnoseSearchOutput {
             run_id: input.run_id,
             overall_status: state.progress.status.clone(),
@@ -3613,6 +3701,8 @@ impl ProteinCopilotServer {
         &self,
         Parameters(input): Parameters<ClassifyEntrapmentHitsInput>,
     ) -> Result<Json<ClassifyEntrapmentOutput>, ErrorData> {
+        let _span = tracing::info_span!("mcp_tool", name = "classify_entrapment_hits").entered();
+        tracing::info!(results_file = %input.results_file, "started");
         use protein_copilot_entrapment_analysis::{
             config::EntrapmentConfig,
             loader::{self, ResultFormat},
@@ -3725,6 +3815,7 @@ impl ProteinCopilotServer {
                 .collect(),
         };
 
+        tracing::info!("completed");
         Ok(Json(output))
     }
 
@@ -3736,6 +3827,8 @@ impl ProteinCopilotServer {
         &self,
         Parameters(input): Parameters<AnalyzeEntrapmentStatsInput>,
     ) -> Result<Json<AnalyzeEntrapmentStatsOutput>, ErrorData> {
+        let _span = tracing::info_span!("mcp_tool", name = "analyze_entrapment_stats").entered();
+        tracing::info!(classified_file = %input.classified_file, "started");
         let path = std::path::Path::new(&input.classified_file);
         let mut rdr = csv::ReaderBuilder::new()
             .delimiter(b'\t')
@@ -3834,6 +3927,7 @@ impl ProteinCopilotServer {
             top_protein_families: top_families,
         };
 
+        tracing::info!("completed");
         Ok(Json(stats))
     }
 
@@ -3845,6 +3939,8 @@ impl ProteinCopilotServer {
         &self,
         Parameters(input): Parameters<FindSimilarTargetsInput>,
     ) -> Result<Json<FindSimilarTargetsOutput>, ErrorData> {
+        let _span = tracing::info_span!("mcp_tool", name = "find_similar_targets").entered();
+        tracing::info!(peptide = %input.peptide, "started");
         use protein_copilot_entrapment_analysis::{
             config::SimilarityConfig,
             digest::TargetDigestIndex,
@@ -3895,6 +3991,7 @@ impl ProteinCopilotServer {
             alignment_detail: result.alignment_detail,
         };
 
+        tracing::info!(matches = output.index_size, "completed");
         Ok(Json(output))
     }
 
@@ -3910,6 +4007,8 @@ impl ProteinCopilotServer {
         &self,
         Parameters(input): Parameters<AnnotateProvenanceInput>,
     ) -> Result<Json<AnnotateProvenanceOutput>, ErrorData> {
+        let _span = tracing::info_span!("mcp_tool", name = "annotate_provenance").entered();
+        tracing::info!(scan = input.scan_number, trap_sequence = %input.trap_sequence, "started");
         use protein_copilot_core::search_params::{MassTolerance, ToleranceUnit};
         use protein_copilot_entrapment_analysis::mirror_plot::render_mirror_plot;
         use protein_copilot_entrapment_analysis::provenance::trace_provenance;
@@ -3998,6 +4097,7 @@ impl ProteinCopilotServer {
             )
         })?;
 
+        tracing::info!("completed");
         Ok(Json(AnnotateProvenanceOutput {
             output_file: output_path.display().to_string(),
             trap_sequence: provenance.trap_sequence,

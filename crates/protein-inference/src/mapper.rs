@@ -42,6 +42,8 @@ pub fn build_peptide_protein_map(
     psms: &[Psm],
     q_value_threshold: Option<f64>,
 ) -> Result<PeptideProteinMap, InferenceError> {
+    let _span = tracing::info_span!("build_peptide_protein_map", psm_count = psms.len()).entered();
+
     if psms.is_empty() {
         return Err(InferenceError::NoPsms);
     }
@@ -104,6 +106,12 @@ pub fn build_peptide_protein_map(
     if !has_target {
         return Err(InferenceError::NoTargetProteins);
     }
+
+    tracing::info!(
+        peptides = peptide_to_proteins.len(),
+        proteins = protein_to_peptides.len(),
+        "peptide-protein map built"
+    );
 
     Ok(PeptideProteinMap {
         peptide_to_proteins,

@@ -35,6 +35,10 @@ struct IndistinguishableGroup {
 /// # Errors
 /// Returns [`InferenceError::NoPsms`] if the input map has no proteins.
 pub fn run_parsimony(map: &PeptideProteinMap) -> Result<Vec<ProteinGroup>, InferenceError> {
+    let _span = tracing::info_span!("run_parsimony",
+        protein_count = map.protein_to_peptides.len(),
+    ).entered();
+
     if map.protein_to_peptides.is_empty() {
         return Err(InferenceError::NoPsms);
     }

@@ -108,6 +108,9 @@ impl TargetDigestIndex {
         max_missed_cleavages: u32,
         max_edit_distance: u16,
     ) -> Result<Self, EntrapmentError> {
+        let _span = tracing::info_span!("digest_from_fasta",
+            file = %path.display(),
+        ).entered();
         let entries = parse_fasta(path).map_err(|e| EntrapmentError::FastaError {
             path: path.to_path_buf(),
             detail: e.to_string(),
@@ -265,6 +268,7 @@ impl TargetDigestIndex {
         len_tolerance: usize,
         _config: &SimilarityConfig,
     ) -> Vec<SimilarityMatch> {
+        let _span = tracing::info_span!("find_similar", query_len = query.len()).entered();
         let query_len = query.len();
         let min_len = query_len.saturating_sub(len_tolerance);
         let max_len = query_len + len_tolerance;

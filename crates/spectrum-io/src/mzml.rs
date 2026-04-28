@@ -518,7 +518,14 @@ impl SpectrumReader for MzMLReader {
             acc.observe(&s);
             Ok(true)
         })?;
-        acc.into_summary(path, SpectrumFormat::MzML)
+        let summary = acc.into_summary(path, SpectrumFormat::MzML)?;
+        tracing::info!(
+            ms1 = summary.ms1_count,
+            ms2 = summary.ms2_count,
+            total = summary.total_spectra,
+            "summary complete"
+        );
+        Ok(summary)
     }
 
     fn read_spectrum(&self, path: &Path, scan: u32) -> Result<Spectrum, SpectrumIoError> {

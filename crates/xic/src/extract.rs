@@ -1186,6 +1186,11 @@ pub fn extract_xic_unified(
     params: &ExtractionParams,
     ms1_mz_window_da: f64,
 ) -> Result<crate::XicUnifiedResult, XicError> {
+    let _span = tracing::info_span!("extract_xic",
+        peptide = %peptide_sequence,
+        scan = target_scan,
+    ).entered();
+
     if peptide_sequence.is_empty() {
         return Err(XicError::InvalidPeptide {
             detail: "peptide sequence is empty".to_string(),
@@ -1676,6 +1681,8 @@ pub fn extract_xic_unified(
             .collect::<Vec<_>>(),
         peptide_sequence,
     );
+
+    tracing::info!("XIC extraction complete");
 
     Ok(crate::XicUnifiedResult {
         xic_data,

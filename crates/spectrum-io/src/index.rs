@@ -612,6 +612,14 @@ pub fn build_index_by_byte_scan(path: &Path) -> Result<ScanIndex, SpectrumIoErro
     use std::fs::File;
     use std::io::BufReader;
 
+    let file_size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+    let span = tracing::info_span!("byte_scan_index",
+        file = %path.display(),
+        file_size_mb = file_size / (1024 * 1024),
+        scan_count = tracing::field::Empty,
+    );
+    let _enter = span.enter();
+
     let file = File::open(path).map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
             SpectrumIoError::FileNotFound {
@@ -702,6 +710,8 @@ pub fn build_index_by_byte_scan(path: &Path) -> Result<ScanIndex, SpectrumIoErro
         reader.consume(consumed);
     }
 
+    span.record("scan_count", entries.len());
+    tracing::info!("byte scan complete");
     Ok(ScanIndex::from_meta(entries, IndexSource::BuiltFromScan))
 }
 

@@ -23,6 +23,8 @@ pub struct FastaEntry {
 
 /// Parses a FASTA file and returns all protein entries.
 pub fn parse_fasta(path: &Path) -> Result<Vec<FastaEntry>, SearchEngineError> {
+    let _span = tracing::info_span!("parse_fasta", path = %path.display()).entered();
+
     let file = File::open(path).map_err(|e| SearchEngineError::FastaError {
         path: path.to_path_buf(),
         detail: format!("cannot open file: {e}"),
@@ -72,6 +74,8 @@ pub fn parse_fasta(path: &Path) -> Result<Vec<FastaEntry>, SearchEngineError> {
             detail: "no protein entries found".to_string(),
         });
     }
+
+    tracing::info!(proteins = entries.len(), "FASTA parsed");
 
     Ok(entries)
 }

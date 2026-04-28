@@ -23,6 +23,8 @@ fn normalize_il(s: &str) -> String {
 /// Mutates groups in-place to set the `coverage` field. Proteins not found
 /// in the FASTA map get coverage = None.
 pub fn calculate_coverage(groups: &mut [ProteinGroup], fasta_sequences: &HashMap<String, String>) {
+    let _span = tracing::info_span!("calculate_coverage", group_count = groups.len()).entered();
+
     for group in groups.iter_mut() {
         let Some(fasta_seq) = fasta_sequences.get(&group.leader_accession) else {
             tracing::warn!(
@@ -66,6 +68,9 @@ pub fn calculate_coverage(groups: &mut [ProteinGroup], fasta_sequences: &HashMap
         let covered_count = covered.iter().filter(|&&b| b).count();
         group.coverage = Some(covered_count as f64 / seq_len as f64);
     }
+
+    let with_coverage = groups.iter().filter(|g| g.coverage.is_some()).count();
+    tracing::info!(groups_with_coverage = with_coverage, "coverage calculation complete");
 }
 
 #[cfg(test)]

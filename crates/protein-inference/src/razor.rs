@@ -22,6 +22,8 @@ pub fn assign_razor_peptides(
     groups: &mut [ProteinGroup],
     #[allow(unused)] map: &PeptideProteinMap,
 ) -> HashMap<String, String> {
+    let _span = tracing::info_span!("assign_razor_peptides", group_count = groups.len()).entered();
+
     let mut razor_map: HashMap<String, String> = HashMap::new();
 
     if groups.len() <= 1 {

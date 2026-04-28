@@ -44,6 +44,10 @@ pub fn match_scans(
     config: &ScanMatcherConfig,
     reader_factory: &ReaderFactory,
 ) -> Result<MatchReport, ResultImportError> {
+    let _span = tracing::info_span!("match_scans",
+        psm_count = psms.len(),
+    ).entered();
+
     // Group PSMs by raw_name
     let mut groups: HashMap<String, Vec<usize>> = HashMap::new();
     for (i, psm) in psms.iter().enumerate() {
@@ -127,6 +131,8 @@ pub fn match_scans(
         all_rt_deltas[all_rt_deltas.len() / 2]
     };
     let max_rt_delta = all_rt_deltas.last().copied().unwrap_or(0.0);
+
+    tracing::info!(matched = total_matched, unmatched = total_unmatched, "scan matching complete");
 
     Ok(MatchReport {
         total_psms: psms.len(),
