@@ -23,7 +23,13 @@ fn normalize_il(s: &str) -> String {
 /// Mutates groups in-place to set the `coverage` field. Proteins not found
 /// in the FASTA map get coverage = None.
 pub fn calculate_coverage(groups: &mut [ProteinGroup], fasta_sequences: &HashMap<String, String>) {
-    for group in groups.iter_mut() {
+    let _span = tracing::info_span!("calculate_coverage", group_count = groups.len()).entered();
+
+    let total = groups.len();
+    let progress_interval: usize = 500;
+    let loop_start = std::time::Instant::now();
+
+    for (i, group) in groups.iter_mut().enumerate() {
         let Some(fasta_seq) = fasta_sequences.get(&group.leader_accession) else {
             tracing::warn!(
                 accession = %group.leader_accession,
@@ -65,7 +71,23 @@ pub fn calculate_coverage(groups: &mut [ProteinGroup], fasta_sequences: &HashMap
 
         let covered_count = covered.iter().filter(|&&b| b).count();
         group.coverage = Some(covered_count as f64 / seq_len as f64);
+
+        if (i + 1) % progress_interval == 0 || i + 1 == total {
+            let elapsed = loop_start.elapsed().as_secs_f64();
+            let rate = if elapsed > 0.0 { (i + 1) as f64 / elapsed } else { 0.0 };
+            let eta = if rate > 0.0 { (total - i - 1) as f64 / rate } else { 0.0 };
+            tracing::info!(
+                progress = i + 1,
+                total = total,
+                rate = format!("{:.0}/s", rate),
+                eta_sec = format!("{:.1}", eta),
+                "calculating coverage"
+            );
+        }
     }
+
+    let with_coverage = groups.iter().filter(|g| g.coverage.is_some()).count();
+    tracing::info!(groups_with_coverage = with_coverage, "coverage calculation complete");
 }
 
 #[cfg(test)]

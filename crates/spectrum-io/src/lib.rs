@@ -74,11 +74,20 @@ pub fn detect_format(path: &Path) -> Result<SpectrumFileInfo, SpectrumIoError> {
         source: e,
     })?;
 
-    Ok(SpectrumFileInfo {
+    let info = SpectrumFileInfo {
         path: path.to_string_lossy().to_string(),
         format,
         file_size_bytes: metadata.len(),
-    })
+    };
+
+    tracing::info!(
+        path = %path.display(),
+        format = ?format,
+        file_size_bytes = metadata.len(),
+        "format detected"
+    );
+
+    Ok(info)
 }
 
 /// Creates the appropriate [`SpectrumReader`] for the given file info.

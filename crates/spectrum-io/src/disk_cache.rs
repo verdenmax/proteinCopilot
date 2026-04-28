@@ -262,8 +262,8 @@ pub fn load_index(
 
     tracing::info!(
         path = %mzml_path.display(),
-        entries = entry_count,
-        "disk cache hit: loaded scan index v2 from .idx file"
+        scans = entry_count,
+        "disk cache loaded"
     );
 
     Ok(Some(ScanIndex::from_meta(
@@ -341,9 +341,9 @@ pub fn save_index(
 
     tracing::info!(
         path = %mzml_path.display(),
-        entries = entry_count,
+        scans = entry_count,
         cache_path = %cache_path.display(),
-        "saved scan index v2 to .idx cache"
+        "disk cache saved"
     );
 
     Ok(())

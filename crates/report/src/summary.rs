@@ -7,6 +7,8 @@ use protein_copilot_core::util::compute_median;
 
 /// Generates a statistical summary with optional FDR filtering.
 pub(crate) fn generate_summary(result: &SearchResult) -> SearchResultSummary {
+    let _span = tracing::info_span!("generate_summary").entered();
+
     let total_spectra = result.summary.total_spectra_searched;
     let total_psms = result.psms.len() as u64;
 
@@ -68,6 +70,21 @@ pub(crate) fn generate_summary(result: &SearchResult) -> SearchResultSummary {
 
     let median_score = compute_median(&scores);
     let median_delta = compute_median(&delta_ppms);
+
+    tracing::info!(
+        id_rate = format!("{:.1}%", identification_rate * 100.0),
+        psms_1pct = psms_at_1pct_fdr,
+        "summary generated"
+    );
+
+    if identification_rate < 0.10 {
+        tracing::warn!(
+            id_rate = format!("{:.1}%", identification_rate * 100.0),
+            psms_1pct = psms_at_1pct_fdr,
+            total_spectra = total_spectra,
+            "low identification rate — check search parameters or database"
+        );
+    }
 
     SearchResultSummary {
         total_spectra_searched: total_spectra,

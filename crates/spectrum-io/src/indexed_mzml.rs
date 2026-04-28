@@ -42,15 +42,27 @@ impl IndexedMzMLReader {
     /// After layer 2 succeeds, the result is persisted to disk cache
     /// so future opens are instant.
     pub fn open(path: &Path) -> Result<Self, SpectrumIoError> {
+        let file_size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+        let span = tracing::info_span!("open_indexed_reader",
+            file = %path.display(),
+            file_size_mb = file_size / (1024 * 1024),
+            index_source = tracing::field::Empty,
+            scan_count = tracing::field::Empty,
+        );
+        let _enter = span.enter();
+
         // Layer 1: Try disk cache
         if let Ok((file_size, file_mtime)) = crate::disk_cache::file_metadata(path) {
             match crate::disk_cache::load_index(path, file_size, file_mtime) {
                 Ok(Some(cached_index)) => {
+                    span.record("index_source", "disk_cache");
+                    span.record("scan_count", cached_index.len());
                     tracing::info!(
                         path = %path.display(),
                         scans = cached_index.len(),
                         "loaded index from disk cache"
                     );
+                    tracing::info!("indexed reader opened");
                     return Ok(Self {
                         index: cached_index,
                         path: path.to_path_buf(),
@@ -69,6 +81,9 @@ impl IndexedMzMLReader {
         // which makes find_by_rt() unusable (all ms_level=0, all rt=0).
         let index = build_index_by_byte_scan(path)?;
 
+        span.record("index_source", "byte_scan");
+        span.record("scan_count", index.len());
+
         // Persist to disk cache for future opens (non-fatal if it fails)
         if let Ok((file_size, file_mtime)) = crate::disk_cache::file_metadata(path) {
             if let Err(e) = crate::disk_cache::save_index(path, &index, file_size, file_mtime) {
@@ -76,6 +91,7 @@ impl IndexedMzMLReader {
             }
         }
 
+        tracing::info!("indexed reader opened");
         Ok(Self {
             index,
             path: path.to_path_buf(),

@@ -28,7 +28,7 @@ async-trait = "0.1"
 
 # Observability
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
 # XML / binary parsing
 quick-xml = "0.37"

@@ -344,6 +344,11 @@ pub fn annotate_spectrum(
     is_protein_nterm: bool,
     is_protein_cterm: bool,
 ) -> Result<SpectrumAnnotation, SearchEngineError> {
+    let _span = tracing::info_span!("annotate_spectrum",
+        scan = spectrum.scan_number,
+        peptide = %peptide_sequence,
+        charge = charge,
+    ).entered();
     // --- Validation ---
     if charge <= 0 {
         return Err(SearchEngineError::ExecutionError {

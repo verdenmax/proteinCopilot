@@ -33,7 +33,14 @@ pub fn digest(
     enzyme: &Enzyme,
     missed_cleavages: u32,
 ) -> Vec<DigestedPeptide> {
-    digest_with_length(sequence, protein_accession, enzyme, missed_cleavages, 6, 50)
+    let _span = tracing::info_span!("digest",
+        protein = %protein_accession,
+        enzyme = ?enzyme,
+        missed_cleavages = missed_cleavages,
+    ).entered();
+    let result = digest_with_length(sequence, protein_accession, enzyme, missed_cleavages, 6, 50);
+    tracing::info!(peptides = result.len(), "digestion complete");
+    result
 }
 
 /// Digests a protein sequence with configurable peptide length range.

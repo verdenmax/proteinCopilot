@@ -77,7 +77,28 @@ impl EntrapmentAnalyzer {
 
     /// Classify a batch of PSMs.
     pub fn classify_all(&self, psms: &[UnifiedPsm]) -> Result<Vec<ClassifiedPsm>, EntrapmentError> {
-        psms.iter().map(|psm| self.classify(psm)).collect()
+        let _span = tracing::info_span!("classify_all", psm_count = psms.len()).entered();
+        let total = psms.len();
+        let progress_interval: usize = 500;
+        let loop_start = std::time::Instant::now();
+        let mut result = Vec::with_capacity(total);
+        for (i, psm) in psms.iter().enumerate() {
+            result.push(self.classify(psm)?);
+            if (i + 1) % progress_interval == 0 || i + 1 == total {
+                let elapsed = loop_start.elapsed().as_secs_f64();
+                let rate = if elapsed > 0.0 { (i + 1) as f64 / elapsed } else { 0.0 };
+                let eta = if rate > 0.0 { (total - i - 1) as f64 / rate } else { 0.0 };
+                tracing::info!(
+                    progress = i + 1,
+                    total = total,
+                    rate = format!("{:.0}/s", rate),
+                    eta_sec = format!("{:.1}", eta),
+                    "classifying PSMs"
+                );
+            }
+        }
+        tracing::info!(classified_count = result.len(), "entrapment classification complete");
+        Ok(result)
     }
 
     /// Compute summary statistics from a set of classified PSMs.

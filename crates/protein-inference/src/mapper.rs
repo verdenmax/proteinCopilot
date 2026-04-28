@@ -42,6 +42,8 @@ pub fn build_peptide_protein_map(
     psms: &[Psm],
     q_value_threshold: Option<f64>,
 ) -> Result<PeptideProteinMap, InferenceError> {
+    let _span = tracing::info_span!("build_peptide_protein_map", psm_count = psms.len()).entered();
+
     if psms.is_empty() {
         return Err(InferenceError::NoPsms);
     }
@@ -50,7 +52,11 @@ pub fn build_peptide_protein_map(
     let mut protein_to_peptides: HashMap<String, HashSet<String>> = HashMap::new();
     let mut peptide_best_score: HashMap<String, f64> = HashMap::new();
 
-    for psm in psms {
+    let total = psms.len();
+    let progress_interval: usize = 5000;
+    let loop_start = std::time::Instant::now();
+
+    for (i, psm) in psms.iter().enumerate() {
         // Filter by q-value threshold when provided.
         // PSMs without a q-value are kept (conservative: don't discard unscored PSMs).
         if let Some(threshold) = q_value_threshold {
@@ -86,6 +92,19 @@ pub fn build_peptide_protein_map(
                 }
             })
             .or_insert(psm.score);
+
+        if (i + 1) % progress_interval == 0 || i + 1 == total {
+            let elapsed = loop_start.elapsed().as_secs_f64();
+            let rate = if elapsed > 0.0 { (i + 1) as f64 / elapsed } else { 0.0 };
+            let eta = if rate > 0.0 { (total - i - 1) as f64 / rate } else { 0.0 };
+            tracing::info!(
+                progress = i + 1,
+                total = total,
+                rate = format!("{:.0}/s", rate),
+                eta_sec = format!("{:.1}", eta),
+                "building peptide map"
+            );
+        }
     }
 
     // Classify decoy status: a peptide is decoy iff ALL its proteins are decoy
@@ -104,6 +123,12 @@ pub fn build_peptide_protein_map(
     if !has_target {
         return Err(InferenceError::NoTargetProteins);
     }
+
+    tracing::info!(
+        peptides = peptide_to_proteins.len(),
+        proteins = protein_to_peptides.len(),
+        "peptide-protein map built"
+    );
 
     Ok(PeptideProteinMap {
         peptide_to_proteins,

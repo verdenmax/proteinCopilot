@@ -21,10 +21,14 @@ pub fn correlate_ms1_ms2(
         return vec![None; ms2_spectra.len()];
     }
 
-    ms2_spectra
+    let result: Vec<Option<usize>> = ms2_spectra
         .iter()
         .map(|ms2| correlate_single(ms1_spectra, ms2))
-        .collect()
+        .collect();
+
+    tracing::info!(ms1 = ms1_spectra.len(), ms2 = ms2_spectra.len(), "MS1-MS2 correlation complete");
+
+    result
 }
 
 /// Correlates a single MS2 spectrum to an MS1 using the three-level fallback.

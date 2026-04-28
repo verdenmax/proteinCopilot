@@ -11,6 +11,7 @@ protein-copilot-core = { workspace = true }
 serde = { workspace = true }
 schemars = { workspace = true }
 thiserror = { workspace = true }
+tracing = { workspace = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }

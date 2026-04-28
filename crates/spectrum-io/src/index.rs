@@ -611,6 +611,16 @@ fn extract_meta_from_region(region: &[u8]) -> (f64, u8, Option<(f64, f64, f64)>)
 pub fn build_index_by_byte_scan(path: &Path) -> Result<ScanIndex, SpectrumIoError> {
     use std::fs::File;
     use std::io::BufReader;
+    use std::time::Instant;
+
+    let file_size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+    let span = tracing::info_span!("byte_scan_index",
+        file = %path.display(),
+        file_size_mb = file_size / (1024 * 1024),
+        scan_count = tracing::field::Empty,
+    );
+    let _enter = span.enter();
+    let scan_start = Instant::now();
 
     let file = File::open(path).map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
@@ -686,6 +696,9 @@ pub fn build_index_by_byte_scan(path: &Path) -> Result<ScanIndex, SpectrumIoErro
                     abs_pos
                 );
             }
+            if entries.len() % 5000 == 0 {
+                tracing::info!(count = entries.len(), "scanning for spectra");
+            }
             search_start = local_pos + needle.len();
         }
 
@@ -700,6 +713,20 @@ pub fn build_index_by_byte_scan(path: &Path) -> Result<ScanIndex, SpectrumIoErro
         };
         global_pos += consumed as u64;
         reader.consume(consumed);
+    }
+
+    span.record("scan_count", entries.len());
+    tracing::info!("byte scan complete");
+
+    let scan_elapsed = scan_start.elapsed().as_secs_f64();
+    if scan_elapsed > 10.0 {
+        let file_size_gb = file_size as f64 / (1024.0 * 1024.0 * 1024.0);
+        tracing::warn!(
+            elapsed_sec = format!("{:.1}", scan_elapsed),
+            file_size_gb = format!("{:.1}", file_size_gb),
+            scans = entries.len(),
+            "slow index rebuild"
+        );
     }
 
     Ok(ScanIndex::from_meta(entries, IndexSource::BuiltFromScan))

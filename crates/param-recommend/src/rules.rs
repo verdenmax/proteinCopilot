@@ -86,6 +86,13 @@ pub(crate) fn recommend(
         summary.rt_range_min[1],
     );
 
+    tracing::info!(
+        enzyme = ?base.enzyme,
+        precursor_tol = ?base.precursor_tolerance,
+        confidence = ?confidence,
+        "parameters recommended"
+    );
+
     Ok(AiDecision {
         decision: base,
         confidence,

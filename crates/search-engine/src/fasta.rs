@@ -23,6 +23,8 @@ pub struct FastaEntry {
 
 /// Parses a FASTA file and returns all protein entries.
 pub fn parse_fasta(path: &Path) -> Result<Vec<FastaEntry>, SearchEngineError> {
+    let _span = tracing::info_span!("parse_fasta", path = %path.display()).entered();
+
     let file = File::open(path).map_err(|e| SearchEngineError::FastaError {
         path: path.to_path_buf(),
         detail: format!("cannot open file: {e}"),
@@ -32,6 +34,8 @@ pub fn parse_fasta(path: &Path) -> Result<Vec<FastaEntry>, SearchEngineError> {
     let mut entries = Vec::new();
     let mut current_header: Option<String> = None;
     let mut current_seq = String::new();
+    let fasta_progress_interval = 5000;
+    let fasta_loop_start = std::time::Instant::now();
 
     for line_result in reader.lines() {
         let line = line_result.map_err(|e| SearchEngineError::FastaError {
@@ -49,6 +53,17 @@ pub fn parse_fasta(path: &Path) -> Result<Vec<FastaEntry>, SearchEngineError> {
             if let Some(ref h) = current_header {
                 if !current_seq.is_empty() {
                     entries.push(build_entry(h, &current_seq));
+
+                    let count = entries.len();
+                    if count % fasta_progress_interval == 0 {
+                        let elapsed = fasta_loop_start.elapsed().as_secs_f64();
+                        let rate = if elapsed > 0.0 { count as f64 / elapsed } else { 0.0 };
+                        tracing::info!(
+                            progress = count,
+                            rate = format!("{:.0}/s", rate),
+                            "parsing proteins"
+                        );
+                    }
                 }
             }
             current_header = Some(header.to_string());
@@ -72,6 +87,8 @@ pub fn parse_fasta(path: &Path) -> Result<Vec<FastaEntry>, SearchEngineError> {
             detail: "no protein entries found".to_string(),
         });
     }
+
+    tracing::info!(proteins = entries.len(), "FASTA parsed");
 
     Ok(entries)
 }

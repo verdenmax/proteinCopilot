@@ -10,6 +10,7 @@ description = "FDR calculation and decoy database generation for ProteinCopilot"
 protein-copilot-core = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true }
+tracing = { workspace = true }
 rand = { version = "0.8", features = ["std"] }
 
 [dev-dependencies]
