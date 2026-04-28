@@ -241,7 +241,10 @@ impl SimpleSearchEngine {
                 peptide_count = tracing::field::Empty,
             ).entered();
 
-            for protein in &proteins {
+            let digest_total = proteins.len();
+            let digest_progress_interval = 1000;
+            let digest_loop_start = Instant::now();
+            for (di, protein) in proteins.iter().enumerate() {
                 let peptides = digest_with_length(
                     &protein.sequence,
                     &protein.accession,
@@ -251,6 +254,19 @@ impl SimpleSearchEngine {
                     params.max_peptide_length,
                 );
                 all_peptides.extend(peptides);
+
+                if (di + 1) % digest_progress_interval == 0 || di + 1 == digest_total {
+                    let elapsed = digest_loop_start.elapsed().as_secs_f64();
+                    let rate = if elapsed > 0.0 { (di + 1) as f64 / elapsed } else { 0.0 };
+                    let eta = if rate > 0.0 { (digest_total - di - 1) as f64 / rate } else { 0.0 };
+                    tracing::info!(
+                        progress = di + 1,
+                        total = digest_total,
+                        rate = format!("{:.0}/s", rate),
+                        eta_sec = format!("{:.1}", eta),
+                        "digesting proteins"
+                    );
+                }
             }
 
             if all_peptides.is_empty() {
@@ -337,6 +353,8 @@ impl SimpleSearchEngine {
         report("Reading spectra", 0.15);
         let mut processed_ms2_spectra: u64 = 0;
         let mut psms: Vec<Psm> = Vec::new();
+        let stream_loop_start = Instant::now();
+        let stream_progress_interval: u64 = 500;
 
         for file_path in input_files {
             let reader = protein_copilot_spectrum_io::create_indexed_reader(file_path).map_err(|e| {
@@ -364,6 +382,20 @@ impl SimpleSearchEngine {
                 }
 
                 Self::collect_psms_for_spectrum(&spectrum, params, &all_peptides, &mut psms);
+
+                if processed_ms2_spectra % stream_progress_interval == 0 || processed_ms2_spectra == total_ms2_spectra {
+                    let elapsed = stream_loop_start.elapsed().as_secs_f64();
+                    let rate = if elapsed > 0.0 { processed_ms2_spectra as f64 / elapsed } else { 0.0 };
+                    let eta = if rate > 0.0 { (total_ms2_spectra - processed_ms2_spectra) as f64 / rate } else { 0.0 };
+                    tracing::info!(
+                        progress = processed_ms2_spectra,
+                        total = total_ms2_spectra,
+                        rate = format!("{:.0}/s", rate),
+                        eta_sec = format!("{:.1}", eta),
+                        "matching spectra"
+                    );
+                }
+
                 Ok(true)
             };
 
@@ -435,6 +467,8 @@ impl SimpleSearchEngine {
         let total_spectra = ms2_spectra.len();
         let mut psms: Vec<Psm> = Vec::new();
 
+        let progress_interval = 500;
+        let loop_start = Instant::now();
         for (i, spectrum) in ms2_spectra.iter().enumerate() {
             if i % 50 == 0 || i + 1 == total_spectra {
                 let pct = 0.15 + 0.75 * (i as f64 / total_spectra.max(1) as f64);
@@ -445,6 +479,19 @@ impl SimpleSearchEngine {
             }
 
             Self::collect_psms_for_spectrum(spectrum, params, &all_peptides, &mut psms);
+
+            if (i + 1) % progress_interval == 0 || i + 1 == total_spectra {
+                let elapsed = loop_start.elapsed().as_secs_f64();
+                let rate = if elapsed > 0.0 { (i + 1) as f64 / elapsed } else { 0.0 };
+                let eta = if rate > 0.0 { (total_spectra - i - 1) as f64 / rate } else { 0.0 };
+                tracing::info!(
+                    progress = i + 1,
+                    total = total_spectra,
+                    rate = format!("{:.0}/s", rate),
+                    eta_sec = format!("{:.1}", eta),
+                    "matching spectra"
+                );
+            }
         }
         diagnostics.end_stage(Some(total_spectra as u64));
 
@@ -547,7 +594,10 @@ impl SearchEngineAdapter for SimpleSearchEngine {
         report("Digesting proteins", 0.08);
         diagnostics.begin_stage("digestion");
         let mut all_peptides: Vec<DigestedPeptide> = Vec::new();
-        for protein in &proteins {
+        let digest_total2 = proteins.len();
+        let digest_progress_interval2 = 1000;
+        let digest_loop_start2 = Instant::now();
+        for (di, protein) in proteins.iter().enumerate() {
             let peptides = digest_with_length(
                 &protein.sequence,
                 &protein.accession,
@@ -557,6 +607,19 @@ impl SearchEngineAdapter for SimpleSearchEngine {
                 params.max_peptide_length,
             );
             all_peptides.extend(peptides);
+
+            if (di + 1) % digest_progress_interval2 == 0 || di + 1 == digest_total2 {
+                let elapsed = digest_loop_start2.elapsed().as_secs_f64();
+                let rate = if elapsed > 0.0 { (di + 1) as f64 / elapsed } else { 0.0 };
+                let eta = if rate > 0.0 { (digest_total2 - di - 1) as f64 / rate } else { 0.0 };
+                tracing::info!(
+                    progress = di + 1,
+                    total = digest_total2,
+                    rate = format!("{:.0}/s", rate),
+                    eta_sec = format!("{:.1}", eta),
+                    "digesting proteins"
+                );
+            }
         }
 
         if all_peptides.is_empty() {

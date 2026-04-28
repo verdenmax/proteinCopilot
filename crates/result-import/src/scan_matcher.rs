@@ -58,6 +58,10 @@ pub fn match_scans(
     let mut all_rt_deltas: Vec<f64> = Vec::new();
     let mut total_matched = 0usize;
     let mut total_unmatched = 0usize;
+    let total_psm_count = psms.len();
+    let progress_interval: usize = 1000;
+    let loop_start = std::time::Instant::now();
+    let mut processed_count: usize = 0;
 
     for (raw_name, indices) in &groups {
         let mzml_path = config.mzml_dir.join(format!("{raw_name}.mzML"));
@@ -108,6 +112,19 @@ pub fn match_scans(
                 file_matched += 1;
             } else {
                 file_unmatched += 1;
+            }
+            processed_count += 1;
+            if processed_count % progress_interval == 0 || processed_count == total_psm_count {
+                let elapsed = loop_start.elapsed().as_secs_f64();
+                let rate = if elapsed > 0.0 { processed_count as f64 / elapsed } else { 0.0 };
+                let eta = if rate > 0.0 { (total_psm_count - processed_count) as f64 / rate } else { 0.0 };
+                tracing::info!(
+                    progress = processed_count,
+                    total = total_psm_count,
+                    rate = format!("{:.0}/s", rate),
+                    eta_sec = format!("{:.1}", eta),
+                    "matching scans"
+                );
             }
         }
 

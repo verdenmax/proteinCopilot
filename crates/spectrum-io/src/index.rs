@@ -694,6 +694,9 @@ pub fn build_index_by_byte_scan(path: &Path) -> Result<ScanIndex, SpectrumIoErro
                     abs_pos
                 );
             }
+            if entries.len() % 5000 == 0 {
+                tracing::info!(count = entries.len(), "scanning for spectra");
+            }
             search_start = local_pos + needle.len();
         }
 

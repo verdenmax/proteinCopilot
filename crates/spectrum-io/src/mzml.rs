@@ -423,6 +423,9 @@ where
                         let spectrum = builder.build(path)?;
                         let keep_going = handler(spectrum)?;
                         count += 1;
+                        if count % 1000 == 0 {
+                            tracing::info!(count, "streaming spectra");
+                        }
                         if !keep_going {
                             return Ok(count);
                         }

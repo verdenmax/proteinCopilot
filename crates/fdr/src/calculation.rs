@@ -52,7 +52,11 @@ pub fn calculate_fdr(psms: &[ScoredPsm]) -> Result<Vec<(usize, f64)>, FdrError> 
     let mut decoys: u64 = 0;
     let mut raw_fdrs: Vec<f64> = Vec::with_capacity(sorted.len());
 
-    for psm in &sorted {
+    let total = sorted.len();
+    let progress_interval: usize = 5000;
+    let loop_start = std::time::Instant::now();
+
+    for (i, psm) in sorted.iter().enumerate() {
         if psm.is_decoy {
             decoys += 1;
         } else {
@@ -64,6 +68,19 @@ pub fn calculate_fdr(psms: &[ScoredPsm]) -> Result<Vec<(usize, f64)>, FdrError> 
             1.0
         };
         raw_fdrs.push(fdr.min(1.0));
+
+        if (i + 1) % progress_interval == 0 || i + 1 == total {
+            let elapsed = loop_start.elapsed().as_secs_f64();
+            let rate = if elapsed > 0.0 { (i + 1) as f64 / elapsed } else { 0.0 };
+            let eta = if rate > 0.0 { (total - i - 1) as f64 / rate } else { 0.0 };
+            tracing::info!(
+                progress = i + 1,
+                total = total,
+                rate = format!("{:.0}/s", rate),
+                eta_sec = format!("{:.1}", eta),
+                "calculating FDR"
+            );
+        }
     }
 
     // Enforce monotonicity: walk backward
