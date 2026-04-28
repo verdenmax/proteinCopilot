@@ -922,8 +922,20 @@ fn find_precursor_in_ms1(
     best_mz
 }
 
+/// Maximum FASTA file size for in-memory loading (512 MB).
+const MAX_FASTA_SIZE: u64 = 512 * 1024 * 1024;
+
 /// Load FASTA sequences into a HashMap<accession, sequence>.
 fn load_fasta_sequences(fasta_path: &str) -> Result<HashMap<String, String>, String> {
+    let metadata = std::fs::metadata(fasta_path)
+        .map_err(|e| format!("Cannot stat FASTA file {fasta_path}: {e}"))?;
+    if metadata.len() > MAX_FASTA_SIZE {
+        return Err(format!(
+            "FASTA file too large ({:.0} MB, max {} MB): {fasta_path}",
+            metadata.len() as f64 / 1_048_576.0,
+            MAX_FASTA_SIZE / 1_048_576,
+        ));
+    }
     let content = std::fs::read_to_string(fasta_path)
         .map_err(|e| format!("Failed to read FASTA file {fasta_path}: {e}"))?;
 
@@ -1058,7 +1070,12 @@ impl OrderedDiaCache {
     /// Spill spectra to disk. Returns true on success, false on failure.
     fn spill_to_disk(&self, id: Uuid, spectra: &[Spectrum]) -> bool {
         if let Err(e) = std::fs::create_dir_all(&self.spill_dir) {
-            tracing::warn!("Failed to create DIA spill dir: {}", e);
+            tracing::error!(
+                dir = %self.spill_dir.display(),
+                error = %e,
+                "Cannot create DIA spill directory — all spectra kept in memory. \
+                 Large DIA runs may OOM. Ensure directory is writable."
+            );
             return false;
         }
         let path = self.spill_dir.join(format!("{}.bin", id));
@@ -2307,6 +2324,15 @@ impl ProteinCopilotServer {
                     "provide either 'run_id' (mode 1) or 'file_path' + 'peptide_sequence' + 'charge' (mode 2)",
                 ));
         };
+
+        // Defense-in-depth: validate charge > 0 before any m/z calculation.
+        // Mode 2 validates at entry; this catches mode 1 PSMs with invalid charge.
+        if charge <= 0 {
+            return Err(mcp_err(
+                ErrorCode::INVALID_PARAMS,
+                format!("charge must be > 0 (got {charge}); PSM may have invalid charge state"),
+            ));
+        }
 
         // Resolve scan_number: if 0 and retention_time_min provided, auto-match via RT
         let resolved_scan = if input.scan_number == 0 {

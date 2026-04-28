@@ -35,6 +35,10 @@ use quick_xml::Reader;
 use crate::error::SpectrumIoError;
 use crate::reader::SpectrumReader;
 
+/// Maximum peaks per spectrum. Prevents OOM from malformed mzML files.
+/// 500k covers even wide DIA windows with high resolution.
+const MAX_PEAKS_PER_SPECTRUM: usize = 500_000;
+
 /// Reader for mzML spectrum files.
 pub struct MzMLReader;
 
@@ -112,6 +116,12 @@ impl SpectrumBuilder {
             n => MsLevel::Other(n),
         };
 
+        // Log when MS2+ spectrum has no retention time — RT-based lookups
+        // (XIC, scan auto-matching) will use 0.0 as fallback.
+        if self.rt_min.is_none() && !matches!(ms_level, MsLevel::MS1) {
+            tracing::debug!(scan, "MS2 spectrum missing retention time, defaulting to 0.0");
+        }
+
         // Sort m/z + intensity arrays together by m/z ascending.
         let mut mz_array = self.mz_array;
         let mut intensity_array = self.intensity_array;
@@ -166,7 +176,7 @@ pub(crate) fn decode_binary_array(
         raw
     };
 
-    if meta.is_64bit {
+    let values = if meta.is_64bit {
         if bytes.len() % 8 != 0 {
             return Err(SpectrumIoError::BinaryDecodeError {
                 path: path.to_path_buf(),
@@ -176,17 +186,14 @@ pub(crate) fn decode_binary_array(
                 ),
             });
         }
-        // Safety: chunks_exact(8) guarantees exactly 8 bytes per chunk,
-        // so try_into::<[u8; 8]> always succeeds after the length check above.
-        Ok(bytes
+        bytes
             .chunks_exact(8)
             .map(|c| {
                 let arr: [u8; 8] = c.try_into().expect("chunks_exact(8) guarantees 8 bytes");
                 f64::from_le_bytes(arr)
             })
-            .collect())
+            .collect::<Vec<f64>>()
     } else {
-        // 32-bit float
         if bytes.len() % 4 != 0 {
             return Err(SpectrumIoError::BinaryDecodeError {
                 path: path.to_path_buf(),
@@ -196,15 +203,26 @@ pub(crate) fn decode_binary_array(
                 ),
             });
         }
-        // Safety: chunks_exact(4) guarantees exactly 4 bytes per chunk.
-        Ok(bytes
+        bytes
             .chunks_exact(4)
             .map(|c| {
                 let arr: [u8; 4] = c.try_into().expect("chunks_exact(4) guarantees 4 bytes");
                 f32::from_le_bytes(arr) as f64
             })
-            .collect())
+            .collect::<Vec<f64>>()
+    };
+
+    if values.len() > MAX_PEAKS_PER_SPECTRUM {
+        return Err(SpectrumIoError::BinaryDecodeError {
+            path: path.to_path_buf(),
+            detail: format!(
+                "array has {} elements (max {MAX_PEAKS_PER_SPECTRUM}); file may be corrupt",
+                values.len()
+            ),
+        });
     }
+
+    Ok(values)
 }
 
 // ---------------------------------------------------------------------------

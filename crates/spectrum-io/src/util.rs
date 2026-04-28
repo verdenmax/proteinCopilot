@@ -143,6 +143,10 @@ impl SummaryAccumulator {
     ) -> Result<SpectrumSummary, SpectrumIoError> {
         // Handle empty file sentinels
         if self.total == 0 {
+            tracing::warn!(
+                path = %path.display(),
+                "spectrum file contains 0 spectra — downstream analysis will produce no results"
+            );
             self.mz_min = 0.0;
             self.mz_max = 0.0;
             self.rt_min = 0.0;

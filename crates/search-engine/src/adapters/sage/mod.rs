@@ -345,7 +345,7 @@ impl SearchEngineAdapter for SageAdapter {
         // ── Phase 4: Convert Feature → Psm ──────────────────────────────
         let psms: Vec<Psm> = features
             .iter()
-            .map(|feat| feature_to_psm(feat, &db))
+            .filter_map(|feat| feature_to_psm(feat, &db))
             .collect();
 
         // ── Build peptide-level results ──────────────────────────────────
@@ -540,7 +540,7 @@ impl SearchEngineAdapter for SageAdapter {
 }
 
 /// Convert a sage `Feature` + `IndexedDatabase` lookup into our `Psm`.
-fn feature_to_psm(feat: &Feature, db: &IndexedDatabase) -> Psm {
+fn feature_to_psm(feat: &Feature, db: &IndexedDatabase) -> Option<Psm> {
     let peptide = &db[feat.peptide_idx];
 
     let peptide_sequence = String::from_utf8_lossy(&peptide.sequence).to_string();
@@ -549,6 +549,14 @@ fn feature_to_psm(feat: &Feature, db: &IndexedDatabase) -> Psm {
     // Convert mass → m/z:  mz = (mass + charge * PROTON) / charge
     // PROTON is f32 in sage-core.
     let charge = f64::from(feat.charge);
+    if charge == 0.0 {
+        tracing::warn!(
+            spec_id = %feat.spec_id,
+            peptide = %peptide_sequence,
+            "sage returned charge=0, skipping PSM"
+        );
+        return None;
+    }
     let proton = f64::from(PROTON);
     let precursor_mz = (f64::from(feat.expmass) + charge * proton) / charge;
     let calculated_mz = (f64::from(feat.calcmass) + charge * proton) / charge;
@@ -589,7 +597,7 @@ fn feature_to_psm(feat: &Feature, db: &IndexedDatabase) -> Psm {
 
     let modifications = convert_sage_modifications(peptide);
 
-    Psm {
+    Some(Psm {
         spectrum_scan,
         peptide_sequence,
         modifications,
@@ -602,7 +610,7 @@ fn feature_to_psm(feat: &Feature, db: &IndexedDatabase) -> Psm {
         protein_accessions,
         is_decoy: feat.label == -1,
         extra: Some(extra),
-    }
+    })
 }
 
 /// Convert sage `Peptide` modifications to our `Modification` structs.

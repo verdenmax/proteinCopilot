@@ -132,6 +132,25 @@ pub fn load_generic_tsv(
     let protein_ids_idx = find_column(headers, &column_map.protein_ids);
     let q_value_idx = find_column(headers, &column_map.q_value);
 
+    // Log unfound optional columns to aid debugging when data appears missing
+    for (name, found) in [
+        (&column_map.charge, charge_idx.is_some()),
+        (&column_map.precursor_mz, precursor_mz_idx.is_some()),
+        (&column_map.retention_time, retention_time_idx.is_some()),
+        (&column_map.scan_number, scan_number_idx.is_some()),
+        (&column_map.spectrum_file, spectrum_file_idx.is_some()),
+        (&column_map.protein_ids, protein_ids_idx.is_some()),
+        (&column_map.q_value, q_value_idx.is_some()),
+    ] {
+        if !found {
+            tracing::debug!(
+                column = %name,
+                file = %path.display(),
+                "optional TSV column not found in headers"
+            );
+        }
+    }
+
     let mut psms = Vec::new();
 
     for result in rdr.records() {
