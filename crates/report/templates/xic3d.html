@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>3D MS2 — __PEPTIDE_PLACEHOLDER__</title>
+<script src="__PLOTLY_SRC__"></script>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background:#0a0e1a; color:#e0e6f0; padding:20px; }
+  .container { max-width:1400px; margin:0 auto; }
+  .header { background:linear-gradient(135deg,#1a2744,#0f1829); border:1px solid #2a3a5c; border-radius:12px; padding:20px; margin-bottom:16px; }
+  h1 { font-size:20px; margin-bottom:6px; }
+  .subtitle { color:#7a8aaa; font-size:13px; }
+  .meta-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; margin-top:14px; }
+  .meta-card { background:#0f1829; border:1px solid #2a3a5c; border-radius:8px; padding:10px 14px; }
+  .meta-label { font-size:11px; color:#7a8aaa; text-transform:uppercase; }
+  .meta-value { font-size:17px; font-weight:600; margin-top:3px; }
+  .panel { background:#0f1829; border:1px solid #2a3a5c; border-radius:12px; padding:16px; margin-bottom:16px; }
+  .panel-title { font-size:15px; font-weight:600; margin-bottom:12px; }
+  #plot3d { width:100%; height:520px; }
+  .scan-card { border:1px solid #2a3a5c; border-radius:10px; margin-bottom:12px; overflow:hidden; }
+  .scan-card.target { box-shadow:0 0 0 2px #3b82f6 inset; }
+  .scan-head { display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; padding:9px 14px; background:#13203a; border-bottom:1px solid #2a3a5c; }
+  .scan-head .left { font-size:14px; }
+  .scan-head .right { font-size:12px; color:#9fb0d0; }
+  .badge { font-size:10px; color:#3b82f6; border:1px solid #3b82f6; border-radius:6px; padding:0 5px; margin-left:6px; }
+  .chip { display:inline-block; padding:1px 7px; border-radius:10px; font-size:11px; color:#fff; margin-left:3px; }
+  .spec-plot { width:100%; height:190px; padding:4px 8px; }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="header">
+    <h1 id="pep"></h1>
+    <div class="subtitle" id="sub"></div>
+    <div class="meta-grid">
+      <div class="meta-card"><div class="meta-label">Charge</div><div class="meta-value" id="m-charge"></div></div>
+      <div class="meta-card"><div class="meta-label">Precursor m/z</div><div class="meta-value" id="m-mz"></div></div>
+      <div class="meta-card"><div class="meta-label">谱图数</div><div class="meta-value" id="m-scans"></div></div>
+      <div class="meta-card"><div class="meta-label">鉴定谱图</div><div class="meta-value" id="m-target"></div></div>
+      <div class="meta-card"><div class="meta-label">m/z 容差</div><div class="meta-value" id="m-tol"></div></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-title">① 3D 柱状 MS2 总览（拖动旋转；灰柱=普通峰，红=b 离子，蓝=y 离子）</div>
+    <div id="plot3d"></div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-title">② 逐谱图 b/y 标注（每张：总谱峰数 + 匹配情况 + 标注棒状图）</div>
+    <div id="scan-list"></div>
+  </div>
+</div>
+
+<script>
+var data = /*__XIC3D_JSON__*/;
+var MAX_PEAKS_3D = /*__MAX_PEAKS_3D__*/;
+(function(){
+  var B_COLOR = '#e74c3c', Y_COLOR = '#3498db', GRAY = '#7f8a97';
+  function ionLabel(a){ var t = (a.ion_type === 'B' ? 'b' : 'y'); var s = t + a.ion_number; if (a.charge > 1) s += '^' + a.charge + '+'; return s; }
+  function ionColor(a){ return a.ion_type === 'B' ? B_COLOR : Y_COLOR; }
+
+  function header(){
+    document.getElementById('pep').textContent = '3D MS2 — ' + data.peptide_sequence;
+    document.getElementById('sub').textContent = data.source_file + ' · 目标 scan ' + data.target_scan;
+    document.getElementById('m-charge').textContent = data.charge + '+';
+    document.getElementById('m-mz').textContent = data.precursor_mz.toFixed(4);
+    document.getElementById('m-scans').textContent = data.scans.length;
+    document.getElementById('m-target').textContent = 'scan ' + data.target_scan;
+    var tolUnit = data.mz_tolerance.unit === 'Ppm' ? 'ppm' : data.mz_tolerance.unit;
+    document.getElementById('m-tol').textContent = data.mz_tolerance.value + ' ' + tolUnit;
+  }
+
+  function build3d(){
+    var gX=[],gY=[],gZ=[], bX=[],bY=[],bZ=[], yX=[],yY=[],yZ=[];
+    data.scans.forEach(function(s){
+      var rt = s.retention_time_min;
+      var peaks = s.annotation.peaks;
+      var matched = peaks.filter(function(p){ return p.annotation; });
+      var others = peaks.filter(function(p){ return !p.annotation; });
+      if (MAX_PEAKS_3D && others.length > MAX_PEAKS_3D) {
+        others = others.sort(function(a,b){ return b.intensity - a.intensity; }).slice(0, MAX_PEAKS_3D);
+      }
+      others.forEach(function(p){ gX.push(rt,rt,null); gY.push(p.mz,p.mz,null); gZ.push(0,p.intensity,null); });
+      matched.forEach(function(p){
+        if (p.annotation.ion_type === 'B') { bX.push(rt,rt,null); bY.push(p.mz,p.mz,null); bZ.push(0,p.intensity,null); }
+        else { yX.push(rt,rt,null); yY.push(p.mz,p.mz,null); yZ.push(0,p.intensity,null); }
+      });
+    });
+    var traces = [
+      { type:'scatter3d', mode:'lines', x:gX, y:gY, z:gZ, name:'其他 MS2 峰', line:{ color:GRAY, width:2 }, opacity:0.55, hoverinfo:'skip' },
+      { type:'scatter3d', mode:'lines', x:bX, y:bY, z:bZ, name:'b 离子', line:{ color:B_COLOR, width:6 } },
+      { type:'scatter3d', mode:'lines', x:yX, y:yY, z:yZ, name:'y 离子', line:{ color:Y_COLOR, width:6 } }
+    ];
+    var layout = {
+      margin:{ l:0, r:0, t:0, b:0 }, paper_bgcolor:'rgba(0,0,0,0)', font:{ color:'#9fb0d0', size:10 },
+      showlegend:true, legend:{ x:0, y:1, font:{ size:10 }, bgcolor:'rgba(0,0,0,0)' },
+      scene:{
+        xaxis:{ title:'RT (min)', gridcolor:'rgba(120,140,180,0.2)' },
+        yaxis:{ title:'m/z', gridcolor:'rgba(120,140,180,0.2)' },
+        zaxis:{ title:'强度', gridcolor:'rgba(120,140,180,0.2)' },
+        camera:{ eye:{ x:1.75, y:1.45, z:0.85 } }
+      }
+    };
+    Plotly.newPlot('plot3d', traces, layout, { displayModeBar:false, responsive:true });
+  }
+
+  function plotScan(divId, ann){
+    var gx=[],gy=[];
+    ann.peaks.forEach(function(p){ if (!p.annotation) { gx.push(p.mz,p.mz,null); gy.push(0,p.intensity,null); } });
+    var traces = [{ type:'scatter', mode:'lines', x:gx, y:gy, line:{ color:'#5a6b88', width:1 }, hoverinfo:'skip', showlegend:false }];
+    var lx=[],ly=[],lt=[],lc=[];
+    ann.peaks.forEach(function(p){
+      if (p.annotation) {
+        traces.push({ type:'scatter', mode:'lines', x:[p.mz,p.mz], y:[0,p.intensity], line:{ color:ionColor(p.annotation), width:2.5 }, hoverinfo:'skip', showlegend:false });
+        lx.push(p.mz); ly.push(p.intensity); lt.push(ionLabel(p.annotation)); lc.push(ionColor(p.annotation));
+      }
+    });
+    traces.push({ type:'scatter', mode:'markers+text', x:lx, y:ly, text:lt, textposition:'top center', textfont:{ size:10, color:'#cdd3da' }, marker:{ size:4, color:lc }, showlegend:false, hovertemplate:'%{text}<br>m/z %{x:.3f}<br>强度 %{y:.0f}<extra></extra>' });
+    var layout = {
+      margin:{ l:50, r:8, t:8, b:30 }, paper_bgcolor:'rgba(0,0,0,0)', plot_bgcolor:'rgba(0,0,0,0)', font:{ color:'#9fb0d0', size:9 },
+      xaxis:{ title:'m/z', gridcolor:'rgba(120,140,180,0.12)', zeroline:false },
+      yaxis:{ title:'强度', gridcolor:'rgba(120,140,180,0.12)', zeroline:false, rangemode:'tozero' }
+    };
+    Plotly.newPlot(divId, traces, layout, { displayModeBar:false, responsive:true });
+  }
+
+  function buildList(){
+    // Safety invariant: only numeric/enum-derived values are interpolated into
+    // innerHTML below. Free-form strings (peptide_sequence, source_file) must
+    // stay on textContent (see header()). Route any future string field through
+    // a proper HTML-escape before adding it here.
+    var html = data.scans.map(function(s, i){
+      var ann = s.annotation;
+      var matched = ann.peaks.filter(function(p){ return p.annotation; });
+      var chips = matched.map(function(p){ return '<span class="chip" style="background:' + ionColor(p.annotation) + '">' + ionLabel(p.annotation) + '</span>'; }).join('');
+      var tgt = s.is_target ? '<span class="badge">鉴定谱图</span>' : '';
+      return '<div class="scan-card' + (s.is_target ? ' target' : '') + '">'
+        + '<div class="scan-head"><div class="left"><b>scan ' + s.scan_number + '</b>' + tgt + ' <span style="color:#7a8aaa">RT ' + s.retention_time_min.toFixed(2) + ' min</span></div>'
+        + '<div class="right">总谱峰数 <b>' + s.total_peaks + '</b> · 匹配 <b>' + ann.matched_ions + '/' + ann.total_ions + '</b> ' + chips + '</div></div>'
+        + '<div class="spec-plot" id="spec' + i + '"></div></div>';
+    }).join('');
+    document.getElementById('scan-list').innerHTML = html;
+    data.scans.forEach(function(s, i){ plotScan('spec' + i, s.annotation); });
+  }
+
+  header();
+  build3d();
+  buildList();
+})();
+</script>
+</body>
+</html>
