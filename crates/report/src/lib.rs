@@ -16,6 +16,7 @@ pub mod xic_visualize;
 
 pub mod unified_types;
 pub mod unified_visualize;
+pub mod xic3d_build;
 pub mod xic3d_types;
 
 pub use error::ReportError;
