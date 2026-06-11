@@ -443,6 +443,17 @@ struct DiaCacheStatusOutput {
     extracted_at: Option<String>,
 }
 
+/// View mode for the `extract_xic` tool.
+#[derive(Debug, Clone, Copy, Deserialize, schemars::JsonSchema)]
+enum XicView {
+    /// Standard 2D XIC line chart (default).
+    #[serde(rename = "standard")]
+    Standard,
+    /// 3D MS2 overview + per-scan b/y annotated spectra.
+    #[serde(rename = "3d")]
+    ThreeD,
+}
+
 /// Input for the `extract_xic` MCP tool.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct ExtractXicInput {
@@ -511,6 +522,20 @@ struct ExtractXicInput {
         description = "Run ID from a previous search. Auto-fills peptide, charge, mods, precursor_mz. MVP: single-file searches only."
     )]
     run_id: Option<String>,
+
+    /// View mode: standard 2D XIC (default) or 3D MS2 annotation view.
+    #[serde(default)]
+    #[schemars(
+        description = "View mode: 'standard' (default, 2D XIC line chart) or '3d' (3D MS2 overview RT x m/z x intensity + per-scan b/y annotated spectra with total peak counts)."
+    )]
+    view: Option<XicView>,
+
+    /// (3D only) Max non-matched peaks per scan drawn in the 3D overview.
+    #[serde(default)]
+    #[schemars(
+        description = "Only for view=3d: max non-matched peaks per scan drawn in the 3D overview (display declutter; matched b/y always kept). Default 200."
+    )]
+    max_peaks_per_scan_3d: Option<usize>,
 }
 
 /// Result returned by `extract_xic`.
@@ -528,6 +553,12 @@ struct ExtractXicResult {
     has_ms1_xic: bool,
     /// Summary message.
     summary: String,
+    /// (3D mode only) Number of MS2 scans annotated in the window.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    annotated_scan_count: Option<usize>,
+    /// (3D mode only) Matched fragment ions in the target scan.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    target_matched_ions: Option<u32>,
 }
 
 /// Presets list response
@@ -2993,7 +3024,7 @@ impl ProteinCopilotServer {
     /// Extract XIC (Extracted Ion Chromatogram) for a peptide from an mzML file.
     #[rmcp::tool(
         name = "extract_xic",
-        description = "Extract XIC (Extracted Ion Chromatogram) for a peptide from an mzML file. Generates an interactive HTML file with Plotly.js showing MS1 precursor and MS2 fragment ion chromatograms. Supports SILAC heavy-label comparison. Two modes: (1) provide run_id + scan_number to use PSM context, or (2) provide file_path + scan_number + peptide_sequence + charge + precursor_mz. In mode 2, set scan_number=0 with retention_time_min to auto-find scan."
+        description = "Extract XIC (Extracted Ion Chromatogram) for a peptide from an mzML file. Generates an interactive HTML file with Plotly.js showing MS1 precursor and MS2 fragment ion chromatograms. Supports SILAC heavy-label comparison. Two modes: (1) provide run_id + scan_number to use PSM context, or (2) provide file_path + scan_number + peptide_sequence + charge + precursor_mz. In mode 2, set scan_number=0 with retention_time_min to auto-find scan. Set view='3d' for a 3D MS2 overview (RT x m/z x intensity sticks) plus per-scan b/y annotated spectra with total peak counts (output: xic3d_scan{N}.html)."
     )]
     fn extract_xic(
         &self,
@@ -3136,6 +3167,61 @@ impl ProteinCopilotServer {
             20.0,
         )
         .map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, e.to_string()))?;
+        // 3D view: annotate every MS2 scan in the window and render 3D HTML.
+        if matches!(input.view, Some(XicView::ThreeD)) {
+            let plotly_mode = input
+                .plotly_mode
+                .unwrap_or(protein_copilot_xic::PlotlyMode::Cdn);
+            let out_path = input
+                .output_path
+                .clone()
+                .map(PathBuf::from)
+                .unwrap_or_else(|| {
+                    PathBuf::from(format!("output/xic3d_scan{}.html", resolved_scan))
+                });
+
+            let data = protein_copilot_report::xic3d_build::build_xic3d_data(
+                &unified_result.raw_scans.ms2_scans,
+                &peptide,
+                charge,
+                precursor_mz,
+                &modifications,
+                &params.mz_tolerance,
+                resolved_scan,
+                &file_path.to_string_lossy(),
+            )
+            .map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, e.to_string()))?;
+
+            protein_copilot_report::xic3d_visualize::render_xic_3d(
+                &data,
+                &out_path,
+                plotly_mode,
+                input.max_peaks_per_scan_3d,
+            )
+            .map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, e.to_string()))?;
+
+            let annotated = data.scans.len();
+            let target_matched = data
+                .scans
+                .iter()
+                .find(|s| s.is_target)
+                .map(|s| s.annotation.matched_ions);
+
+            tracing::info!(scans = annotated, "completed (3d)");
+            return Ok(Json(ExtractXicResult {
+                output_path: out_path.to_string_lossy().to_string(),
+                ms2_scan_count: annotated,
+                light_trace_count: 0,
+                heavy_trace_count: 0,
+                has_ms1_xic: false,
+                annotated_scan_count: Some(annotated),
+                target_matched_ions: target_matched,
+                summary: format!(
+                    "3D MS2 view for {} ({}+): {} MS2 scans annotated in window",
+                    peptide, charge, annotated
+                ),
+            }));
+        }
         let xic_data = unified_result.xic_data;
 
         // Render HTML
@@ -3174,6 +3260,8 @@ impl ProteinCopilotServer {
             heavy_trace_count: xic_data.heavy_fragment_xic_traces.len(),
             has_ms1_xic: xic_data.ms1_precursor_xic.is_some(),
             summary,
+            annotated_scan_count: None,
+            target_matched_ions: None,
         }))
     }
 
