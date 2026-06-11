@@ -18,6 +18,7 @@ pub mod unified_types;
 pub mod unified_visualize;
 pub mod xic3d_build;
 pub mod xic3d_types;
+pub mod xic3d_visualize;
 
 pub use error::ReportError;
 
@@ -88,6 +89,16 @@ impl ReportGenerator {
         plotly_mode: protein_copilot_xic::PlotlyMode,
     ) -> Result<(), ReportError> {
         unified_visualize::render_unified_html(data, output_path, plotly_mode)
+    }
+
+    /// Renders 3D MS2 annotation data as a self-contained HTML file.
+    pub fn render_xic_3d(
+        data: &crate::xic3d_types::Xic3dData,
+        output_path: &Path,
+        plotly_mode: protein_copilot_xic::PlotlyMode,
+        max_peaks_per_scan_3d: Option<usize>,
+    ) -> Result<(), ReportError> {
+        xic3d_visualize::render_xic_3d(data, output_path, plotly_mode, max_peaks_per_scan_3d)
     }
 }
 
