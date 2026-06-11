@@ -32,6 +32,8 @@ pub fn render_xic_3d(
         serde_json::to_string(data).map_err(|e| ReportError::SerializationError(e.to_string()))?;
     let json = crate::escape_json_for_html(&json);
 
+    // MVP: both modes load Plotly from the CDN. `Embedded` is accepted for
+    // API parity with the other renderers but does not yet inline plotly.js.
     let plotly_src = match plotly_mode {
         PlotlyMode::Cdn | PlotlyMode::Embedded => PLOTLY_CDN.to_string(),
     };
