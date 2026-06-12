@@ -1295,6 +1295,36 @@ impl ProteinCopilotServer {
         Ok(reader)
     }
 
+    /// Validate an engine name against the registry and construct its adapter.
+    ///
+    /// This has no side effects, so it can be called BEFORE any cache mutation
+    /// to ensure an invalid engine name fails fast without consuming cached
+    /// spectra or inserting an orphaned run entry.
+    fn resolve_engine(&self, engine_name: &str) -> Result<Box<dyn SearchEngineAdapter>, ErrorData> {
+        if self.registry.get(engine_name).is_none()
+            && !engine_name.eq_ignore_ascii_case("sage")
+            && !engine_name.eq_ignore_ascii_case("simplesearch")
+        {
+            return Err(mcp_err(
+                ErrorCode::INVALID_PARAMS,
+                format!(
+                    "Engine '{}' not registered. Available: {:?}",
+                    engine_name,
+                    self.registry
+                        .list_available()
+                        .iter()
+                        .map(|e| &e.name)
+                        .collect::<Vec<_>>()
+                ),
+            ));
+        }
+        Ok(if engine_name.eq_ignore_ascii_case("sage") {
+            Box::new(protein_copilot_search_engine::adapters::sage::SageAdapter::default())
+        } else {
+            Box::new(SimpleSearchEngine::new())
+        })
+    }
+
     /// Resolve a SearchResult from direct input or cached run_id.
     fn get_result(
         &self,
@@ -1314,10 +1344,7 @@ impl ProteinCopilotServer {
         if let Some(id_str) = run_id {
             let id = Uuid::parse_str(id_str)
                 .map_err(|_| mcp_err(ErrorCode::INVALID_PARAMS, "invalid run_id format"))?;
-            let cache = self
-                .run_cache
-                .lock()
-                .map_err(|_| mcp_err(ErrorCode::INTERNAL_ERROR, "cache lock failed"))?;
+            let cache = self.run_cache.lock().unwrap_or_else(|e| e.into_inner());
             let state = cache.get(&id).ok_or_else(|| {
                 mcp_err(ErrorCode::INVALID_PARAMS, format!("run_id {id} not found — it may have been evicted from the cache (max 100 recent runs are kept)"))
             })?;
@@ -1557,12 +1584,18 @@ impl ProteinCopilotServer {
                 ));
             }
 
+            // Resolve + construct the engine BEFORE any cache mutation, so an
+            // invalid engine name fails fast without consuming cached spectra
+            // or inserting an orphaned run entry.
+            let engine_name = params.engine.as_deref().unwrap_or("SimpleSearch");
+            let engine = self.resolve_engine(engine_name)?;
+            let engine_info_for_error = engine.engine_info();
+
             // Move spectra out of the DIA cache (frees the slot).
-            // This happens after validation so a param error won't lose cached spectra.
+            // This happens after engine + param validation so a failure won't
+            // lose cached spectra.
             let dia_spectra = {
-                let mut cache = self.dia_cache.lock().map_err(|_| {
-                    mcp_err(ErrorCode::INTERNAL_ERROR, "DIA cache lock is poisoned")
-                })?;
+                let mut cache = self.dia_cache.lock().unwrap_or_else(|e| e.into_inner());
                 cache.remove(&dia_uuid).ok_or_else(|| {
                     mcp_err(
                         ErrorCode::INVALID_PARAMS,
@@ -1579,9 +1612,7 @@ impl ProteinCopilotServer {
 
             // Evict + initialize in unified run cache
             {
-                let mut cache = self.run_cache.lock().map_err(|_| {
-                    mcp_err(ErrorCode::INTERNAL_ERROR, "run cache lock is poisoned")
-                })?;
+                let mut cache = self.run_cache.lock().unwrap_or_else(|e| e.into_inner());
                 cache.evict_if_full();
                 cache.insert(
                     run_id,
@@ -1605,31 +1636,6 @@ impl ProteinCopilotServer {
             }
 
             let run_cache_clone = Arc::clone(&self.run_cache);
-            let engine_name = params.engine.as_deref().unwrap_or("SimpleSearch");
-            // Validate engine exists in registry before spawning
-            if self.registry.get(engine_name).is_none()
-                && !engine_name.eq_ignore_ascii_case("sage")
-                && !engine_name.eq_ignore_ascii_case("simplesearch")
-            {
-                return Err(mcp_err(
-                    ErrorCode::INVALID_PARAMS,
-                    format!(
-                        "Engine '{}' not registered. Available: {:?}",
-                        engine_name,
-                        self.registry
-                            .list_available()
-                            .iter()
-                            .map(|e| &e.name)
-                            .collect::<Vec<_>>()
-                    ),
-                ));
-            }
-            let engine: Box<dyn SearchEngineAdapter> = if engine_name.eq_ignore_ascii_case("sage") {
-                Box::new(protein_copilot_search_engine::adapters::sage::SageAdapter::default())
-            } else {
-                Box::new(SimpleSearchEngine::new())
-            };
-            let engine_info_for_error = engine.engine_info();
             let dia_source = vec![PathBuf::from(format!("dia:{}", run_id_str))];
 
             let progress_cache = Arc::clone(&self.run_cache);
@@ -1880,15 +1886,18 @@ impl ProteinCopilotServer {
             }
         }
 
+        // Resolve + construct the engine BEFORE any cache mutation, so an
+        // invalid engine name fails fast without inserting an orphaned run entry.
+        let engine_name = params.engine.as_deref().unwrap_or("SimpleSearch");
+        let engine = self.resolve_engine(engine_name)?;
+        let engine_info_for_error = engine.engine_info();
+
         let run_id = Uuid::new_v4();
         let files: Vec<PathBuf> = input.input_files.iter().map(PathBuf::from).collect();
 
         // Evict + initialize in unified cache
         {
-            let mut cache = self
-                .run_cache
-                .lock()
-                .map_err(|_| mcp_err(ErrorCode::INTERNAL_ERROR, "run cache lock is poisoned"))?;
+            let mut cache = self.run_cache.lock().unwrap_or_else(|e| e.into_inner());
             cache.evict_if_full();
             cache.insert(
                 run_id,
@@ -1912,31 +1921,6 @@ impl ProteinCopilotServer {
         }
 
         let run_cache_clone = Arc::clone(&self.run_cache);
-        let engine_name = params.engine.as_deref().unwrap_or("SimpleSearch");
-        // Validate engine exists in registry before spawning
-        if self.registry.get(engine_name).is_none()
-            && !engine_name.eq_ignore_ascii_case("sage")
-            && !engine_name.eq_ignore_ascii_case("simplesearch")
-        {
-            return Err(mcp_err(
-                ErrorCode::INVALID_PARAMS,
-                format!(
-                    "Engine '{}' not registered. Available: {:?}",
-                    engine_name,
-                    self.registry
-                        .list_available()
-                        .iter()
-                        .map(|e| &e.name)
-                        .collect::<Vec<_>>()
-                ),
-            ));
-        }
-        let engine: Box<dyn SearchEngineAdapter> = if engine_name.eq_ignore_ascii_case("sage") {
-            Box::new(protein_copilot_search_engine::adapters::sage::SageAdapter::default())
-        } else {
-            Box::new(SimpleSearchEngine::new())
-        };
-        let engine_info_for_error = engine.engine_info();
 
         // Construct progress callback that writes stage updates to the cache
         let progress_cache = Arc::clone(&self.run_cache);
@@ -2103,10 +2087,7 @@ impl ProteinCopilotServer {
         tracing::info!(run_id = %input.run_id, "started");
         let id = Uuid::parse_str(&input.run_id)
             .map_err(|_| mcp_err(ErrorCode::INVALID_PARAMS, "invalid run_id format"))?;
-        let cache = self
-            .run_cache
-            .lock()
-            .map_err(|_| mcp_err(ErrorCode::INTERNAL_ERROR, "cache lock failed"))?;
+        let cache = self.run_cache.lock().unwrap_or_else(|e| e.into_inner());
         let state = cache
             .get(&id)
             .ok_or_else(|| mcp_err(ErrorCode::INVALID_PARAMS, format!("run_id {id} not found — it may have been evicted from the cache (max 100 recent runs are kept)")))?;
@@ -2127,10 +2108,7 @@ impl ProteinCopilotServer {
         tracing::info!(run_id = %input.run_id, "started");
         let id = Uuid::parse_str(&input.run_id)
             .map_err(|_| mcp_err(ErrorCode::INVALID_PARAMS, "invalid run_id format"))?;
-        let mut cache = self
-            .run_cache
-            .lock()
-            .map_err(|_| mcp_err(ErrorCode::INTERNAL_ERROR, "cache lock failed"))?;
+        let mut cache = self.run_cache.lock().unwrap_or_else(|e| e.into_inner());
         let state = cache
             .get_mut(&id)
             .ok_or_else(|| mcp_err(ErrorCode::INVALID_PARAMS, format!("run_id {id} not found — it may have been evicted from the cache (max 100 recent runs are kept)")))?;
@@ -2870,10 +2848,7 @@ impl ProteinCopilotServer {
         let run_id = Uuid::new_v4();
 
         // Cache for future use
-        let mut cache = self
-            .dia_cache
-            .lock()
-            .map_err(|_| mcp_err(ErrorCode::INTERNAL_ERROR, "DIA cache lock is poisoned"))?;
+        let mut cache = self.dia_cache.lock().unwrap_or_else(|e| e.into_inner());
         cache.insert(run_id, output_spectra);
 
         let output = DiaExtractionOutput {
@@ -2988,10 +2963,7 @@ impl ProteinCopilotServer {
         let dia_uuid = Uuid::parse_str(&input.dia_run_id)
             .map_err(|_| mcp_err(ErrorCode::INVALID_PARAMS, "invalid dia_run_id format"))?;
 
-        let cache = self
-            .dia_cache
-            .lock()
-            .map_err(|_| mcp_err(ErrorCode::INTERNAL_ERROR, "DIA cache lock is poisoned"))?;
+        let cache = self.dia_cache.lock().unwrap_or_else(|e| e.into_inner());
 
         let output = match cache.status(&dia_uuid) {
             DiaCacheLocation::Memory {
@@ -3488,10 +3460,7 @@ impl ProteinCopilotServer {
         // Store in run_cache
         let run_id = search_result.run_id;
         {
-            let mut cache = self
-                .run_cache
-                .lock()
-                .map_err(|_| mcp_err(ErrorCode::INTERNAL_ERROR, "run cache lock poisoned"))?;
+            let mut cache = self.run_cache.lock().unwrap_or_else(|e| e.into_inner());
             cache.evict_if_full();
             cache.insert(
                 run_id,
@@ -3854,10 +3823,7 @@ impl ProteinCopilotServer {
             )
         })?;
 
-        let cache = self
-            .run_cache
-            .lock()
-            .map_err(|_| mcp_err(ErrorCode::INTERNAL_ERROR, "run cache lock is poisoned"))?;
+        let cache = self.run_cache.lock().unwrap_or_else(|e| e.into_inner());
 
         let state = cache.get(&id).ok_or_else(|| {
             mcp_err(
@@ -4335,5 +4301,141 @@ impl ProteinCopilotServer {
             is_chimeric: provenance.shared_ratio > input.chimera_threshold,
             total_peaks: provenance.annotated_peaks.len(),
         }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use protein_copilot_core::search_params::{
+        DecoyStrategy, Enzyme, MassTolerance, ToleranceUnit,
+    };
+    use protein_copilot_core::spectrum::MsLevel;
+
+    /// Absolute path to a repo test fixture, independent of the working dir.
+    fn fixture(name: &str) -> String {
+        format!(
+            "{}/../../tests/fixtures/{}",
+            env!("CARGO_MANIFEST_DIR"),
+            name
+        )
+    }
+
+    /// Minimal-but-valid `SearchParams` (passes `validate()`), with a chosen
+    /// database path and engine name.
+    fn valid_params(database_path: String, engine: &str) -> SearchParams {
+        SearchParams {
+            enzyme: Enzyme::Trypsin,
+            missed_cleavages: 2,
+            fixed_modifications: vec![],
+            variable_modifications: vec![],
+            precursor_tolerance: MassTolerance {
+                value: 10.0,
+                unit: ToleranceUnit::Ppm,
+            },
+            fragment_tolerance: MassTolerance {
+                value: 0.02,
+                unit: ToleranceUnit::Da,
+            },
+            database_path,
+            decoy_strategy: DecoyStrategy::Reverse,
+            acquisition_mode: None,
+            max_variable_modifications: 3,
+            min_peptide_length: 7,
+            max_peptide_length: 50,
+            engine: Some(engine.to_string()),
+        }
+    }
+
+    fn dummy_spectrum() -> Spectrum {
+        Spectrum {
+            scan_number: 1,
+            ms_level: MsLevel::MS2,
+            retention_time_min: 0.0,
+            precursors: vec![],
+            mz_array: vec![100.0, 200.0],
+            intensity_array: vec![10.0, 20.0],
+        }
+    }
+
+    /// FIX 1 (DIA path): an invalid engine name must NOT consume cached DIA
+    /// spectra. The entry must survive the failed run so the user need not
+    /// re-run extract_dia_precursors.
+    #[tokio::test]
+    async fn dia_invalid_engine_preserves_cached_spectra() {
+        let server = ProteinCopilotServer::new();
+        let dia_uuid = Uuid::new_v4();
+
+        {
+            let mut cache = server.dia_cache.lock().unwrap_or_else(|e| e.into_inner());
+            cache.insert(dia_uuid, vec![dummy_spectrum()]);
+        }
+
+        let input = RunSearchInput {
+            params: Some(valid_params(fixture("small_test.fasta"), "BogusEngine")),
+            input_files: vec![],
+            database_path: None,
+            hints: None,
+            dia_run_id: Some(dia_uuid.to_string()),
+        };
+
+        let result = server.run_search(Parameters(input)).await;
+        assert!(result.is_err(), "bogus engine must fail");
+
+        let cache = server.dia_cache.lock().unwrap_or_else(|e| e.into_inner());
+        assert_eq!(
+            cache.entries.get(&dia_uuid).map(|s| s.len()),
+            Some(1),
+            "DIA spectra must NOT be consumed when engine validation fails"
+        );
+    }
+
+    /// FIX 1 (file path): an invalid engine name must NOT insert an orphaned
+    /// "Running" entry into the run cache.
+    #[tokio::test]
+    async fn file_invalid_engine_leaves_no_orphan_run() {
+        let server = ProteinCopilotServer::new();
+
+        let input = RunSearchInput {
+            params: Some(valid_params(fixture("small_test.fasta"), "BogusEngine")),
+            input_files: vec![fixture("small_test.mgf")],
+            database_path: None,
+            hints: None,
+            dia_run_id: None,
+        };
+
+        let result = server.run_search(Parameters(input)).await;
+        assert!(result.is_err(), "bogus engine must fail");
+
+        let cache = server.run_cache.lock().unwrap_or_else(|e| e.into_inner());
+        assert_eq!(
+            cache.len(),
+            0,
+            "no orphaned Running run must remain when engine validation fails"
+        );
+    }
+
+    /// FIX 2: a poisoned run cache must self-heal instead of bricking the tool.
+    #[test]
+    fn poisoned_run_cache_self_heals_in_get_result() {
+        let server = ProteinCopilotServer::new();
+
+        let cache = Arc::clone(&server.run_cache);
+        let _ = std::thread::spawn(move || {
+            let _guard = cache.lock().expect("acquire lock to poison");
+            panic!("intentionally poison the run cache mutex");
+        })
+        .join();
+
+        let missing = Uuid::new_v4().to_string();
+        let err = server
+            .get_result(&None, &Some(missing))
+            .expect_err("missing run_id should error");
+        assert_eq!(
+            err.code,
+            ErrorCode::INVALID_PARAMS,
+            "poisoned lock must self-heal, not return INTERNAL_ERROR"
+        );
+        assert!(err.message.contains("not found"));
     }
 }
