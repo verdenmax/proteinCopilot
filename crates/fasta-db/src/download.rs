@@ -137,10 +137,13 @@ pub async fn download_fasta(url: &str, dest_path: &Path) -> Result<DownloadResul
         counter.update(&chunk);
     }
 
-    file.flush().await.map_err(|e| FastaDbError::IoError {
-        path: part_path.clone(),
-        source: e,
-    })?;
+    if let Err(e) = file.flush().await {
+        let _ = tokio::fs::remove_file(&part_path).await;
+        return Err(FastaDbError::IoError {
+            path: part_path.clone(),
+            source: e,
+        });
+    }
 
     if total_bytes == 0 {
         let _ = tokio::fs::remove_file(&part_path).await;
@@ -155,12 +158,13 @@ pub async fn download_fasta(url: &str, dest_path: &Path) -> Result<DownloadResul
     let sha256 = format!("{:x}", hasher.finalize());
 
     // Atomic rename
-    tokio::fs::rename(&part_path, dest_path)
-        .await
-        .map_err(|e| FastaDbError::IoError {
+    if let Err(e) = tokio::fs::rename(&part_path, dest_path).await {
+        let _ = tokio::fs::remove_file(&part_path).await;
+        return Err(FastaDbError::IoError {
             path: dest_path.to_path_buf(),
             source: e,
-        })?;
+        });
+    }
 
     tracing::info!(
         proteins = protein_count,

@@ -2,11 +2,16 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::FastaDbError;
+
+/// Monotonic sequence for unique registry temp-file names, so concurrent
+/// `save_entry` calls never collide on a single fixed temp path.
+static REGISTRY_TMP_SEQ: AtomicU64 = AtomicU64::new(0);
 
 /// Metadata for a single cached (downloaded) database file.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -110,7 +115,11 @@ impl CacheManager {
                 detail: format!("serialization error: {e}"),
             })?;
 
-        let tmp_path = self.cache_dir.join("registry.json.tmp");
+        let tmp_path = self.cache_dir.join(format!(
+            "registry.json.{}.{}.tmp",
+            std::process::id(),
+            REGISTRY_TMP_SEQ.fetch_add(1, Ordering::Relaxed)
+        ));
         let dest_path = self.registry_path();
 
         if let Err(e) = Self::write_atomic(&tmp_path, &dest_path, json.as_bytes()) {
@@ -195,10 +204,16 @@ mod tests {
         assert_eq!(reg.databases.len(), 1);
         assert_eq!(reg.databases["human_swissprot"].protein_count, 20422);
 
-        // The atomic write must not leave a temp file behind.
+        // The atomic write must not leave any temp file behind.
+        let leftover_tmp: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|name| name.ends_with(".tmp"))
+            .collect();
         assert!(
-            !dir.path().join("registry.json.tmp").exists(),
-            "save_entry must not leave a registry.json.tmp behind"
+            leftover_tmp.is_empty(),
+            "save_entry must not leave a temp file behind, found: {leftover_tmp:?}"
         );
     }
 
