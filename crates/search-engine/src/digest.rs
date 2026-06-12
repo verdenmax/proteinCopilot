@@ -66,7 +66,7 @@ pub fn digest_with_length(
     for mc in 0..=(missed_cleavages as usize) {
         for (i, window) in fragments.windows(mc + 1).enumerate() {
             let combined: String = window.concat();
-            let len = combined.len() as u32;
+            let len = combined.chars().count() as u32;
             if len >= min_length && len <= max_length {
                 // Skip peptides containing non-standard amino acids
                 if let Some(mass) = peptide_mass(&combined) {

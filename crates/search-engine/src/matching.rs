@@ -128,27 +128,7 @@ pub fn generate_b_ions_with_charge(
     max_charge: i32,
 ) -> Vec<f64> {
     let chars: Vec<char> = sequence.chars().collect();
-    let n = chars.len().saturating_sub(1);
-    let max_z = max_charge.max(1) as usize;
-    let mut ions = Vec::with_capacity(n * max_z);
-    let mut cumulative = 0.0;
-
-    for (frag_idx, &aa) in chars[..chars.len().saturating_sub(1)].iter().enumerate() {
-        let mass = match residue_mass(aa) {
-            Some(m) => m,
-            None => return Vec::new(),
-        };
-        cumulative += mass;
-        let prefix_len = frag_idx + 1;
-        let mod_delta = mod_delta_fragment(&chars[..prefix_len], fixed_mods, true);
-        let neutral = cumulative + mod_delta;
-
-        for z in 1..=max_z {
-            ions.push((neutral + z as f64 * PROTON_MASS) / z as f64);
-        }
-    }
-
-    ions
+    generate_b_ions_positional(&chars, fixed_mods, &[], max_charge)
 }
 
 /// Generates theoretical singly-charged y-ion m/z values for a peptide,
@@ -167,30 +147,7 @@ pub fn generate_y_ions_with_charge(
     max_charge: i32,
 ) -> Vec<f64> {
     let chars: Vec<char> = sequence.chars().collect();
-    let n = chars.len();
-    let max_z = max_charge.max(1) as usize;
-    let mut ions = Vec::with_capacity(n.saturating_sub(1) * max_z);
-    let mut cumulative = WATER_MASS;
-
-    for (i, &aa) in chars.iter().rev().enumerate() {
-        if i >= n.saturating_sub(1) {
-            break;
-        }
-        let mass = match residue_mass(aa) {
-            Some(m) => m,
-            None => return Vec::new(),
-        };
-        cumulative += mass;
-        let suffix_start = n - 1 - i;
-        let mod_delta = mod_delta_fragment(&chars[suffix_start..], fixed_mods, false);
-        let neutral = cumulative + mod_delta;
-
-        for z in 1..=max_z {
-            ions.push((neutral + z as f64 * PROTON_MASS) / z as f64);
-        }
-    }
-
-    ions
+    generate_y_ions_positional(&chars, fixed_mods, &[], max_charge)
 }
 
 // ---------------------------------------------------------------------------
