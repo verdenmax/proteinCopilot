@@ -132,6 +132,14 @@ impl ResultParser for PFindTsvParser {
                 .parse()
                 .unwrap_or(0.0);
 
+            if charge <= 0 {
+                tracing::warn!(
+                    scan = scan_no,
+                    "skipping pFind PSM with non-positive charge"
+                );
+                continue;
+            }
+
             let precursor_mz = mh_plus_to_precursor_mz(mh_plus, charge);
             let modifications = parse_modifications(mod_str, &mod_masses);
             let protein_accessions = parse_proteins(proteins_str);
@@ -336,6 +344,34 @@ mod tests {
         // (1592.692795 + 2 * 1.007276) / 3 = 531.569116
         let mz = mh_plus_to_precursor_mz(1592.692795, 3);
         assert!((mz - 531.569116).abs() < 0.001);
+    }
+
+    #[test]
+    fn parse_skips_non_positive_charge() {
+        // One charge-0 row (must be skipped) followed by one valid charge-2 row.
+        let header = "FileName\tPeptideSequence\tModifications\tPepMass\tPredRT\tCleavageType\tProNCTerm\tProteins\tMH+\tCharge\tScanNo\tRawScore\tDeltaMassPPM\tDeltaRT(Min)\tFinalScore\tQValue";
+        let row_charge0 =
+            "raw1\tBADPEPK\t\t900.0\t10.0\tfull\t-\tsp|P1|A/\t901.0\t0\t100\t1.0\t0.5\t0.1\t5.0\t0.01";
+        let row_valid =
+            "raw1\tHNDLDDVGK\t\t1000.0\t12.0\tfull\t-\tsp|P2|B/\t1012.470123\t2\t200\t1.0\t0.5\t0.1\t6.0\t0.01";
+        let content = format!("{header}\n{row_charge0}\n{row_valid}\n");
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("pfind_charge0.tsv");
+        std::fs::write(&path, content).unwrap();
+
+        let db = UnimodDb::builtin();
+        let parser = PFindTsvParser;
+        let psms = parser.parse(&path, &db).expect("should parse pFind TSV");
+
+        assert_eq!(psms.len(), 1, "the charge-0 PSM must be skipped");
+        assert_eq!(psms[0].sequence, "HNDLDDVGK");
+        assert_eq!(psms[0].charge, 2);
+        assert!(
+            psms[0].precursor_mz.is_finite() && psms[0].precursor_mz > 0.0,
+            "valid PSM must have a finite, positive precursor m/z, got {}",
+            psms[0].precursor_mz
+        );
     }
 
     #[test]

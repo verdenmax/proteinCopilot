@@ -61,6 +61,12 @@ impl CacheManager {
     }
 
     /// Loads the registry from disk. Returns empty registry if file doesn't exist.
+    ///
+    /// If the registry file exists but is corrupt (e.g. truncated by a crash
+    /// mid-write), this self-heals by returning an empty registry instead of
+    /// erroring permanently — the cached FASTA files remain on disk and the
+    /// registry is rebuilt as entries are re-saved. Read I/O errors remain hard
+    /// errors; only a parse failure self-heals.
     pub fn load_registry(&self) -> Result<CacheRegistry, FastaDbError> {
         let path = self.registry_path();
         if !path.exists() {
@@ -70,12 +76,26 @@ impl CacheManager {
             path: path.clone(),
             source: e,
         })?;
-        serde_json::from_str(&content).map_err(|e| FastaDbError::RegistryError {
-            detail: format!("failed to parse {}: {}", path.display(), e),
-        })
+        match serde_json::from_str(&content) {
+            Ok(registry) => Ok(registry),
+            Err(e) => {
+                tracing::warn!(
+                    path = %path.display(),
+                    error = %e,
+                    "registry.json is corrupt; recovering with an empty registry \
+                     (cached files remain on disk and will be re-registered)"
+                );
+                Ok(CacheRegistry::default())
+            }
+        }
     }
 
     /// Saves/updates a single entry in the registry (read-modify-write).
+    ///
+    /// The write is atomic: the updated registry is written to a temp file in
+    /// the same directory, flushed and fsync'd, then renamed over the
+    /// destination. `rename(2)` is atomic on the same filesystem, so concurrent
+    /// readers never observe a partially written registry.
     pub fn save_entry(&self, entry: &CachedDatabase) -> Result<(), FastaDbError> {
         std::fs::create_dir_all(&self.cache_dir).map_err(|e| FastaDbError::IoError {
             path: self.cache_dir.clone(),
@@ -89,8 +109,41 @@ impl CacheManager {
             serde_json::to_string_pretty(&registry).map_err(|e| FastaDbError::RegistryError {
                 detail: format!("serialization error: {e}"),
             })?;
-        std::fs::write(self.registry_path(), json).map_err(|e| FastaDbError::IoError {
-            path: self.registry_path(),
+
+        let tmp_path = self.cache_dir.join("registry.json.tmp");
+        let dest_path = self.registry_path();
+
+        if let Err(e) = Self::write_atomic(&tmp_path, &dest_path, json.as_bytes()) {
+            // Best-effort cleanup so a failed write never leaves a stray temp file.
+            let _ = std::fs::remove_file(&tmp_path);
+            return Err(e);
+        }
+        Ok(())
+    }
+
+    /// Writes `bytes` to `tmp_path`, flushes + fsyncs, then atomically renames
+    /// it onto `dest_path`.
+    fn write_atomic(tmp_path: &Path, dest_path: &Path, bytes: &[u8]) -> Result<(), FastaDbError> {
+        use std::io::Write;
+
+        let mut file = std::fs::File::create(tmp_path).map_err(|e| FastaDbError::IoError {
+            path: tmp_path.to_path_buf(),
+            source: e,
+        })?;
+        file.write_all(bytes).map_err(|e| FastaDbError::IoError {
+            path: tmp_path.to_path_buf(),
+            source: e,
+        })?;
+        file.flush().map_err(|e| FastaDbError::IoError {
+            path: tmp_path.to_path_buf(),
+            source: e,
+        })?;
+        file.sync_all().map_err(|e| FastaDbError::IoError {
+            path: tmp_path.to_path_buf(),
+            source: e,
+        })?;
+        std::fs::rename(tmp_path, dest_path).map_err(|e| FastaDbError::IoError {
+            path: dest_path.to_path_buf(),
             source: e,
         })
     }
@@ -141,6 +194,27 @@ mod tests {
         let reg = cache.load_registry().unwrap();
         assert_eq!(reg.databases.len(), 1);
         assert_eq!(reg.databases["human_swissprot"].protein_count, 20422);
+
+        // The atomic write must not leave a temp file behind.
+        assert!(
+            !dir.path().join("registry.json.tmp").exists(),
+            "save_entry must not leave a registry.json.tmp behind"
+        );
+    }
+
+    #[test]
+    fn corrupt_registry_self_heals_to_empty() {
+        let dir = TempDir::new().unwrap();
+        // Deliberately write a truncated/corrupt registry, as a crash mid-write
+        // would produce.
+        std::fs::write(dir.path().join("registry.json"), b"{ not json").unwrap();
+
+        let cache = CacheManager::new(dir.path().to_path_buf());
+        let reg = cache
+            .load_registry()
+            .expect("a corrupt registry must self-heal (Ok), not error");
+        assert!(reg.databases.is_empty());
+        assert_eq!(reg.version, 1);
     }
 
     #[test]

@@ -21,6 +21,9 @@ pub enum ResultImportError {
         available: String,
     },
 
+    #[error("invalid raw file name '{raw_name}': must be a bare file name without path separators or '..' (path traversal is not allowed)")]
+    InvalidRawName { raw_name: String },
+
     #[error("no MS2 scan found near RT={rt_min:.3} min (±{tolerance_min} min) with precursor_mz={precursor_mz:.4}")]
     NoMatchingScan {
         rt_min: f64,

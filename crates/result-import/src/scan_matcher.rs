@@ -7,6 +7,7 @@
 //!    pick the closest RT match
 
 use std::collections::HashMap;
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
 use protein_copilot_spectrum_io::reader::SpectrumReader;
@@ -64,6 +65,11 @@ pub fn match_scans(
     let mut processed_count: usize = 0;
 
     for (raw_name, indices) in &groups {
+        // `raw_name` originates from an external search-result file. Confine it
+        // to `mzml_dir`: it must be a bare file-name component so it cannot
+        // escape the directory via path separators or `..` (path traversal).
+        validate_raw_name(raw_name)?;
+
         let mzml_path = config.mzml_dir.join(format!("{raw_name}.mzML"));
         let mzml_path_lower = config.mzml_dir.join(format!("{raw_name}.mzml"));
 
@@ -261,6 +267,25 @@ pub fn find_best_match(
     best
 }
 
+/// Validates that an externally supplied `raw_name` is a bare file-name
+/// component, so that `mzml_dir.join(format!("{raw_name}.mzML"))` cannot escape
+/// `mzml_dir` via path separators or `..` (path-traversal confinement).
+fn validate_raw_name(raw_name: &str) -> Result<(), ResultImportError> {
+    let invalid = raw_name.is_empty()
+        || raw_name == "."
+        || raw_name == ".."
+        || raw_name.contains('/')
+        || raw_name.contains('\\')
+        || raw_name.contains(std::path::MAIN_SEPARATOR)
+        || Path::new(raw_name).file_name() != Some(OsStr::new(raw_name));
+    if invalid {
+        return Err(ResultImportError::InvalidRawName {
+            raw_name: raw_name.to_string(),
+        });
+    }
+    Ok(())
+}
+
 /// List .mzML files in a directory for error messages.
 fn list_mzml_files(dir: &Path) -> String {
     match std::fs::read_dir(dir) {
@@ -287,6 +312,81 @@ fn list_mzml_files(dir: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::TempDir;
+
+    fn make_psm(raw_name: &str) -> ImportedPsm {
+        ImportedPsm {
+            sequence: "PEPTIDEK".to_string(),
+            charge: 2,
+            precursor_mz: 500.0,
+            rt_min: 100.0,
+            modifications: Vec::new(),
+            score: None,
+            q_value: None,
+            protein_accessions: Vec::new(),
+            raw_name: raw_name.to_string(),
+            matched_scan: None,
+            rt_delta_min: None,
+        }
+    }
+
+    #[test]
+    fn match_scans_rejects_path_traversal_raw_name() {
+        let dir = TempDir::new().unwrap();
+        let config = ScanMatcherConfig {
+            rt_tolerance_min: 0.5,
+            mzml_dir: dir.path().to_path_buf(),
+        };
+        let called = std::rc::Rc::new(std::cell::RefCell::new(Vec::<PathBuf>::new()));
+        let called_in = std::rc::Rc::clone(&called);
+        let factory = move |p: &Path| -> Result<Box<dyn SpectrumReader>, ResultImportError> {
+            called_in.borrow_mut().push(p.to_path_buf());
+            Err(ResultImportError::Other("factory-reached".to_string()))
+        };
+
+        let mut psms = vec![make_psm("../evil")];
+        let err = match_scans(&mut psms, &config, &factory).unwrap_err();
+
+        assert!(
+            matches!(err, ResultImportError::InvalidRawName { .. }),
+            "expected InvalidRawName, got {err:?}"
+        );
+        assert!(
+            called.borrow().is_empty(),
+            "reader factory must not be invoked for a traversal raw_name"
+        );
+        // The PSM must not have been matched/escaped.
+        assert!(psms[0].matched_scan.is_none());
+    }
+
+    #[test]
+    fn match_scans_accepts_bare_raw_name() {
+        let dir = TempDir::new().unwrap();
+        // The legitimate file must exist so matching reaches the read path.
+        std::fs::write(dir.path().join("sample1.mzML"), b"").unwrap();
+        let config = ScanMatcherConfig {
+            rt_tolerance_min: 0.5,
+            mzml_dir: dir.path().to_path_buf(),
+        };
+        let called = std::rc::Rc::new(std::cell::RefCell::new(Vec::<PathBuf>::new()));
+        let called_in = std::rc::Rc::clone(&called);
+        let factory = move |p: &Path| -> Result<Box<dyn SpectrumReader>, ResultImportError> {
+            called_in.borrow_mut().push(p.to_path_buf());
+            Err(ResultImportError::Other("factory-reached".to_string()))
+        };
+
+        let mut psms = vec![make_psm("sample1")];
+        let err = match_scans(&mut psms, &config, &factory).unwrap_err();
+
+        // Confinement passed; we reached the (factory-driven) read path, not
+        // an InvalidRawName rejection.
+        assert!(
+            matches!(err, ResultImportError::Other(_)),
+            "expected to reach the factory read path, got {err:?}"
+        );
+        assert_eq!(called.borrow().len(), 1);
+        assert!(called.borrow()[0].ends_with("sample1.mzML"));
+    }
 
     fn make_ms2_infos() -> Vec<Ms2Info> {
         vec![
