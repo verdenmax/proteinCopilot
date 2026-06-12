@@ -55,8 +55,9 @@ pub fn digest_with_length(
     min_length: u32,
     max_length: u32,
 ) -> Vec<DigestedPeptide> {
-    let cleavage_sites = find_cleavage_sites(sequence, enzyme);
-    let fragments = split_at_sites(sequence, &cleavage_sites);
+    let chars: Vec<char> = sequence.chars().collect();
+    let cleavage_sites = find_cleavage_sites(&chars, enzyme);
+    let fragments = split_at_sites(&chars, &cleavage_sites);
     let num_fragments = fragments.len();
 
     let mut peptides = Vec::new();
@@ -88,10 +89,12 @@ pub fn digest_with_length(
 
 /// Finds cleavage positions in the sequence based on enzyme rules.
 ///
+/// Operates on a character slice so positions are character indices (not byte
+/// offsets), keeping digestion correct for multi-byte UTF-8 input.
+///
 /// Returns a sorted list of positions where cleavage occurs.
-/// A position `i` means the enzyme cuts between `sequence[i-1]` and `sequence[i]`.
-fn find_cleavage_sites(sequence: &str, enzyme: &Enzyme) -> Vec<usize> {
-    let chars: Vec<char> = sequence.chars().collect();
+/// A position `i` means the enzyme cuts between `chars[i-1]` and `chars[i]`.
+fn find_cleavage_sites(chars: &[char], enzyme: &Enzyme) -> Vec<usize> {
     let len = chars.len();
     let mut sites = Vec::new();
 
@@ -155,21 +158,25 @@ fn find_cleavage_sites(sequence: &str, enzyme: &Enzyme) -> Vec<usize> {
     sites
 }
 
-/// Splits a sequence at the given cleavage sites into fragments.
-fn split_at_sites(sequence: &str, sites: &[usize]) -> Vec<String> {
+/// Splits a character slice at the given cleavage sites into fragments.
+///
+/// `sites` are character indices (as produced by [`find_cleavage_sites`]).
+/// Slicing the `&[char]` (rather than byte-indexing the original `&str`) keeps
+/// fragment boundaries correct and panic-free for multi-byte UTF-8 sequences.
+fn split_at_sites(chars: &[char], sites: &[usize]) -> Vec<String> {
     let mut fragments = Vec::new();
     let mut prev = 0;
 
     for &site in sites {
-        if site > prev && site <= sequence.len() {
-            fragments.push(sequence[prev..site].to_string());
+        if site > prev && site <= chars.len() {
+            fragments.push(chars[prev..site].iter().collect());
             prev = site;
         }
     }
 
     // Last fragment
-    if prev < sequence.len() {
-        fragments.push(sequence[prev..].to_string());
+    if prev < chars.len() {
+        fragments.push(chars[prev..].iter().collect());
     }
 
     fragments
@@ -353,5 +360,44 @@ mod tests {
         assert_eq!(peptides.len(), 1);
         assert!(peptides[0].is_protein_nterm);
         assert!(peptides[0].is_protein_cterm);
+    }
+
+    // ---- FIX B: UTF-8-safe digestion (char-index vs byte-offset) ----
+
+    #[test]
+    fn digest_non_ascii_does_not_panic() {
+        // 'É' is a 2-byte UTF-8 codepoint, so char indices diverge from byte
+        // offsets after it. The Trypsin cleavage site (char index 3) lands in the
+        // middle of the second 'É' when used as a byte offset, which would panic
+        // a `&str[..]` slice. Char-based slicing must split safely and correctly.
+        let peptides = digest("ÉÉKAPEPTIDER", "P001", &Enzyme::Trypsin, 0);
+        let seqs: Vec<&str> = peptides.iter().map(|p| p.sequence.as_str()).collect();
+        // The all-ASCII fragment after the K cut must be recovered intact.
+        assert!(
+            seqs.contains(&"APEPTIDER"),
+            "expected APEPTIDER from UTF-8-safe digest, got: {seqs:?}"
+        );
+        // The fragment containing the non-standard residue is dropped (no mass),
+        // so it must not leak a corrupted/truncated sequence into the results.
+        assert!(
+            !seqs.iter().any(|s| s.contains('É')),
+            "non-standard residues are filtered out, got: {seqs:?}"
+        );
+    }
+
+    #[test]
+    fn digest_ascii_unchanged_after_utf8_fix() {
+        // Regression: pure-ASCII digestion boundaries are unchanged by the fix.
+        let peptides = digest(
+            "PEPTIDEKANSTHERPEPTIDERLASTPART",
+            "P001",
+            &Enzyme::Trypsin,
+            0,
+        );
+        let seqs: Vec<&str> = peptides.iter().map(|p| p.sequence.as_str()).collect();
+        assert!(seqs.contains(&"PEPTIDEK"), "got: {seqs:?}");
+        assert!(seqs.contains(&"ANSTHERPEPTIDER"), "got: {seqs:?}");
+        // Trypsin also cuts after the R in "LASTPART" → "LASTPAR" (+ "T", too short).
+        assert!(seqs.contains(&"LASTPAR"), "got: {seqs:?}");
     }
 }

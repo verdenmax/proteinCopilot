@@ -194,6 +194,91 @@ pub fn generate_y_ions_with_charge(
 }
 
 // ---------------------------------------------------------------------------
+// Position-aware fragment ion generation (variable-mod localization)
+// ---------------------------------------------------------------------------
+
+/// Generates b-ion m/z values with position-resolved modification masses.
+///
+/// `nonpositional_mods` are applied exactly as in [`generate_b_ions_with_charge`]
+/// (via [`mod_delta_fragment`]): residue-identity and terminal/global mods.
+/// `position_deltas[i]` carries the total mass shift of any *site-localized*
+/// variable modification at residue position `i`. Because the per-position
+/// deltas are accumulated along the fragment, each b-ion reflects only the
+/// modifications on the residues it actually covers — preventing the
+/// over-counting that occurs when the same residue type is modifiable at
+/// several positions.
+///
+/// Returns an empty vector if any residue is non-standard.
+fn generate_b_ions_positional(
+    chars: &[char],
+    nonpositional_mods: &[Modification],
+    position_deltas: &[f64],
+    max_charge: i32,
+) -> Vec<f64> {
+    let n = chars.len();
+    let max_z = max_charge.max(1) as usize;
+    let mut ions = Vec::with_capacity(n.saturating_sub(1) * max_z);
+    let mut cumulative = 0.0;
+    let mut cumulative_var = 0.0;
+
+    for (frag_idx, &aa) in chars[..n.saturating_sub(1)].iter().enumerate() {
+        let mass = match residue_mass(aa) {
+            Some(m) => m,
+            None => return Vec::new(),
+        };
+        cumulative += mass;
+        cumulative_var += position_deltas.get(frag_idx).copied().unwrap_or(0.0);
+        let prefix_len = frag_idx + 1;
+        let mod_delta = mod_delta_fragment(&chars[..prefix_len], nonpositional_mods, true);
+        let neutral = cumulative + mod_delta + cumulative_var;
+
+        for z in 1..=max_z {
+            ions.push((neutral + z as f64 * PROTON_MASS) / z as f64);
+        }
+    }
+
+    ions
+}
+
+/// Generates y-ion m/z values with position-resolved modification masses.
+///
+/// Mirrors [`generate_b_ions_positional`] from the C-terminus; see its docs for
+/// the meaning of `nonpositional_mods` and `position_deltas`.
+fn generate_y_ions_positional(
+    chars: &[char],
+    nonpositional_mods: &[Modification],
+    position_deltas: &[f64],
+    max_charge: i32,
+) -> Vec<f64> {
+    let n = chars.len();
+    let max_z = max_charge.max(1) as usize;
+    let mut ions = Vec::with_capacity(n.saturating_sub(1) * max_z);
+    let mut cumulative = WATER_MASS;
+    let mut cumulative_var = 0.0;
+
+    for (i, &aa) in chars.iter().rev().enumerate() {
+        if i >= n.saturating_sub(1) {
+            break;
+        }
+        let mass = match residue_mass(aa) {
+            Some(m) => m,
+            None => return Vec::new(),
+        };
+        cumulative += mass;
+        let suffix_start = n - 1 - i;
+        cumulative_var += position_deltas.get(suffix_start).copied().unwrap_or(0.0);
+        let mod_delta = mod_delta_fragment(&chars[suffix_start..], nonpositional_mods, false);
+        let neutral = cumulative + mod_delta + cumulative_var;
+
+        for z in 1..=max_z {
+            ions.push((neutral + z as f64 * PROTON_MASS) / z as f64);
+        }
+    }
+
+    ions
+}
+
+// ---------------------------------------------------------------------------
 // Fragment matching
 // ---------------------------------------------------------------------------
 
@@ -291,36 +376,39 @@ fn apply_fixed_mods(
     delta
 }
 
-/// Builds a combined modification list merging fixed mods with applied variable sites.
+/// Resolves an applied variable-mod combination into position-aware fragment inputs.
 ///
-/// Variable mods at residue positions are converted to `Anywhere` single-residue
-/// mods for fragment ion mass calculation via `mod_delta_fragment`.
-fn build_combined_mods(
+/// Splits the applied sites into two complementary pieces:
+/// - `nonpositional`: `fixed_mods` plus any *terminal/global* variable mods
+///   (`residue_pos == usize::MAX`). These are applied via [`mod_delta_fragment`]
+///   exactly as before, preserving N-term/C-term/global handling.
+/// - `position_deltas`: a per-residue-position mass-delta vector of length
+///   `seq_len`, where `position_deltas[i]` is the total mass of site-localized
+///   variable mods at residue position `i`.
+///
+/// Keeping localized variable mods position-resolved (rather than collapsing
+/// them to residue-identity `Anywhere` mods) is what makes fragment masses
+/// reflect exactly the modifications on the residues each fragment covers.
+fn resolve_combined_mods(
     fixed_mods: &[Modification],
     variable_mods: &[Modification],
     applied_sites: &[crate::varmod::ModSite],
-    sequence: &str,
-) -> Vec<Modification> {
-    use protein_copilot_core::search_params::ModPosition;
-    let chars: Vec<char> = sequence.chars().collect();
-    let mut combined: Vec<Modification> = fixed_mods.to_vec();
+    seq_len: usize,
+) -> (Vec<Modification>, Vec<f64>) {
+    let mut nonpositional: Vec<Modification> = fixed_mods.to_vec();
+    let mut position_deltas = vec![0.0; seq_len];
 
     for site in applied_sites {
         let base_mod = &variable_mods[site.mod_index];
         if site.residue_pos == usize::MAX {
-            combined.push(base_mod.clone());
-        } else {
-            let ch = chars[site.residue_pos];
-            combined.push(Modification {
-                name: base_mod.name.clone(),
-                mass_delta: base_mod.mass_delta,
-                residues: vec![ch],
-                position: ModPosition::Anywhere,
-            });
+            // Terminal/global variable mod — handled identically to fixed mods.
+            nonpositional.push(base_mod.clone());
+        } else if let Some(slot) = position_deltas.get_mut(site.residue_pos) {
+            *slot += base_mod.mass_delta;
         }
     }
 
-    combined
+    (nonpositional, position_deltas)
 }
 
 /// Matches a single spectrum against all candidate peptides.
@@ -357,6 +445,8 @@ pub fn match_spectrum(
             peptide.is_protein_cterm,
         );
 
+        let pep_chars: Vec<char> = peptide.sequence.chars().collect();
+
         // Discover applicable variable mod sites for this peptide
         let sites = crate::varmod::find_applicable_sites(
             &peptide.sequence,
@@ -372,29 +462,31 @@ pub fn match_spectrum(
             let modified_mass = peptide.neutral_mass + fixed_delta + combo.mass_delta;
 
             for &charge in &charge_states {
-                if charge == 0 {
+                if charge <= 0 {
                     continue;
                 }
                 let theoretical_mz = peptide_mz(modified_mass, charge);
 
                 if within_tolerance(observed_mz, theoretical_mz, precursor_tolerance) {
-                    let combined_mods = build_combined_mods(
+                    let (nonpositional_mods, position_deltas) = resolve_combined_mods(
                         fixed_mods,
                         variable_mods,
                         &combo.sites,
-                        &peptide.sequence,
+                        pep_chars.len(),
                     );
 
                     // Generate fragment ions: include doubly-charged when precursor z ≥ 3
                     let max_frag_charge = if charge >= 3 { 2 } else { 1 };
-                    let b_ions = generate_b_ions_with_charge(
-                        &peptide.sequence,
-                        &combined_mods,
+                    let b_ions = generate_b_ions_positional(
+                        &pep_chars,
+                        &nonpositional_mods,
+                        &position_deltas,
                         max_frag_charge,
                     );
-                    let y_ions = generate_y_ions_with_charge(
-                        &peptide.sequence,
-                        &combined_mods,
+                    let y_ions = generate_y_ions_positional(
+                        &pep_chars,
+                        &nonpositional_mods,
+                        &position_deltas,
                         max_frag_charge,
                     );
 
@@ -484,6 +576,8 @@ pub fn match_spectrum_all(
                 peptide.is_protein_cterm,
             );
 
+            let pep_chars: Vec<char> = peptide.sequence.chars().collect();
+
             let sites = crate::varmod::find_applicable_sites(
                 &peptide.sequence,
                 variable_mods,
@@ -498,28 +592,30 @@ pub fn match_spectrum_all(
                 let modified_mass = peptide.neutral_mass + fixed_delta + combo.mass_delta;
 
                 for &charge in &charge_states {
-                    if charge == 0 {
+                    if charge <= 0 {
                         continue;
                     }
                     let theoretical_mz = peptide_mz(modified_mass, charge);
 
                     if within_tolerance(observed_mz, theoretical_mz, precursor_tolerance) {
-                        let combined_mods = build_combined_mods(
+                        let (nonpositional_mods, position_deltas) = resolve_combined_mods(
                             fixed_mods,
                             variable_mods,
                             &combo.sites,
-                            &peptide.sequence,
+                            pep_chars.len(),
                         );
 
                         let max_frag_charge = if charge >= 3 { 2 } else { 1 };
-                        let b_ions = generate_b_ions_with_charge(
-                            &peptide.sequence,
-                            &combined_mods,
+                        let b_ions = generate_b_ions_positional(
+                            &pep_chars,
+                            &nonpositional_mods,
+                            &position_deltas,
                             max_frag_charge,
                         );
-                        let y_ions = generate_y_ions_with_charge(
-                            &peptide.sequence,
-                            &combined_mods,
+                        let y_ions = generate_y_ions_positional(
+                            &pep_chars,
+                            &nonpositional_mods,
+                            &position_deltas,
                             max_frag_charge,
                         );
 
@@ -1096,5 +1192,203 @@ mod tests {
         assert!(!within_tolerance(0.0, 0.0, &tol));
         assert!(!within_tolerance(100.0, 0.0, &tol));
         assert!(!within_tolerance(0.0, -1.0, &tol));
+    }
+
+    // ---- FIX A: non-positive precursor charge must not panic ----
+
+    #[test]
+    fn negative_charge_does_not_panic_match_spectrum() {
+        // The MGF reader's parse_charge returns -2 for "2-", and Spectrum::validate
+        // does NOT reject negative charge. A negative charge passes a `== 0` guard
+        // and would trip the `assert!(charge > 0)` in `peptide_mz`. The guard must
+        // be `<= 0` so such precursors are skipped rather than crashing the search.
+        let peptide = make_peptide("PEPTIDER", "P001");
+        let spectrum = make_spectrum(500.0, Some(-2), vec![100.0, 200.0, 300.0]);
+        let result = match_spectrum(
+            &spectrum,
+            &[peptide],
+            &default_tolerance(),
+            &fragment_tolerance(),
+            &[],
+            &[],
+            0,
+        );
+        assert!(
+            result.is_none(),
+            "negative precursor charge should yield no match, not panic"
+        );
+    }
+
+    #[test]
+    fn negative_charge_does_not_panic_match_spectrum_all() {
+        let peptide = make_peptide("PEPTIDER", "P001");
+        let spectrum = make_spectrum(500.0, Some(-2), vec![100.0, 200.0, 300.0]);
+        let results = match_spectrum_all(
+            &spectrum,
+            &[peptide],
+            &default_tolerance(),
+            &fragment_tolerance(),
+            &[],
+            &[],
+            0,
+        );
+        assert!(
+            results.is_empty(),
+            "negative precursor charge should yield no matches, not panic"
+        );
+    }
+
+    // ---- FIX C: position-aware variable-mod fragment masses ----
+
+    /// Builds singly-charged b/y ion peaks for `seq` with a single mass `delta`
+    /// localized to residue position `mod_pos` only (correct localization).
+    fn localized_mod_peaks(seq: &str, mod_pos: usize, delta: f64) -> Vec<f64> {
+        let chars: Vec<char> = seq.chars().collect();
+        let n = chars.len();
+        let mut peaks = Vec::new();
+
+        // b-ions: prefix [0..=k] for k = 0..n-1
+        let mut cum = 0.0;
+        let mut cum_delta = 0.0;
+        for (k, &ch) in chars.iter().enumerate().take(n.saturating_sub(1)) {
+            cum += residue_mass(ch).expect("standard residue");
+            if k == mod_pos {
+                cum_delta += delta;
+            }
+            peaks.push(cum + cum_delta + PROTON_MASS);
+        }
+
+        // y-ions: suffix [start..n) for start = n-1 down to 1
+        let mut cum_y = WATER_MASS;
+        let mut cum_y_delta = 0.0;
+        for i in 0..n.saturating_sub(1) {
+            let start = n - 1 - i;
+            cum_y += residue_mass(chars[start]).expect("standard residue");
+            if start == mod_pos {
+                cum_y_delta += delta;
+            }
+            peaks.push(cum_y + cum_y_delta + PROTON_MASS);
+        }
+
+        peaks
+    }
+
+    #[test]
+    fn match_spectrum_localizes_variable_mod_without_overcount() {
+        use protein_copilot_core::search_params::ModPosition;
+        // Peptide with the SAME modifiable residue (S) at two positions (0 and 3).
+        // Phospho is localized to ONLY the second S (position 3). The experimental
+        // peaks are the correct, position-resolved fragments. With the buggy
+        // residue-identity handling, b-ions covering the *unmodified* S@0 are
+        // over-shifted (and b4/b5 double-shifted), collapsing the score to ~0.5.
+        let phospho = Modification {
+            name: "Phospho".to_string(),
+            mass_delta: 79.966331,
+            residues: vec!['S', 'T', 'Y'],
+            position: ModPosition::Anywhere,
+        };
+        let seq = "SAGSIK";
+        let peptide = make_peptide(seq, "P001");
+
+        let mut peaks = localized_mod_peaks(seq, 3, 79.966331);
+        peaks.sort_by(|a, b| a.total_cmp(b));
+
+        let modified_mass = peptide.neutral_mass + 79.966331;
+        let mz_z2 = peptide_mz(modified_mass, 2);
+
+        let spectrum = make_spectrum(mz_z2, Some(2), peaks);
+        let result = match_spectrum(
+            &spectrum,
+            std::slice::from_ref(&peptide),
+            &default_tolerance(),
+            &fragment_tolerance(),
+            &[],
+            std::slice::from_ref(&phospho),
+            1, // localize exactly one variable mod
+        );
+
+        let m = result.expect("should match the singly-phosphorylated peptide");
+        assert!(
+            m.score > 0.99,
+            "position-aware fragments should match all ions (~1.0); got {} (buggy ~0.5)",
+            m.score
+        );
+        assert_eq!(
+            m.applied_variable_mods.len(),
+            1,
+            "exactly one phospho should be applied"
+        );
+        assert_eq!(
+            m.applied_variable_mods[0].1, 3,
+            "phospho should localize to S at residue position 3"
+        );
+    }
+
+    #[test]
+    fn positional_fragments_carry_exactly_one_delta() {
+        // "SAGSIK" has S at positions 0 and 3. Phospho is localized to S@3 only.
+        // The buggy residue-identity handling would add the delta for EVERY S in
+        // a fragment (b1..b3 each +1, b4/b5 +2). Position-aware masses must carry
+        // exactly the delta of the residues each fragment covers.
+        let seq: Vec<char> = "SAGSIK".chars().collect();
+        let phospho = 79.966331;
+        let deltas = vec![0.0, 0.0, 0.0, phospho, 0.0, 0.0];
+        let zero = vec![0.0; seq.len()];
+
+        let b_mod = generate_b_ions_positional(&seq, &[], &deltas, 1);
+        let b_un = generate_b_ions_positional(&seq, &[], &zero, 1);
+        let y_mod = generate_y_ions_positional(&seq, &[], &deltas, 1);
+        let y_un = generate_y_ions_positional(&seq, &[], &zero, 1);
+
+        assert_eq!(b_mod.len(), 5, "b1..b5");
+        assert_eq!(y_mod.len(), 5, "y1..y5");
+
+        let approx = |got: f64, want: f64| (got - want).abs() < 1e-6;
+
+        // (b) b1..b3 cover the UNMODIFIED S@0 but not S@3 → zero delta.
+        for i in 0..3 {
+            assert!(
+                approx(b_mod[i] - b_un[i], 0.0),
+                "b{} must carry no delta, got {}",
+                i + 1,
+                b_mod[i] - b_un[i]
+            );
+        }
+        // (a)+(c) b4 covers BOTH S residues (only S@3 modified) → exactly ONE delta;
+        // b5 likewise. The buggy path would yield 2×phospho here.
+        assert!(
+            approx(b_mod[3] - b_un[3], phospho),
+            "b4 must carry exactly one delta, got {}",
+            b_mod[3] - b_un[3]
+        );
+        assert!(
+            approx(b_mod[4] - b_un[4], phospho),
+            "b5 must carry exactly one delta, got {}",
+            b_mod[4] - b_un[4]
+        );
+
+        // (b) y1,y2 do not reach S@3 → zero delta.
+        assert!(approx(y_mod[0] - y_un[0], 0.0), "y1 must carry no delta");
+        assert!(approx(y_mod[1] - y_un[1], 0.0), "y2 must carry no delta");
+        // (a) y3,y4,y5 cover S@3 → exactly one delta each.
+        for i in 2..5 {
+            assert!(
+                approx(y_mod[i] - y_un[i], phospho),
+                "y{} must carry exactly one delta, got {}",
+                i + 1,
+                y_mod[i] - y_un[i]
+            );
+        }
+
+        // (d) A complementary b/y pair tiling the whole peptide (b3 covers 0..=2,
+        // y3 covers 3..=5) must account for the delta exactly ONCE total — i.e.
+        // fragment masses stay consistent with the precursor's single +phospho.
+        let b3_delta = b_mod[2] - b_un[2];
+        let y3_delta = y_mod[2] - y_un[2];
+        assert!(
+            approx(b3_delta + y3_delta, phospho),
+            "complementary b3+y3 delta must equal one phospho, got {}",
+            b3_delta + y3_delta
+        );
     }
 }
