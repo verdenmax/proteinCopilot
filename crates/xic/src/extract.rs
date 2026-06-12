@@ -7,7 +7,7 @@
 use std::path::Path;
 
 use protein_copilot_core::search_params::{MassTolerance, Modification, ToleranceUnit};
-use protein_copilot_core::spectrum::{IsolationWindow, MsLevel};
+use protein_copilot_core::spectrum::{IsolationWindow, MsLevel, Spectrum};
 use protein_copilot_search_engine::matching::{
     generate_b_ions_with_charge, generate_y_ions_with_charge, within_tolerance,
 };
@@ -1423,11 +1423,6 @@ pub fn extract_xic_unified(
             .collect();
         ms2_light_points.push((spec.scan_number, spec.retention_time_min, light_intensities));
 
-        // DDA: heavy from same scans
-        if !needs_separate_heavy_window && !heavy_ions.is_empty() {
-            // will be handled below
-        }
-
         raw_ms2_light_scans.push(crate::RawScan {
             scan_number: spec.scan_number,
             retention_time_min: spec.retention_time_min,
@@ -1436,35 +1431,18 @@ pub fn extract_xic_unified(
         });
     }
 
-    // DDA heavy: extract from the same light scans we already read
+    // --- Heavy MS2 extraction ---
+    //
+    // Light and heavy peptides co-elute but are selected by different precursor
+    // m/z, so heavy fragment ions live in MS2 scan(s) distinct from the light
+    // ones. They must be located by the heavy precursor — never reused from the
+    // light scans.
     let mut ms2_heavy_points: Vec<Ms2Point> = Vec::new();
-    if !needs_separate_heavy_window && !heavy_ions.is_empty() {
-        // Re-extract heavy from already-read light scans
-        for raw_scan in &raw_ms2_light_scans {
-            let heavy_intensities: Vec<(f64, Option<f64>)> = heavy_ions
-                .iter()
-                .map(|ion| {
-                    extract_intensity(
-                        ion.mz,
-                        &raw_scan.mz_array,
-                        &raw_scan.intensity_array,
-                        &params.mz_tolerance,
-                        params.intensity_rule,
-                    )
-                })
-                .collect();
-            ms2_heavy_points.push((
-                raw_scan.scan_number,
-                raw_scan.retention_time_min,
-                heavy_intensities,
-            ));
-        }
-    }
+    let mut raw_ms2_heavy_scans: Vec<crate::RawScan> = Vec::with_capacity(planned_heavy_ms2.len());
 
-    // DIA+SILAC heavy: read separate scans
-    let mut raw_ms2_heavy_scans: Vec<crate::RawScan> =
-        Vec::with_capacity(planned_heavy_ms2.len());
     if needs_separate_heavy_window {
+        // DIA + SILAC: heavy fragments come from MS2 scans whose (wide) isolation
+        // window covers the heavy precursor (planned in Step 5).
         for &(scan_num, _rt) in &planned_heavy_ms2 {
             let spec = reader.read_spectrum(file_path, scan_num)?;
             let heavy_intensities: Vec<(f64, Option<f64>)> = heavy_ions
@@ -1487,6 +1465,88 @@ pub fn extract_xic_unified(
                 mz_array: spec.mz_array.clone(),
                 intensity_array: spec.intensity_array.clone(),
             });
+        }
+    } else if !heavy_ions.is_empty() {
+        // DDA + SILAC: each MS2 scan is triggered by a single narrow-window
+        // precursor selection. The light scan selected the LIGHT precursor, so the
+        // heavy peptide was fragmented in a DIFFERENT MS2 scan. Locate the scan(s)
+        // that actually selected the heavy precursor.
+        if let Some(heavy_mz) = heavy_precursor_mz {
+            let tol_ppm = match params.mz_tolerance.unit {
+                ToleranceUnit::Ppm => params.mz_tolerance.value,
+                ToleranceUnit::Da => params.mz_tolerance.value / heavy_mz * 1e6,
+            };
+
+            // Metadata pre-filter: candidate MS2 scans whose isolation-window
+            // center is within tolerance of the heavy precursor (avoids reading
+            // every spectrum). When metadata carries no isolation window, fall
+            // back to treating every MS2 scan as a candidate.
+            let mut heavy_candidate_meta: Vec<&protein_copilot_spectrum_io::ScanMetaInfo> =
+                all_meta
+                    .iter()
+                    .filter(|m| {
+                        if m.ms_level != 2 {
+                            return false;
+                        }
+                        match &m.isolation_window {
+                            Some(w) => ((w.0 - heavy_mz) / heavy_mz * 1e6).abs() <= tol_ppm,
+                            None => true,
+                        }
+                    })
+                    .collect();
+            heavy_candidate_meta.sort_by_key(|m| m.scan_number);
+
+            // Read only the candidate scans (typically a handful).
+            let mut candidate_spectra: Vec<Spectrum> =
+                Vec::with_capacity(heavy_candidate_meta.len());
+            for m in &heavy_candidate_meta {
+                candidate_spectra.push(reader.read_spectrum(file_path, m.scan_number)?);
+            }
+            candidate_spectra.sort_by_key(|s| s.scan_number);
+
+            // Locate the heavy scan: closest RT to the target whose precursor m/z
+            // matches the heavy precursor within tolerance. The borrow ends when
+            // the call returns, so we can reuse `candidate_spectra` afterwards.
+            let center =
+                crate::heavy::find_dda_heavy_scan(&candidate_spectra, target_rt, heavy_mz, tol_ppm);
+
+            if let Some(center_scan) = center {
+                if let Some(pos) = candidate_spectra
+                    .iter()
+                    .position(|s| s.scan_number == center_scan)
+                {
+                    let n = params.n_cycles as usize;
+                    let h_start = pos.saturating_sub(n);
+                    let h_end = (pos + n + 1).min(candidate_spectra.len());
+                    for spec in &candidate_spectra[h_start..h_end] {
+                        let heavy_intensities: Vec<(f64, Option<f64>)> = heavy_ions
+                            .iter()
+                            .map(|ion| {
+                                extract_intensity(
+                                    ion.mz,
+                                    &spec.mz_array,
+                                    &spec.intensity_array,
+                                    &params.mz_tolerance,
+                                    params.intensity_rule,
+                                )
+                            })
+                            .collect();
+                        ms2_heavy_points.push((
+                            spec.scan_number,
+                            spec.retention_time_min,
+                            heavy_intensities,
+                        ));
+                        raw_ms2_heavy_scans.push(crate::RawScan {
+                            scan_number: spec.scan_number,
+                            retention_time_min: spec.retention_time_min,
+                            mz_array: spec.mz_array.clone(),
+                            intensity_array: spec.intensity_array.clone(),
+                        });
+                    }
+                }
+            }
+            // `None` → no MS2 scan selected the heavy precursor; leave
+            // `ms2_heavy_points` empty so the heavy_warning below fires.
         }
     }
 
@@ -1645,11 +1705,17 @@ pub fn extract_xic_unified(
         })
     };
 
-    let heavy_warning = if needs_separate_heavy_window && ms2_heavy_points.is_empty() {
-        Some(format!(
-            "Heavy precursor m/z ({:.4}) is outside all DIA MS2 isolation windows. Heavy MS2 traces unavailable.",
-            heavy_precursor_mz.unwrap_or(0.0)
-        ))
+    let heavy_warning = if !heavy_ions.is_empty() && ms2_heavy_points.is_empty() {
+        let heavy_mz = heavy_precursor_mz.unwrap_or(0.0);
+        Some(if is_dia {
+            format!(
+                "Heavy precursor m/z ({heavy_mz:.4}) is outside all DIA MS2 isolation windows. Heavy MS2 traces unavailable."
+            )
+        } else {
+            format!(
+                "No MS2 scan selecting the heavy precursor (m/z {heavy_mz:.4}) was found near RT {target_rt:.2} min; heavy traces unavailable."
+            )
+        })
     } else {
         None
     };
@@ -2065,6 +2131,226 @@ mod tests {
             result.raw_scans.ms2_scans.len(),
             3,
             "expected all 3 MS2 scans in the isolation window to be extracted"
+        );
+    }
+
+    /// Write a synthetic `.pfb` from `(property_string, mz, intensity)` records
+    /// and return the temp dir (kept alive) plus the file path.
+    fn write_pfb_records(
+        recs: &[(String, Vec<f64>, Vec<f64>)],
+    ) -> (tempfile::TempDir, std::path::PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("xic.pfb");
+        let header_size: u64 = 24;
+        let mut body: Vec<u8> = Vec::new();
+        let mut offsets: Vec<u64> = Vec::new();
+        for (prop, mz, inten) in recs {
+            offsets.push(header_size + body.len() as u64);
+            let pb = prop.as_bytes();
+            body.extend_from_slice(&(pb.len() as i32).to_le_bytes());
+            body.extend_from_slice(pb);
+            body.extend_from_slice(&(mz.len() as i32).to_le_bytes());
+            for &m in mz {
+                body.extend_from_slice(&m.to_le_bytes());
+            }
+            for &v in inten {
+                body.extend_from_slice(&v.to_le_bytes());
+            }
+        }
+        let addr_list_addr = header_size + body.len() as u64;
+        let mut out: Vec<u8> = Vec::new();
+        out.extend_from_slice(&0i32.to_le_bytes());
+        out.extend_from_slice(&0i32.to_le_bytes());
+        out.extend_from_slice(&0i32.to_le_bytes());
+        out.extend_from_slice(&(addr_list_addr as i64).to_le_bytes());
+        out.extend_from_slice(&(recs.len() as i32).to_le_bytes());
+        out.extend_from_slice(&body);
+        for &off in &offsets {
+            out.extend_from_slice(&(off as i64).to_le_bytes());
+        }
+        std::fs::write(&path, &out).unwrap();
+        (dir, path)
+    }
+
+    fn silac_label() -> protein_copilot_core::label::LabelType {
+        protein_copilot_core::label::LabelType::Silac {
+            heavy_k_delta: 8.014199,
+            heavy_r_delta: 10.008269,
+        }
+    }
+
+    /// DDA + SILAC: heavy fragment ions must be extracted from the MS2 scan that
+    /// selected the HEAVY precursor (a different narrow-window scan), never from
+    /// the light peptide's MS2 scan.
+    #[test]
+    fn dda_silac_heavy_extracted_from_heavy_precursor_scan() {
+        use protein_copilot_core::search_params::{MassTolerance, ToleranceUnit};
+
+        let peptide = "PEPTIDEK"; // exactly one K → unambiguous SILAC shift
+        let charge = 2;
+        let light_precursor = 500.5;
+        let label = silac_label();
+
+        let light_ions = build_target_ions(peptide, &[], charge);
+        let heavy_ions = crate::heavy::compute_heavy_target_ions(&light_ions, peptide, &label);
+        let heavy_precursor =
+            crate::heavy::compute_heavy_precursor_mz(light_precursor, charge, peptide, &label);
+
+        let light_mz: Vec<f64> = light_ions.iter().map(|i| i.mz).collect();
+        let light_int: Vec<f64> = light_mz.iter().map(|_| 1000.0).collect();
+        let heavy_mz: Vec<f64> = heavy_ions.iter().map(|i| i.mz).collect();
+        // Distinctive intensity so we can prove the heavy signal came from scan 3.
+        let heavy_int: Vec<f64> = heavy_mz.iter().map(|_| 777.0).collect();
+
+        // MS1 (scan 1) + LIGHT MS2 (scan 2) + HEAVY MS2 (scan 3), all narrow DDA
+        // windows (ActivationWindow 0.7 → offsets 0.35 → total 0.7 < 1.0).
+        let recs: Vec<(String, Vec<f64>, Vec<f64>)> = vec![
+            (
+                "1\t1\t60.5\tFTMS".to_string(),
+                vec![light_precursor, heavy_precursor],
+                vec![5000.0, 4000.0],
+            ),
+            (
+                format!(
+                    "2\t2\t60.5\tFTMS\t{charge}\t1000.0\t50\t{light_precursor}\tHCD\t1\t0.7\t27.0\t{light_precursor}"
+                ),
+                light_mz.clone(),
+                light_int.clone(),
+            ),
+            (
+                format!(
+                    "3\t2\t61.0\tFTMS\t{charge}\t1000.0\t50\t{heavy_precursor}\tHCD\t1\t0.7\t27.0\t{heavy_precursor}"
+                ),
+                heavy_mz.clone(),
+                heavy_int.clone(),
+            ),
+        ];
+
+        let (_d, p) = write_pfb_records(&recs);
+        let reader = protein_copilot_spectrum_io::create_indexed_reader(&p).unwrap();
+        let params = ExtractionParams {
+            mz_tolerance: MassTolerance {
+                value: 20.0,
+                unit: ToleranceUnit::Ppm,
+            },
+            n_cycles: 2,
+            top_n_ions: usize::MAX,
+            label_type: Some(label),
+            intensity_rule: IntensityRule::MaxInWindow,
+        };
+
+        // Target the LIGHT scan (2); the heavy peptide lives in scan 3.
+        let result = extract_xic_unified(
+            reader.as_ref(),
+            &p,
+            2,
+            peptide,
+            charge,
+            light_precursor,
+            &[],
+            &params,
+            20.0,
+        )
+        .unwrap();
+
+        let heavy_scan_nums: Vec<u32> = result
+            .raw_scans
+            .ms2_heavy_scans
+            .iter()
+            .map(|s| s.scan_number)
+            .collect();
+        assert!(
+            heavy_scan_nums.contains(&3),
+            "heavy raw scans must include the heavy precursor's MS2 scan (3); got {heavy_scan_nums:?}"
+        );
+        assert!(
+            !heavy_scan_nums.contains(&2),
+            "heavy fragments must NOT be sourced from the light scan (2); got {heavy_scan_nums:?}"
+        );
+        let has_heavy_signal = result.xic_data.heavy_fragment_xic_traces.iter().any(|t| {
+            t.data_points
+                .iter()
+                .any(|p| (p.intensity - 777.0).abs() < 1e-6)
+        });
+        assert!(
+            has_heavy_signal,
+            "heavy fragment traces should carry the heavy scan's distinctive 777.0 intensity"
+        );
+        assert!(
+            result.xic_data.heavy_warning.is_none(),
+            "no heavy_warning expected when the heavy scan is found: {:?}",
+            result.xic_data.heavy_warning
+        );
+    }
+
+    /// DDA + SILAC with NO heavy-precursor scan in the data: heavy traces must be
+    /// empty and a `heavy_warning` must fire (never fall back to the light scan).
+    #[test]
+    fn dda_silac_missing_heavy_scan_emits_warning() {
+        use protein_copilot_core::search_params::{MassTolerance, ToleranceUnit};
+
+        let peptide = "PEPTIDEK";
+        let charge = 2;
+        let light_precursor = 500.5;
+        let label = silac_label();
+
+        let light_ions = build_target_ions(peptide, &[], charge);
+        let light_mz: Vec<f64> = light_ions.iter().map(|i| i.mz).collect();
+        let light_int: Vec<f64> = light_mz.iter().map(|_| 1000.0).collect();
+
+        // Only MS1 + the LIGHT MS2 scan — the heavy precursor was never selected.
+        let recs: Vec<(String, Vec<f64>, Vec<f64>)> = vec![
+            (
+                "1\t1\t60.5\tFTMS".to_string(),
+                vec![light_precursor],
+                vec![5000.0],
+            ),
+            (
+                format!(
+                    "2\t2\t60.5\tFTMS\t{charge}\t1000.0\t50\t{light_precursor}\tHCD\t1\t0.7\t27.0\t{light_precursor}"
+                ),
+                light_mz.clone(),
+                light_int.clone(),
+            ),
+        ];
+
+        let (_d, p) = write_pfb_records(&recs);
+        let reader = protein_copilot_spectrum_io::create_indexed_reader(&p).unwrap();
+        let params = ExtractionParams {
+            mz_tolerance: MassTolerance {
+                value: 20.0,
+                unit: ToleranceUnit::Ppm,
+            },
+            n_cycles: 2,
+            top_n_ions: usize::MAX,
+            label_type: Some(label),
+            intensity_rule: IntensityRule::MaxInWindow,
+        };
+
+        let result = extract_xic_unified(
+            reader.as_ref(),
+            &p,
+            2,
+            peptide,
+            charge,
+            light_precursor,
+            &[],
+            &params,
+            20.0,
+        )
+        .unwrap();
+
+        assert!(
+            result.raw_scans.ms2_heavy_scans.is_empty(),
+            "no heavy scan exists, so heavy raw scans must be empty"
+        );
+        assert!(
+            result.xic_data.heavy_fragment_xic_traces.is_empty(),
+            "no heavy scan exists, so heavy fragment traces must be empty"
+        );
+        assert!(
+            result.xic_data.heavy_warning.is_some(),
+            "a heavy_warning must fire when no heavy-precursor MS2 scan is found"
         );
     }
 }
