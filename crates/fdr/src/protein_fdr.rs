@@ -7,7 +7,7 @@
 //! 4. Apply standard target-decoy FDR on the winner list
 //! 5. Assign q-values to winning target groups
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::calculation::{calculate_fdr, ScoredPsm};
 use crate::error::FdrError;
@@ -61,12 +61,12 @@ pub fn calculate_protein_fdr(groups: &[ProteinGroup]) -> Result<ProteinFdrResult
 
     // Compete within pairs and collect winners.
     let mut winners: Vec<(usize, bool)> = Vec::new(); // (index into groups, is_decoy)
-    let mut paired_decoy_keys: Vec<String> = Vec::new();
+    let mut paired_decoy_keys: HashSet<String> = HashSet::new();
 
     for (&target_acc, &target_idx) in &target_map {
         if let Some(&decoy_idx) = decoy_map.get(target_acc) {
             // Paired: compete. Ties → target wins.
-            paired_decoy_keys.push(target_acc.to_string());
+            paired_decoy_keys.insert(target_acc.to_string());
             if groups[target_idx].score >= groups[decoy_idx].score {
                 winners.push((target_idx, false));
             } else {
@@ -98,7 +98,11 @@ pub fn calculate_protein_fdr(groups: &[ProteinGroup]) -> Result<ProteinFdrResult
                 g
             })
             .collect();
-        result_groups.sort_by(|a, b| b.score.total_cmp(&a.score));
+        result_groups.sort_by(|a, b| {
+            b.score
+                .total_cmp(&a.score)
+                .then_with(|| a.leader_accession.cmp(&b.leader_accession))
+        });
 
         let target_groups_at_1pct = result_groups.len() as u64;
         return Ok(ProteinFdrResult {
@@ -138,8 +142,13 @@ pub fn calculate_protein_fdr(groups: &[ProteinGroup]) -> Result<ProteinFdrResult
         result_groups.push(g);
     }
 
-    // Sort by score descending for consistent output ordering.
-    result_groups.sort_by(|a, b| b.score.total_cmp(&a.score));
+    // Sort by score descending, then leader accession ascending for a fully
+    // deterministic output order even when scores (and q-values) are tied.
+    result_groups.sort_by(|a, b| {
+        b.score
+            .total_cmp(&a.score)
+            .then_with(|| a.leader_accession.cmp(&b.leader_accession))
+    });
 
     let target_groups_at_1pct = result_groups
         .iter()
@@ -362,6 +371,78 @@ mod tests {
     fn empty_input_returns_error() {
         let result = calculate_protein_fdr(&[]);
         assert!(matches!(result, Err(FdrError::NoPsms)));
+    }
+
+    #[test]
+    fn tied_target_winners_deterministic_order() {
+        // Five target winners with identical scores, plus an unpaired decoy winner
+        // (so the FDR/TDC path runs). Tied groups must be emitted in a deterministic
+        // order — sorted by score descending, then leader_accession ascending.
+        let build = || {
+            vec![
+                make_group("P001", 10.0, false),
+                make_group("REV_P001", 1.0, true),
+                make_group("P002", 10.0, false),
+                make_group("REV_P002", 1.0, true),
+                make_group("P003", 10.0, false),
+                make_group("REV_P003", 1.0, true),
+                make_group("P004", 10.0, false),
+                make_group("REV_P004", 1.0, true),
+                make_group("P005", 10.0, false),
+                make_group("REV_P005", 1.0, true),
+                make_group("REV_P999", 0.5, true), // unpaired decoy → decoy winner
+            ]
+        };
+
+        let expected_order = vec!["P001", "P002", "P003", "P004", "P005"];
+
+        // Run many times: each call builds fresh HashMaps (different seeds), so a
+        // non-deterministic ordering would surface quickly.
+        for _ in 0..16 {
+            let result = calculate_protein_fdr(&build()).unwrap();
+            let order: Vec<&str> = result
+                .groups
+                .iter()
+                .map(|g| g.leader_accession.as_str())
+                .collect();
+            assert_eq!(
+                order, expected_order,
+                "tied target winners must be emitted in deterministic (score desc, leader asc) order"
+            );
+            // Tied scores must share one q-value (see FIX 1).
+            let qs: Vec<f64> = result.groups.iter().map(|g| g.q_value.unwrap()).collect();
+            for q in &qs {
+                assert!(
+                    (q - qs[0]).abs() < f64::EPSILON,
+                    "tied winners must share one q-value: {qs:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn many_unpaired_decoys_no_panic_and_correct() {
+        // Exercises the unpaired-decoy membership check (Vec→HashSet change):
+        // mix of paired (target wins) and several unpaired decoys.
+        let groups = vec![
+            make_group("P001", 30.0, false),
+            make_group("REV_P001", 2.0, true), // paired, target wins
+            make_group("P002", 28.0, false),
+            make_group("REV_P002", 2.0, true), // paired, target wins
+            make_group("REV_X1", 1.0, true),   // unpaired decoy
+            make_group("REV_X2", 1.0, true),   // unpaired decoy
+            make_group("REV_X3", 1.0, true),   // unpaired decoy
+        ];
+        let result = calculate_protein_fdr(&groups).unwrap();
+        let accessions: Vec<&str> = result
+            .groups
+            .iter()
+            .map(|g| g.leader_accession.as_str())
+            .collect();
+        assert!(accessions.contains(&"P001"));
+        assert!(accessions.contains(&"P002"));
+        // Only the two winning targets are returned.
+        assert_eq!(result.groups.len(), 2);
     }
 
     #[test]

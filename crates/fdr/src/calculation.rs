@@ -83,6 +83,25 @@ pub fn calculate_fdr(psms: &[ScoredPsm]) -> Result<Vec<(usize, f64)>, FdrError> 
         }
     }
 
+    // Flatten tie groups: PSMs with identical scores must receive the SAME FDR.
+    // For each maximal run of equal scores [lo, hi) in the descending-sorted array,
+    // set every position to the FDR at the LAST position of the run (after counting
+    // ALL targets+decoys at that score). This removes input-order dependence for ties.
+    let mut lo = 0;
+    while lo < sorted.len() {
+        let mut hi = lo + 1;
+        while hi < sorted.len()
+            && sorted[hi].score.total_cmp(&sorted[lo].score) == std::cmp::Ordering::Equal
+        {
+            hi += 1;
+        }
+        let tie_fdr = raw_fdrs[hi - 1];
+        for fdr in &mut raw_fdrs[lo..hi] {
+            *fdr = tie_fdr;
+        }
+        lo = hi;
+    }
+
     // Enforce monotonicity: walk backward
     let mut q_values = raw_fdrs;
     for i in (0..q_values.len().saturating_sub(1)).rev() {
@@ -227,6 +246,83 @@ mod tests {
             matches!(result, Err(FdrError::NoDecoyHits)),
             "all targets, no decoys: should return NoDecoyHits error"
         );
+    }
+
+    #[test]
+    fn fdr_tied_score_target_decoy_same_qvalue() {
+        // Two PSMs with identical score, one target one decoy.
+        // They MUST receive the same q-value regardless of which sorts first.
+        let psms = vec![
+            ScoredPsm {
+                index: 0,
+                score: 5.0,
+                is_decoy: false,
+            },
+            ScoredPsm {
+                index: 1,
+                score: 5.0,
+                is_decoy: true,
+            },
+        ];
+        let result = calculate_fdr(&psms).unwrap();
+        let q0 = result.iter().find(|(i, _)| *i == 0).unwrap().1;
+        let q1 = result.iter().find(|(i, _)| *i == 1).unwrap().1;
+        assert!(
+            (q0 - q1).abs() < f64::EPSILON,
+            "tied PSMs must share one q-value: target q={q0}, decoy q={q1}"
+        );
+    }
+
+    #[test]
+    fn fdr_order_independence_with_ties() {
+        // Build a set containing a tied (target, decoy) pair at score 8.0.
+        // q-values per original index must be identical regardless of input order.
+        let psms = vec![
+            ScoredPsm {
+                index: 0,
+                score: 10.0,
+                is_decoy: false,
+            },
+            ScoredPsm {
+                index: 1,
+                score: 8.0,
+                is_decoy: false,
+            },
+            ScoredPsm {
+                index: 2,
+                score: 8.0,
+                is_decoy: true,
+            },
+            ScoredPsm {
+                index: 3,
+                score: 6.0,
+                is_decoy: false,
+            },
+            ScoredPsm {
+                index: 4,
+                score: 5.0,
+                is_decoy: true,
+            },
+        ];
+
+        let q_of = |res: &[(usize, f64)]| -> std::collections::HashMap<usize, f64> {
+            res.iter().copied().collect()
+        };
+
+        let forward = q_of(&calculate_fdr(&psms).unwrap());
+
+        let mut reversed = psms.clone();
+        reversed.reverse();
+        let backward = q_of(&calculate_fdr(&reversed).unwrap());
+
+        for idx in 0..psms.len() {
+            assert!(
+                (forward[&idx] - backward[&idx]).abs() < f64::EPSILON,
+                "q-value for index {idx} must be order-independent: {} vs {}",
+                forward[&idx],
+                backward[&idx]
+            );
+        }
     }
 
     #[test]

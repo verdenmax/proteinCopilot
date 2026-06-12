@@ -90,7 +90,7 @@ fn group_indistinguishable(map: &PeptideProteinMap) -> Vec<IndistinguishableGrou
             .push(protein.clone());
     }
 
-    key_to_proteins
+    let mut groups: Vec<IndistinguishableGroup> = key_to_proteins
         .into_iter()
         .map(|(pep_key, mut members)| {
             // Sort members alphabetically for deterministic leader selection.
@@ -103,14 +103,25 @@ fn group_indistinguishable(map: &PeptideProteinMap) -> Vec<IndistinguishableGrou
                 score,
             }
         })
-        .collect()
+        .collect();
+    // Deterministic ordering: each protein belongs to exactly one group, so the
+    // (alphabetically-sorted) member lists provide a total order.
+    groups.sort_by(|a, b| a.members.cmp(&b.members));
+    groups
 }
 
 /// Remove subset proteins: if group A's peptides ⊂ group B's peptides,
 /// merge A's members into B and drop A.
 fn remove_subsets(groups: &mut Vec<IndistinguishableGroup>) {
-    // Sort by peptide count descending so larger sets come first.
-    groups.sort_by(|a, b| b.peptides.len().cmp(&a.peptides.len()));
+    // Sort by peptide count descending so larger sets come first; break ties by
+    // the alphabetically-first member so equal-sized supersets have a stable order
+    // and a strict subset is always absorbed into the SAME superset.
+    groups.sort_by(|a, b| {
+        b.peptides
+            .len()
+            .cmp(&a.peptides.len())
+            .then_with(|| a.members[0].cmp(&b.members[0]))
+    });
 
     let n = groups.len();
     let mut subsumed = vec![false; n];
@@ -533,6 +544,60 @@ mod tests {
         assert_eq!(groups[0].member_accessions.len(), 3);
         assert!(groups[0].member_accessions.contains(&"PROT_B".to_string()));
         assert!(groups[0].member_accessions.contains(&"PROT_C".to_string()));
+    }
+
+    #[test]
+    fn test_subset_absorbed_into_deterministic_superset() {
+        // C = {P1, P2} is a strict subset of BOTH equal-sized supersets:
+        //   A = {P1, P2, P3}  and  B = {P1, P2, P4}
+        // A and B are not subsets of each other. The absorbing superset must be
+        // deterministic (the alphabetically-first equal-sized superset = PROT_A),
+        // independent of HashMap iteration order.
+        let make = || {
+            build_map(&[
+                ("P1", &["PROT_A", "PROT_B", "PROT_C"], 10.0),
+                ("P2", &["PROT_A", "PROT_B", "PROT_C"], 9.0),
+                ("P3", &["PROT_A"], 8.0),
+                ("P4", &["PROT_B"], 7.0),
+            ])
+        };
+
+        let signature = |groups: &[ProteinGroup]| -> Vec<String> {
+            let mut sig: Vec<String> = groups
+                .iter()
+                .map(|g| {
+                    let mut members = g.member_accessions.clone();
+                    members.sort();
+                    format!("{}=[{}]", g.leader_accession, members.join(","))
+                })
+                .collect();
+            sig.sort();
+            sig
+        };
+
+        let mut first_sig: Option<Vec<String>> = None;
+        // Each run rebuilds HashMaps (different seeds); a non-deterministic
+        // absorber/ordering would surface quickly.
+        for _ in 0..16 {
+            let groups = run_parsimony(&make()).unwrap();
+
+            // C must always be absorbed into PROT_A's group.
+            let c_group = groups
+                .iter()
+                .find(|g| g.member_accessions.contains(&"PROT_C".to_string()))
+                .expect("PROT_C must belong to some group");
+            assert_eq!(
+                c_group.leader_accession, "PROT_A",
+                "PROT_C must be absorbed into the alphabetically-first equal-sized superset"
+            );
+
+            // The overall group set must be reproducible.
+            let sig = signature(&groups);
+            match &first_sig {
+                None => first_sig = Some(sig),
+                Some(expected) => assert_eq!(&sig, expected, "group set must be reproducible"),
+            }
+        }
     }
 
     #[test]

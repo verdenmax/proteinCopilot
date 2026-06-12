@@ -201,19 +201,17 @@ fn select_preset(lower_type: &str, is_open_search: bool) -> SearchParams {
 }
 
 /// Merge fixed and variable modifications from `source` into `target`,
-/// avoiding duplicates (by modification name).
+/// avoiding duplicates by FULL modification identity (name, mass, residues,
+/// position) rather than name alone — so distinct modifications that share a
+/// name (e.g. TMT on K vs. TMT on the peptide N-terminus) are both retained.
 fn merge_modifications(target: &mut SearchParams, source: &SearchParams) {
     for m in &source.fixed_modifications {
-        if !target.fixed_modifications.iter().any(|t| t.name == m.name) {
+        if !target.fixed_modifications.iter().any(|t| t == m) {
             target.fixed_modifications.push(m.clone());
         }
     }
     for m in &source.variable_modifications {
-        if !target
-            .variable_modifications
-            .iter()
-            .any(|t| t.name == m.name)
-        {
+        if !target.variable_modifications.iter().any(|t| t == m) {
             target.variable_modifications.push(m.clone());
         }
     }
@@ -547,6 +545,67 @@ mod tests {
             .fixed_modifications
             .iter()
             .any(|m| m.name == "TMT6plex"));
+    }
+
+    #[test]
+    fn merge_keeps_distinct_mods_with_same_name() {
+        use protein_copilot_core::search_params::{ModPosition, Modification};
+
+        // Two distinct TMT modifications sharing the SAME name but differing in
+        // residues/position (K-anchored vs peptide N-term).
+        let tmt_k = Modification {
+            name: "TMT6plex".to_string(),
+            mass_delta: 229.162932,
+            residues: vec!['K'],
+            position: ModPosition::Anywhere,
+        };
+        let tmt_nterm = Modification {
+            name: "TMT6plex".to_string(),
+            mass_delta: 229.162932,
+            residues: vec![],
+            position: ModPosition::AnyNTerm,
+        };
+
+        let mut target = preset::standard_preset().params;
+        let n_fixed_before = target.fixed_modifications.len();
+        let mut source = preset::standard_preset().params;
+        source.fixed_modifications = vec![tmt_k.clone(), tmt_nterm.clone()];
+
+        merge_modifications(&mut target, &source);
+
+        // BOTH TMT mods must survive — dedup must use full identity, not name alone.
+        assert!(
+            target
+                .fixed_modifications
+                .iter()
+                .any(|m| m.name == "TMT6plex"
+                    && m.residues == vec!['K']
+                    && m.position == ModPosition::Anywhere),
+            "K-anchored TMT must survive the merge"
+        );
+        assert!(
+            target
+                .fixed_modifications
+                .iter()
+                .any(|m| m.name == "TMT6plex"
+                    && m.residues.is_empty()
+                    && m.position == ModPosition::AnyNTerm),
+            "N-terminal TMT must survive the merge"
+        );
+        let len_after_first = target.fixed_modifications.len();
+        assert_eq!(
+            len_after_first,
+            n_fixed_before + 2,
+            "exactly the two distinct TMT mods should be added"
+        );
+
+        // A genuine duplicate (identical name+residues+position) is still deduped.
+        merge_modifications(&mut target, &source);
+        assert_eq!(
+            target.fixed_modifications.len(),
+            len_after_first,
+            "merging identical modifications again must not create duplicates"
+        );
     }
 
     #[test]

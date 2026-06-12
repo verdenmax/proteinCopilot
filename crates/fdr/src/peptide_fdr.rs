@@ -97,14 +97,17 @@ pub fn extract_unique_peptides(
         }
     }
 
-    best_per_seq
+    let mut result: Vec<PeptideScore> = best_per_seq
         .into_iter()
         .map(|(seq, (score, is_decoy))| PeptideScore {
             sequence: seq.to_string(),
             best_score: score,
             is_decoy,
         })
-        .collect()
+        .collect();
+    // Deterministic ordering so downstream tie-breaking is reproducible.
+    result.sort_by(|a, b| a.sequence.cmp(&b.sequence));
+    result
 }
 
 #[cfg(test)]
@@ -259,6 +262,43 @@ mod tests {
                 scored_q
             );
         }
+    }
+
+    #[test]
+    fn test_extract_unique_peptides_sorted_and_stable() {
+        // Sequences inserted in non-alphabetical order, with a duplicate ("AAAA").
+        // extract_unique_peptides must return them sorted by sequence (deterministic),
+        // while preserving best-score-per-sequence semantics.
+        let psms = vec![
+            make_psm("DDDD", 5.0, false),
+            make_psm("AAAA", 3.0, false),
+            make_psm("CCCC", 7.0, false),
+            make_psm("AAAA", 9.0, false), // duplicate, higher score wins
+            make_psm("BBBB", 4.0, true),
+            make_psm("EEEE", 2.0, false),
+        ];
+
+        let unique = extract_unique_peptides(&psms);
+        let seqs: Vec<String> = unique.iter().map(|p| p.sequence.clone()).collect();
+        assert_eq!(
+            seqs,
+            vec!["AAAA", "BBBB", "CCCC", "DDDD", "EEEE"],
+            "output must be deterministically sorted by sequence"
+        );
+
+        // Stable across repeated calls.
+        let again: Vec<String> = extract_unique_peptides(&psms)
+            .iter()
+            .map(|p| p.sequence.clone())
+            .collect();
+        assert_eq!(seqs, again, "ordering must be stable across runs");
+
+        // Best-score-per-sequence semantics intact.
+        let aaaa = unique.iter().find(|p| p.sequence == "AAAA").unwrap();
+        assert!((aaaa.best_score - 9.0).abs() < f64::EPSILON);
+        let bbbb = unique.iter().find(|p| p.sequence == "BBBB").unwrap();
+        assert!(bbbb.is_decoy);
+        assert_eq!(unique.len(), 5);
     }
 
     #[test]
