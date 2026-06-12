@@ -1519,6 +1519,20 @@ pub fn extract_xic_unified(
                     let h_start = pos.saturating_sub(n);
                     let h_end = (pos + n + 1).min(candidate_spectra.len());
                     for spec in &candidate_spectra[h_start..h_end] {
+                        // Only emit heavy points from scans that actually selected
+                        // the heavy precursor. In the metadata-present path the
+                        // candidates already match by window center; this guard
+                        // additionally protects the no-isolation-window fallback,
+                        // where scan-number-adjacent neighbors could otherwise be
+                        // scans that selected a different precursor.
+                        let selected_heavy = spec
+                            .precursors
+                            .first()
+                            .map(|p| ((p.mz - heavy_mz) / heavy_mz * 1e6).abs() <= tol_ppm)
+                            .unwrap_or(false);
+                        if !selected_heavy {
+                            continue;
+                        }
                         let heavy_intensities: Vec<(f64, Option<f64>)> = heavy_ions
                             .iter()
                             .map(|ion| {
