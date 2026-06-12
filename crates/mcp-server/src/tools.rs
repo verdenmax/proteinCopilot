@@ -4380,7 +4380,15 @@ mod tests {
         };
 
         let result = server.run_search(Parameters(input)).await;
-        assert!(result.is_err(), "bogus engine must fail");
+        let err = match result {
+            Ok(_) => panic!("bogus engine must fail"),
+            Err(e) => e,
+        };
+        assert!(
+            err.message.contains("not registered"),
+            "expected engine-validation error, got: {}",
+            err.message
+        );
 
         let cache = server.dia_cache.lock().unwrap_or_else(|e| e.into_inner());
         assert_eq!(
@@ -4405,7 +4413,15 @@ mod tests {
         };
 
         let result = server.run_search(Parameters(input)).await;
-        assert!(result.is_err(), "bogus engine must fail");
+        let err = match result {
+            Ok(_) => panic!("bogus engine must fail"),
+            Err(e) => e,
+        };
+        assert!(
+            err.message.contains("not registered"),
+            "expected engine-validation error, got: {}",
+            err.message
+        );
 
         let cache = server.run_cache.lock().unwrap_or_else(|e| e.into_inner());
         assert_eq!(
