@@ -163,14 +163,27 @@ pub(crate) fn decode_binary_array(
     let bytes = if meta.is_zlib {
         use flate2::read::ZlibDecoder;
         use std::io::Read;
-        let mut decoder = ZlibDecoder::new(&raw[..]);
+        // Guard against zlib bombs (zlib can amplify ≈1000×): bound the
+        // decompression just past the largest legitimate array so a crafted
+        // payload cannot exhaust memory before the per-spectrum peak cap below
+        // is evaluated. The +1024 headroom keeps a max-size (MAX_PEAKS_PER_
+        // SPECTRUM) array decoding fully without tripping the limit.
+        let limit = (MAX_PEAKS_PER_SPECTRUM * 8 + 1024) as u64;
+        let decoder = ZlibDecoder::new(&raw[..]);
         let mut decompressed = Vec::new();
         decoder
+            .take(limit)
             .read_to_end(&mut decompressed)
             .map_err(|e| SpectrumIoError::BinaryDecodeError {
                 path: path.to_path_buf(),
                 detail: format!("zlib decompress failed: {e}"),
             })?;
+        if decompressed.len() as u64 == limit {
+            return Err(SpectrumIoError::BinaryDecodeError {
+                path: path.to_path_buf(),
+                detail: "decompressed binary array exceeds maximum size".to_string(),
+            });
+        }
         decompressed
     } else {
         raw
@@ -918,5 +931,75 @@ mod tests {
             Ok(count < 2)
         });
         assert_eq!(count, 2);
+    }
+
+    // -- zlib decompression bomb guard ----------------------------------
+
+    #[test]
+    fn decode_binary_array_rejects_zlib_bomb() {
+        use base64::Engine;
+        use flate2::write::ZlibEncoder;
+        use flate2::Compression;
+        use std::io::Write;
+
+        // A payload that decompresses past the decoder limit
+        // (MAX_PEAKS_PER_SPECTRUM*8 + 1024). All-zero bytes compress to a tiny
+        // stream — a classic decompression bomb.
+        let decompressed_size = (MAX_PEAKS_PER_SPECTRUM * 8 + 1024) + 4096;
+        let mut encoder = ZlibEncoder::new(Vec::new(), Compression::best());
+        encoder.write_all(&vec![0u8; decompressed_size]).unwrap();
+        let compressed = encoder.finish().unwrap();
+        // The compressed bomb is tiny — decoding it naïvely would balloon memory.
+        assert!(
+            compressed.len() < 100_000,
+            "compressed bomb should be small, got {} bytes",
+            compressed.len()
+        );
+
+        let b64 = base64::engine::general_purpose::STANDARD.encode(&compressed);
+        let meta = BinaryArrayMeta {
+            is_mz: true,
+            is_intensity: false,
+            is_64bit: true,
+            is_zlib: true,
+        };
+
+        let err = decode_binary_array(&b64, &meta, Path::new("bomb.mzML")).unwrap_err();
+        match err {
+            SpectrumIoError::BinaryDecodeError { detail, .. } => assert!(
+                detail.contains("exceeds maximum size"),
+                "expected size-limit rejection, got: {detail}"
+            ),
+            other => panic!("expected BinaryDecodeError, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn decode_binary_array_accepts_legitimate_zlib() {
+        use base64::Engine;
+        use flate2::write::ZlibEncoder;
+        use flate2::Compression;
+        use std::io::Write;
+
+        // A small, well-formed 64-bit array must still decode after the bomb
+        // guard is in place (regression).
+        let values: Vec<f64> = vec![100.0, 200.5, 300.25, 400.125];
+        let mut raw = Vec::new();
+        for v in &values {
+            raw.extend_from_slice(&v.to_le_bytes());
+        }
+        let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(&raw).unwrap();
+        let compressed = encoder.finish().unwrap();
+        let b64 = base64::engine::general_purpose::STANDARD.encode(&compressed);
+        let meta = BinaryArrayMeta {
+            is_mz: true,
+            is_intensity: false,
+            is_64bit: true,
+            is_zlib: true,
+        };
+        let decoded = decode_binary_array(&b64, &meta, Path::new("ok.mzML")).unwrap();
+        assert_eq!(decoded.len(), 4);
+        assert!((decoded[1] - 200.5).abs() < 1e-9);
     }
 }

@@ -395,7 +395,7 @@ pub struct SpectrumSummary {
     pub ms2_count: u64,
     /// m/z range: \[min, max\].
     pub mz_range: [f64; 2],
-    /// Retention time range: \[min, max\] in seconds.
+    /// Retention time range: \[min, max\] in minutes.
     pub rt_range_min: [f64; 2],
     /// Distribution of precursor charge states (charge → count).
     pub precursor_charge_distribution: HashMap<i32, u64>,

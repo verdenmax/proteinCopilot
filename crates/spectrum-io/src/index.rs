@@ -561,15 +561,23 @@ fn extract_meta_from_region(region: &[u8]) -> (f64, u8, Option<(f64, f64, f64)>)
     let limit = memchr::memmem::find(region, b"<binaryDataArrayList").unwrap_or(region.len());
     let region = &region[..limit];
 
-    // MS:1000016 — scan start time (RT)
+    // MS:1000016 — scan start time (RT). Stored internally as seconds.
+    //
+    // Shared unit convention with the streaming parser (`mzml.rs`):
+    //   UO:0000010 (second)         → value is already in seconds
+    //   UO:0000031 (minute) OR none → value is in minutes (proteomics default)
+    // A missing unitAccession MUST be treated as minutes to agree with the
+    // streaming reader; otherwise `find_by_rt` and parsed `Spectrum` RT would
+    // disagree by 60× for unit-less files.
     if let Some(pos) = memchr::memmem::find(region, b"MS:1000016") {
-        rt_seconds = extract_cv_value(&region[pos..]).unwrap_or(0.0);
-        // Check if unit is minutes (UO:0000031) — convert to seconds
+        let raw = extract_cv_value(&region[pos..]).unwrap_or(0.0);
         let end = region.len().min(pos + 300);
         let after = &region[pos..end];
-        if memchr::memmem::find(after, b"UO:0000031").is_some() {
-            rt_seconds *= 60.0;
-        }
+        rt_seconds = if memchr::memmem::find(after, b"UO:0000010").is_some() {
+            raw // explicit seconds
+        } else {
+            raw * 60.0 // explicit minutes (UO:0000031) or missing unit ⇒ minutes
+        };
     }
 
     // MS:1000511 — ms level (the value attribute contains the level number)
@@ -602,15 +610,19 @@ fn extract_meta_from_region(region: &[u8]) -> (f64, u8, Option<(f64, f64, f64)>)
 
 /// Builds a [`ScanIndex`] by byte-level scanning with SIMD-accelerated search.
 ///
-/// Uses `memchr::memmem` to find `<spectrum ` needles in large buffered reads,
-/// avoiding per-line `String` allocation and UTF-8 validation. This is expected
-/// to be 5–10× faster than [`build_index_by_scanning`] on multi-GB mzML files.
+/// Uses `memchr::memmem` to find `<spectrum ` needles in large reads, avoiding
+/// per-line `String` allocation and UTF-8 validation. This is expected to be
+/// 5–10× faster than [`build_index_by_scanning`] on multi-GB mzML files.
 ///
-/// Cross-buffer-boundary matches are handled by keeping `needle.len() - 1`
-/// bytes of overlap between consecutive buffer fills.
+/// Reads fixed-size chunks into an owned buffer and prepends a carry-over tail
+/// from the previous chunk. A `<spectrum ` tag whose metadata window would be
+/// truncated by the chunk boundary is deferred — carried whole into the next
+/// chunk — so it always sees a full chunk (or to-EOF) of following bytes for
+/// metadata extraction. (`BufReader::fill_buf` cannot be used here because it
+/// never tops up a partially-consumed buffer, which truncated near-boundary
+/// metadata in earlier versions.)
 pub fn build_index_by_byte_scan(path: &Path) -> Result<ScanIndex, SpectrumIoError> {
     use std::fs::File;
-    use std::io::BufReader;
     use std::time::Instant;
 
     let file_size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
@@ -622,7 +634,7 @@ pub fn build_index_by_byte_scan(path: &Path) -> Result<ScanIndex, SpectrumIoErro
     let _enter = span.enter();
     let scan_start = Instant::now();
 
-    let file = File::open(path).map_err(|e| {
+    let mut file = File::open(path).map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
             SpectrumIoError::FileNotFound {
                 path: path.to_path_buf(),
@@ -635,12 +647,10 @@ pub fn build_index_by_byte_scan(path: &Path) -> Result<ScanIndex, SpectrumIoErro
         }
     })?;
 
-    const BUF_CAPACITY: usize = 256 * 1024;
-    let mut reader = BufReader::with_capacity(BUF_CAPACITY, file);
+    const CHUNK_SIZE: usize = 256 * 1024;
     let needle = b"<spectrum ";
     let mut entries: HashMap<u32, ScanMeta> = HashMap::new();
     let mut fallback_scan: u32 = 0;
-    let mut global_pos: u64 = 0;
 
     // We need enough bytes after a `<spectrum ` match to extract metadata up to
     // the `<binaryDataArrayList` tag.  In real DIA files the isolation-window
@@ -649,29 +659,57 @@ pub fn build_index_by_byte_scan(path: &Path) -> Result<ScanIndex, SpectrumIoErro
     // 8192 bytes safely covers all observed layouts.
     const TAG_MIN_CONTENT: usize = 8192;
 
+    // Owned carry-over buffer. `buf` holds the bytes currently being scanned;
+    // `buf_start` is the absolute file offset of `buf[0]`, so emitted offsets
+    // stay correct across chunks.
+    let mut buf: Vec<u8> = Vec::with_capacity(CHUNK_SIZE + TAG_MIN_CONTENT);
+    let mut buf_start: u64 = 0;
+
     loop {
-        let buf = reader.fill_buf().map_err(|e| SpectrumIoError::IoError {
-            path: path.to_path_buf(),
-            source: e,
-        })?;
-        if buf.is_empty() {
+        // Append up to CHUNK_SIZE fresh bytes after the carried-over tail,
+        // absorbing short reads until the chunk is full or EOF is reached.
+        let carry_len = buf.len();
+        let target = carry_len + CHUNK_SIZE;
+        buf.resize(target, 0);
+        let mut filled = carry_len;
+        let mut hit_eof = false;
+        while filled < target {
+            let n = file
+                .read(&mut buf[filled..target])
+                .map_err(|e| SpectrumIoError::IoError {
+                    path: path.to_path_buf(),
+                    source: e,
+                })?;
+            if n == 0 {
+                hit_eof = true;
+                break;
+            }
+            filled += n;
+        }
+        buf.truncate(filled);
+
+        let buf_len = buf.len();
+        if buf_len == 0 {
             break;
         }
-        let buf_len = buf.len();
+
         let mut search_start = 0;
+        let mut deferred_at: Option<usize> = None;
 
         while let Some(pos) = memchr::memmem::find(&buf[search_start..], needle) {
             let local_pos = search_start + pos;
             let remaining = buf_len - local_pos;
 
-            // Only skip near-boundary tags when the buffer is at full capacity,
-            // meaning more data may follow. When `buf_len < BUF_CAPACITY` we are
-            // at the tail of the file — process with whatever bytes remain.
-            if remaining < TAG_MIN_CONTENT && buf_len >= BUF_CAPACITY {
+            // If the metadata window would be truncated and more data may
+            // follow, defer this tag: carry it whole into the next chunk so it
+            // gets a full window. At EOF there is no more data, so process with
+            // whatever bytes remain.
+            if remaining < TAG_MIN_CONTENT && !hit_eof {
+                deferred_at = Some(local_pos);
                 break;
             }
 
-            let abs_pos = global_pos + local_pos as u64;
+            let abs_pos = buf_start + local_pos as u64;
             fallback_scan += 1;
             // Extract scan from tag bytes (limit to 512 bytes or end of buffer)
             let tag_end = (local_pos + 512).min(buf_len);
@@ -702,17 +740,22 @@ pub fn build_index_by_byte_scan(path: &Path) -> Result<ScanIndex, SpectrumIoErro
             search_start = local_pos + needle.len();
         }
 
-        // Keep overlap large enough to cover tags near the buffer boundary.
-        // TAG_MIN_CONTENT bytes ensures any skipped tag is fully available
-        // in the next fill.
-        let overlap = TAG_MIN_CONTENT + needle.len();
-        let consumed = if buf_len > overlap {
-            buf_len - overlap
-        } else {
-            buf_len
+        if hit_eof {
+            break;
+        }
+
+        // Carry over from the deferred tag (so it gets a full window in the
+        // next chunk) or, if none was deferred, keep `needle.len() - 1` bytes so
+        // a needle straddling the chunk boundary is still found. Never carry
+        // from before `search_start`, to avoid re-processing already-indexed
+        // tags (which would corrupt fallback scan numbering).
+        let carry_from = match deferred_at {
+            Some(p) => p,
+            None => search_start.max(buf_len.saturating_sub(needle.len() - 1)),
         };
-        global_pos += consumed as u64;
-        reader.consume(consumed);
+        let carry_from = carry_from.min(buf_len);
+        buf_start += carry_from as u64;
+        buf.drain(..carry_from);
     }
 
     span.record("scan_count", entries.len());
@@ -1246,5 +1289,185 @@ mod tests {
             "10.5 min should be 630 seconds, got {rt}"
         );
         assert_eq!(ms, 1);
+    }
+
+    #[test]
+    fn index_and_streaming_rt_agree_on_missing_unit() {
+        // A scan start time with no unitAccession must be interpreted the SAME
+        // way by the byte-scan index and the streaming mzML reader. The shared
+        // convention (mzml.rs) is "missing unit ⇒ minutes", so the index's
+        // rt_seconds must equal value × 60 and agree with the parsed RT.
+        use crate::mzml::MzMLReader;
+        use crate::reader::SpectrumReader;
+
+        let mzml = r#"<?xml version="1.0" encoding="utf-8"?>
+<mzML xmlns="http://psi.hupo.org/ms/mzml">
+  <run>
+    <spectrumList count="1" defaultDataProcessingRef="dp">
+      <spectrum index="0" id="scan=1" defaultArrayLength="5">
+        <cvParam cvRef="MS" accession="MS:1000511" name="ms level" value="2"/>
+        <scanList count="1">
+          <scan>
+            <cvParam cvRef="MS" accession="MS:1000016" name="scan start time" value="10.5"/>
+          </scan>
+        </scanList>
+        <precursorList count="1">
+          <precursor>
+            <isolationWindow>
+              <cvParam cvRef="MS" accession="MS:1000827" value="471.2561"/>
+              <cvParam cvRef="MS" accession="MS:1000828" value="1.0"/>
+              <cvParam cvRef="MS" accession="MS:1000829" value="1.0"/>
+            </isolationWindow>
+            <selectedIonList count="1">
+              <selectedIon>
+                <cvParam cvRef="MS" accession="MS:1000744" value="471.2561"/>
+                <cvParam cvRef="MS" accession="MS:1000041" value="2"/>
+              </selectedIon>
+            </selectedIonList>
+          </precursor>
+        </precursorList>
+        <binaryDataArrayList count="2">
+          <binaryDataArray encodedLength="56">
+            <cvParam cvRef="MS" accession="MS:1000514" name="m/z array"/>
+            <cvParam cvRef="MS" accession="MS:1000523" name="64-bit float"/>
+            <cvParam cvRef="MS" accession="MS:1000576" name="no compression"/>
+            <binary>JQaBlUMDWUBq3nGKjoRbQP7UeOkmBV5AnMQgsHIEaUCPwvUoXMNyQA==</binary>
+          </binaryDataArray>
+          <binaryDataArray encodedLength="56">
+            <cvParam cvRef="MS" accession="MS:1000515" name="intensity array"/>
+            <cvParam cvRef="MS" accession="MS:1000523" name="64-bit float"/>
+            <cvParam cvRef="MS" accession="MS:1000576" name="no compression"/>
+            <binary>AAAAAADCkkBmZmZmZgKJQAAAAAAAiKNAAAAAAABMzUBmZmZmZgGpQA==</binary>
+          </binaryDataArray>
+        </binaryDataArrayList>
+      </spectrum>
+    </spectrumList>
+  </run>
+</mzML>"#;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("missing_unit.mzML");
+        std::fs::write(&path, mzml).unwrap();
+
+        let idx = build_index_by_byte_scan(&path).unwrap();
+        let meta = idx.get_meta(1).expect("scan 1 should be indexed");
+
+        let spectra = MzMLReader.read_all(&path).unwrap();
+        let s = spectra
+            .iter()
+            .find(|s| s.scan_number == 1)
+            .expect("scan 1 parsed");
+
+        // The two RT paths must agree.
+        assert!(
+            (meta.rt_seconds / 60.0 - s.retention_time_min).abs() < 1e-6,
+            "index rt_seconds/60={} disagrees with streaming rt_min={}",
+            meta.rt_seconds / 60.0,
+            s.retention_time_min
+        );
+        // Shared convention: a unit-less value of 10.5 is 10.5 minutes.
+        assert!((s.retention_time_min - 10.5).abs() < 1e-6);
+        assert!((meta.rt_seconds - 630.0).abs() < 1e-6);
+    }
+
+    /// A complete `<spectrum>` element with full metadata + tiny binary arrays.
+    fn boundary_spectrum_xml(index: u32, scan: u32, target: &str) -> String {
+        format!(
+            "<spectrum index=\"{index}\" id=\"scan={scan}\" defaultArrayLength=\"5\">\n\
+             <cvParam cvRef=\"MS\" accession=\"MS:1000511\" name=\"ms level\" value=\"2\"/>\n\
+             <scanList count=\"1\"><scan>\n\
+             <cvParam cvRef=\"MS\" accession=\"MS:1000016\" name=\"scan start time\" value=\"130.5\" unitCvRef=\"UO\" unitAccession=\"UO:0000010\" unitName=\"second\"/>\n\
+             </scan></scanList>\n\
+             <precursorList count=\"1\"><precursor><isolationWindow>\n\
+             <cvParam cvRef=\"MS\" accession=\"MS:1000827\" name=\"isolation window target m/z\" value=\"{target}\"/>\n\
+             <cvParam cvRef=\"MS\" accession=\"MS:1000828\" name=\"isolation window lower offset\" value=\"1.0\"/>\n\
+             <cvParam cvRef=\"MS\" accession=\"MS:1000829\" name=\"isolation window upper offset\" value=\"1.0\"/>\n\
+             </isolationWindow></precursor></precursorList>\n\
+             <binaryDataArrayList count=\"2\">\n\
+             <binaryDataArray encodedLength=\"56\"><cvParam cvRef=\"MS\" accession=\"MS:1000514\" name=\"m/z array\"/><cvParam cvRef=\"MS\" accession=\"MS:1000523\" name=\"64-bit float\"/><cvParam cvRef=\"MS\" accession=\"MS:1000576\" name=\"no compression\"/><binary>JQaBlUMDWUBq3nGKjoRbQP7UeOkmBV5AnMQgsHIEaUCPwvUoXMNyQA==</binary></binaryDataArray>\n\
+             <binaryDataArray encodedLength=\"56\"><cvParam cvRef=\"MS\" accession=\"MS:1000515\" name=\"intensity array\"/><cvParam cvRef=\"MS\" accession=\"MS:1000523\" name=\"64-bit float\"/><cvParam cvRef=\"MS\" accession=\"MS:1000576\" name=\"no compression\"/><binary>AAAAAADCkkBmZmZmZgKJQAAAAAAAiKNAAAAAAABMzUBmZmZmZgGpQA==</binary></binaryDataArray>\n\
+             </binaryDataArrayList></spectrum>\n"
+        )
+    }
+
+    /// Regression test for the 256 KB buffer-boundary metadata truncation bug.
+    ///
+    /// The 2nd `<spectrum ` opening tag is positioned a few bytes before the
+    /// 262144-byte chunk boundary so that its ms_level / scan-start-time /
+    /// isolationWindow cvParams fall AFTER the boundary. The old `fill_buf`
+    /// scanner deferred the tag but never topped up its window, yielding
+    /// ms_level=0 / rt=0 / isolation=None. The carry-over scanner must extract
+    /// the real metadata.
+    #[test]
+    fn byte_scan_metadata_survives_chunk_boundary() {
+        let header = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n\
+                      <mzML xmlns=\"http://psi.hupo.org/ms/mzml\">\n<run>\n\
+                      <spectrumList count=\"3\">\n";
+        let spec1 = boundary_spectrum_xml(0, 1, "471.2561");
+        let spec2 = boundary_spectrum_xml(1, 2, "523.7832");
+        let spec3 = boundary_spectrum_xml(2, 3, "650.3412");
+        let footer = "</spectrumList>\n</run>\n</mzML>\n";
+
+        // Place the 2nd <spectrum tag 40 bytes before the 256 KB boundary so its
+        // cvParams land past it. Pad with a long XML comment (no `--`, no
+        // `<spectrum `).
+        let boundary = 262_144usize;
+        let target_offset = boundary - 40;
+        let prefix = format!("{header}{spec1}<!--");
+        let after_comment = "-->\n";
+        let fixed = prefix.len() + after_comment.len();
+        assert!(target_offset > fixed, "prefix already past target boundary");
+        let pad = ".".repeat(target_offset - fixed);
+        let mzml = format!("{prefix}{pad}{after_comment}{spec2}{spec3}{footer}");
+
+        // Verify the 2nd <spectrum tag really begins at the intended offset.
+        let needle = b"<spectrum ";
+        let positions: Vec<usize> = {
+            let bytes = mzml.as_bytes();
+            let mut v = Vec::new();
+            let mut s = 0;
+            while let Some(p) = memchr::memmem::find(&bytes[s..], needle) {
+                v.push(s + p);
+                s += p + needle.len();
+            }
+            v
+        };
+        assert_eq!(positions.len(), 3, "expected 3 spectrum tags");
+        assert_eq!(positions[1], target_offset, "2nd tag offset mismatch");
+        assert!(
+            boundary - positions[1] < 8192,
+            "2nd tag must sit within TAG_MIN_CONTENT of the boundary"
+        );
+        assert!(mzml.len() > boundary, "file must exceed one chunk");
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("boundary.mzML");
+        std::fs::write(&path, &mzml).unwrap();
+
+        let idx = build_index_by_byte_scan(&path).unwrap();
+        assert_eq!(idx.len(), 3, "all three spectra must be indexed");
+
+        // 2nd spectrum: metadata sits past the chunk boundary — must be intact.
+        let m2 = idx.get_meta(2).expect("scan 2 indexed");
+        assert_eq!(m2.ms_level, 2, "scan 2 ms_level truncated at boundary");
+        assert!(
+            (m2.rt_seconds - 130.5).abs() < 1e-6,
+            "scan 2 rt_seconds truncated at boundary: {}",
+            m2.rt_seconds
+        );
+        let iw2 = m2
+            .isolation_window
+            .expect("scan 2 isolation window truncated at boundary");
+        assert!((iw2.0 - 523.7832).abs() < 0.01);
+        // Offset must still point exactly at the `<spectrum ` tag.
+        let file_bytes = std::fs::read(&path).unwrap();
+        let off = m2.offset as usize;
+        assert_eq!(&file_bytes[off..off + needle.len()], needle);
+
+        // 3rd spectrum (away from the boundary): regression — still correct.
+        let m3 = idx.get_meta(3).expect("scan 3 indexed");
+        assert_eq!(m3.ms_level, 2);
+        assert!((m3.rt_seconds - 130.5).abs() < 1e-6);
+        assert!(m3.isolation_window.is_some());
     }
 }

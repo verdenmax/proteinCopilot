@@ -23,7 +23,12 @@ use crate::error::SpectrumIoError;
 use crate::reader::SpectrumReader;
 
 /// Sanity bound to avoid huge allocations from a corrupt `peak_num`.
-const MAX_PEAKS_PER_SCAN: usize = 100_000_000;
+///
+/// 10M peaks is ~100× above any real spectrum (typical scans have far fewer
+/// than 100k peaks) and caps the eager `vec![0u8; n*8]` allocation at ~160 MB
+/// (two arrays) rather than ~1.6 GB, mitigating denial-of-service from crafted
+/// or corrupt files.
+const MAX_PEAKS_PER_SCAN: usize = 10_000_000;
 
 /// Sanity bound for a single property string length.
 const MAX_PROP_LEN: usize = 100_000_000;
@@ -512,5 +517,24 @@ mod tests {
             err,
             SpectrumIoError::ValidationError { scan: 7, .. }
         ));
+    }
+
+    #[test]
+    fn read_peaks_rejects_peak_num_above_bound() {
+        // 11M peaks is below the historical 100M bound but above the hardened
+        // 10M ceiling. It must be rejected up-front with a sanity-bound error
+        // (no ~160 MB eager allocation, no read attempt).
+        let peak_num: i32 = 11_000_000;
+        let mut cursor = std::io::Cursor::new(peak_num.to_le_bytes().to_vec());
+        let err = read_peaks(&mut cursor, std::path::Path::new("synthetic.pfb")).unwrap_err();
+        match err {
+            SpectrumIoError::ParseError { detail, .. } => assert!(
+                detail.contains("exceeds sanity bound"),
+                "expected sanity-bound rejection, got: {detail}"
+            ),
+            other => panic!("expected ParseError, got {other:?}"),
+        }
+        // Pin the hardened ceiling so the bound cannot silently regress.
+        assert_eq!(MAX_PEAKS_PER_SCAN, 10_000_000);
     }
 }

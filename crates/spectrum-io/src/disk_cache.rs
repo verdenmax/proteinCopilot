@@ -43,6 +43,16 @@ const HEADER_SIZE: usize = 4 + 1 + 8 + 8 + 4;
 /// + 1 (has_isolation) + 8 (target_mz) + 8 (lower) + 8 (upper) = 46 bytes.
 const ENTRY_SIZE: usize = 4 + 8 + 8 + 1 + 1 + 8 + 8 + 8;
 
+/// Computes the expected PCIX file size for `entry_count` entries using checked
+/// arithmetic. Returns `None` on `usize` overflow (reachable on 32-bit targets
+/// where a corrupt/huge `entry_count` would otherwise panic or wrap), letting
+/// the loader treat the cache as a miss instead of crashing.
+fn expected_total_size(entry_count: usize) -> Option<usize> {
+    entry_count
+        .checked_mul(ENTRY_SIZE)
+        .and_then(|x| x.checked_add(HEADER_SIZE))
+}
+
 /// Returns the sidecar `.idx` cache path for a given mzML file.
 ///
 /// Simply appends `.idx` to the original path, e.g.
@@ -193,8 +203,19 @@ pub fn load_index(
         }
     })?) as usize;
 
-    // Validate total size
-    let expected_total = HEADER_SIZE + entry_count * ENTRY_SIZE;
+    // Validate total size (checked to avoid usize overflow on 32-bit targets
+    // when entry_count is corrupt/huge).
+    let expected_total = match expected_total_size(entry_count) {
+        Some(t) => t,
+        None => {
+            tracing::warn!(
+                path = %mzml_path.display(),
+                entry_count,
+                "disk cache miss: declared entry_count overflows usize"
+            );
+            return Ok(None);
+        }
+    };
     if data.len() < expected_total {
         tracing::warn!(
             path = %mzml_path.display(),
@@ -206,7 +227,10 @@ pub fn load_index(
     }
 
     // --- Parse entries ---
-    let mut entries = HashMap::with_capacity(entry_count);
+    // Cap pre-allocation by the bytes actually present so a corrupt entry_count
+    // cannot trigger a giant allocation.
+    let capacity = entry_count.min(data.len() / ENTRY_SIZE);
+    let mut entries = HashMap::with_capacity(capacity);
     let mut cursor = &data[HEADER_SIZE..];
 
     for _ in 0..entry_count {
@@ -578,5 +602,45 @@ mod tests {
 
         let result = load_index(&mzml, 100, 200).unwrap();
         assert!(result.is_none(), "v1 cache should be rejected by v2 loader");
+    }
+
+    #[test]
+    fn expected_total_size_guards_against_overflow() {
+        // The historical `HEADER_SIZE + entry_count * ENTRY_SIZE` overflows
+        // `usize` for a corrupt/huge entry_count (panics in debug, wraps in
+        // release on 32-bit targets where usize == u32). The checked helper
+        // returns `None` so the loader treats it as a cache miss.
+        assert_eq!(expected_total_size(usize::MAX), None);
+        // Proof the unchecked multiply would indeed overflow for this input.
+        assert!(usize::MAX.checked_mul(ENTRY_SIZE).is_none());
+        // Normal counts still compute exactly.
+        assert_eq!(expected_total_size(0), Some(HEADER_SIZE));
+        assert_eq!(expected_total_size(3), Some(HEADER_SIZE + 3 * ENTRY_SIZE));
+    }
+
+    #[test]
+    fn huge_entry_count_short_body_is_cache_miss() {
+        // A header declaring a u32::MAX entry_count but with a short body must
+        // be a clean cache miss — never a panic or a multi-GB allocation.
+        let dir = tempfile::tempdir().unwrap();
+        let mzml = dir.path().join("sample.mzML");
+        let cache = idx_path(&mzml);
+        let size = 1234u64;
+        let mtime = 1_700_000_000u64;
+
+        let mut buf = Vec::new();
+        buf.extend_from_slice(MAGIC);
+        buf.push(VERSION);
+        buf.extend_from_slice(&size.to_le_bytes());
+        buf.extend_from_slice(&mtime.to_le_bytes());
+        // Absurd entry_count; no entry bytes follow, so the body is short.
+        buf.extend_from_slice(&u32::MAX.to_le_bytes());
+        std::fs::write(&cache, &buf).unwrap();
+
+        let result = load_index(&mzml, size, mtime).unwrap();
+        assert!(
+            result.is_none(),
+            "huge entry_count with short body must be a cache miss"
+        );
     }
 }

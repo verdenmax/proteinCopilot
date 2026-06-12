@@ -43,6 +43,14 @@ pub(crate) fn open_buffered(path: &Path) -> Result<BufReader<File>, SpectrumIoEr
 /// as equal (NaN values will be caught by `Spectrum::new()` validation
 /// after sorting).
 pub(crate) fn sort_peaks_by_mz(mz: &mut Vec<f64>, intensity: &mut Vec<f64>) {
+    // Guard against length-mismatched arrays: reordering by m/z indices would
+    // panic (mz longer) or silently truncate (mz shorter) the intensity array,
+    // producing mis-paired peaks that still pass downstream length checks. Leave
+    // the arrays untouched so the caller's `Spectrum::new()` validation surfaces
+    // a clean `ArrayLengthMismatch` (length is checked before sortedness).
+    if mz.len() != intensity.len() {
+        return;
+    }
     if mz.windows(2).all(|w| w[0] <= w[1]) {
         return; // already sorted
     }
@@ -187,5 +195,41 @@ impl SummaryAccumulator {
                 detail: format!("summary: {e}"),
             })?;
         Ok(summary)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sort_peaks_length_mismatch_does_not_panic_or_truncate() {
+        // mz longer than intensity: reordering would panic (index OOB) without
+        // the length guard. The function must leave both arrays untouched so the
+        // caller's Spectrum::new() surfaces a clean ArrayLengthMismatch.
+        let mut mz = vec![300.0, 100.0, 200.0];
+        let mut intensity = vec![10.0, 20.0];
+        sort_peaks_by_mz(&mut mz, &mut intensity);
+        // Longer array must be unchanged (no truncation, no reordering).
+        assert_eq!(mz, vec![300.0, 100.0, 200.0]);
+        assert_eq!(intensity, vec![10.0, 20.0]);
+
+        // mz shorter than intensity: reordering would silently truncate the
+        // intensity array. Both arrays must remain untouched.
+        let mut mz2 = vec![300.0, 100.0];
+        let mut intensity2 = vec![10.0, 20.0, 30.0];
+        sort_peaks_by_mz(&mut mz2, &mut intensity2);
+        assert_eq!(mz2, vec![300.0, 100.0]);
+        assert_eq!(intensity2, vec![10.0, 20.0, 30.0]);
+    }
+
+    #[test]
+    fn sort_peaks_equal_length_still_sorts() {
+        // Regression: equal-length arrays must still be co-sorted by m/z.
+        let mut mz = vec![300.0, 100.0, 200.0];
+        let mut intensity = vec![30.0, 10.0, 20.0];
+        sort_peaks_by_mz(&mut mz, &mut intensity);
+        assert_eq!(mz, vec![100.0, 200.0, 300.0]);
+        assert_eq!(intensity, vec![10.0, 20.0, 30.0]);
     }
 }
