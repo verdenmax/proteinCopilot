@@ -6,6 +6,7 @@
 //! Supported formats:
 //! - **MGF** (Mascot Generic Format) — text-based, widely used
 //! - **mzML** — PSI standard XML format
+//! - **PFB** — pXtract3 / pParse2+ little-endian binary format
 //!
 //! # Usage
 //!
@@ -27,14 +28,15 @@ pub mod indexed_mgf;
 pub mod indexed_mzml;
 pub mod mgf;
 pub mod mzml;
+pub mod pfb;
 pub mod reader;
 mod util;
 
 pub use error::SpectrumIoError;
 pub use indexed_mgf::IndexedMgfReader;
 pub use indexed_mzml::IndexedMzMLReader;
-pub use reader::SpectrumReader;
 pub use reader::ScanMetaInfo;
+pub use reader::SpectrumReader;
 
 use std::path::Path;
 
@@ -45,6 +47,7 @@ use protein_copilot_core::spectrum::{SpectrumFileInfo, SpectrumFormat};
 /// Format detection uses file extension:
 /// - `.mgf` → [`SpectrumFormat::Mgf`]
 /// - `.mzml` → [`SpectrumFormat::MzML`]
+/// - `.pfb` → [`SpectrumFormat::Pfb`]
 ///
 /// Also verifies the file exists and records its size.
 pub fn detect_format(path: &Path) -> Result<SpectrumFileInfo, SpectrumIoError> {
@@ -62,6 +65,7 @@ pub fn detect_format(path: &Path) -> Result<SpectrumFileInfo, SpectrumIoError> {
     let format = match ext.as_deref() {
         Some("mgf") => SpectrumFormat::Mgf,
         Some("mzml") => SpectrumFormat::MzML,
+        Some("pfb") => SpectrumFormat::Pfb,
         _ => {
             return Err(SpectrumIoError::UnknownFormat {
                 path: path.to_path_buf(),
@@ -97,6 +101,7 @@ pub fn create_reader(info: &SpectrumFileInfo) -> Box<dyn SpectrumReader> {
     match info.format {
         SpectrumFormat::Mgf => Box::new(mgf::MgfReader),
         SpectrumFormat::MzML => Box::new(mzml::MzMLReader),
+        SpectrumFormat::Pfb => Box::new(pfb::PfbReader),
     }
 }
 
@@ -119,6 +124,7 @@ pub fn create_indexed_reader(path: &Path) -> Result<Box<dyn SpectrumReader>, Spe
             let reader = IndexedMgfReader::open(path)?;
             Ok(Box::new(reader))
         }
+        SpectrumFormat::Pfb => Ok(Box::new(pfb::PfbReader)),
     }
 }
 

@@ -120,13 +120,13 @@ impl From<SpectrumIoError> for protein_copilot_core::error::CoreError {
                         .extension()
                         .map(|e| e.to_string_lossy().to_string())
                         .unwrap_or_default(),
-                    supported: vec!["mzML".to_string(), "mgf".to_string()],
+                    supported: vec!["mzML".to_string(), "mgf".to_string(), "pfb".to_string()],
                 }
             }
             SpectrumIoError::UnsupportedFormat { format, .. } => {
                 protein_copilot_core::error::CoreError::UnsupportedFormat {
                     format,
-                    supported: vec!["mzML".to_string(), "mgf".to_string()],
+                    supported: vec!["mzML".to_string(), "mgf".to_string(), "pfb".to_string()],
                 }
             }
             SpectrumIoError::IoError { path, source } => {

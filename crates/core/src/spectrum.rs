@@ -347,6 +347,8 @@ pub enum SpectrumFormat {
     MzML,
     /// Mascot Generic Format.
     Mgf,
+    /// pXtract3 / pParse2+ binary PFB format.
+    Pfb,
 }
 
 impl std::fmt::Display for SpectrumFormat {
@@ -354,6 +356,7 @@ impl std::fmt::Display for SpectrumFormat {
         match self {
             SpectrumFormat::MzML => write!(f, "mzML"),
             SpectrumFormat::Mgf => write!(f, "mgf"),
+            SpectrumFormat::Pfb => write!(f, "pfb"),
         }
     }
 }
