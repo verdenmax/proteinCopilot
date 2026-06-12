@@ -279,7 +279,11 @@ pub(crate) fn extract_xic(
     }
 
     let info = protein_copilot_spectrum_io::detect_format(file_path)?;
-    if info.format != protein_copilot_core::spectrum::SpectrumFormat::MzML {
+    if !matches!(
+        info.format,
+        protein_copilot_core::spectrum::SpectrumFormat::MzML
+            | protein_copilot_core::spectrum::SpectrumFormat::Pfb
+    ) {
         return Err(XicError::UnsupportedFormat {
             path: file_path.to_path_buf(),
         });
@@ -692,7 +696,11 @@ pub(crate) fn extract_xic_with_raw(
     }
 
     let info = protein_copilot_spectrum_io::detect_format(file_path)?;
-    if info.format != protein_copilot_core::spectrum::SpectrumFormat::MzML {
+    if !matches!(
+        info.format,
+        protein_copilot_core::spectrum::SpectrumFormat::MzML
+            | protein_copilot_core::spectrum::SpectrumFormat::Pfb
+    ) {
         return Err(XicError::UnsupportedFormat {
             path: file_path.to_path_buf(),
         });
@@ -1965,5 +1973,98 @@ mod tests {
         let effective_kr = Some(&label)
             .filter(|l| protein_copilot_core::label::total_heavy_delta(peptide_kr, l).abs() > 1e-6);
         assert!(effective_kr.is_some(), "non-zero offset should keep label");
+    }
+
+    #[test]
+    fn pfb_end_to_end_xic_via_indexed_reader() {
+        use protein_copilot_core::search_params::{MassTolerance, ToleranceUnit};
+
+        // Synthetic .pfb: MS1 scan 1 + MS2 scans 2/3/4 (same isolation window).
+        fn write_xic_pfb() -> (tempfile::TempDir, std::path::PathBuf) {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("xic.pfb");
+            let recs: Vec<(&str, Vec<f64>, Vec<f64>)> = vec![
+                (
+                    "1\t1\t60.0\tFTMS",
+                    vec![400.0, 500.5, 600.0],
+                    vec![100.0, 5000.0, 200.0],
+                ),
+                (
+                    "2\t2\t60.5\tFTMS\t2\t1000.0\t50\t500.5\tHCD\t1\t2.0\t27.0\t500.5",
+                    vec![150.0, 250.0],
+                    vec![10.0, 20.0],
+                ),
+                (
+                    "3\t2\t61.0\tFTMS\t2\t1000.0\t50\t500.5\tHCD\t1\t2.0\t27.0\t500.5",
+                    vec![150.0, 250.0, 350.0],
+                    vec![30.0, 40.0, 50.0],
+                ),
+                (
+                    "4\t2\t61.5\tFTMS\t2\t1000.0\t50\t500.5\tHCD\t1\t2.0\t27.0\t500.5",
+                    vec![150.0, 250.0],
+                    vec![15.0, 25.0],
+                ),
+            ];
+            let header_size: u64 = 24;
+            let mut body: Vec<u8> = Vec::new();
+            let mut offsets: Vec<u64> = Vec::new();
+            for (prop, mz, inten) in &recs {
+                offsets.push(header_size + body.len() as u64);
+                let pb = prop.as_bytes();
+                body.extend_from_slice(&(pb.len() as i32).to_le_bytes());
+                body.extend_from_slice(pb);
+                body.extend_from_slice(&(mz.len() as i32).to_le_bytes());
+                for &m in mz {
+                    body.extend_from_slice(&m.to_le_bytes());
+                }
+                for &v in inten {
+                    body.extend_from_slice(&v.to_le_bytes());
+                }
+            }
+            let addr_list_addr = header_size + body.len() as u64;
+            let mut out: Vec<u8> = Vec::new();
+            out.extend_from_slice(&0i32.to_le_bytes());
+            out.extend_from_slice(&0i32.to_le_bytes());
+            out.extend_from_slice(&0i32.to_le_bytes());
+            out.extend_from_slice(&(addr_list_addr as i64).to_le_bytes());
+            out.extend_from_slice(&(recs.len() as i32).to_le_bytes());
+            out.extend_from_slice(&body);
+            for &off in &offsets {
+                out.extend_from_slice(&(off as i64).to_le_bytes());
+            }
+            std::fs::write(&path, &out).unwrap();
+            (dir, path)
+        }
+
+        let (_d, p) = write_xic_pfb();
+        let reader = protein_copilot_spectrum_io::create_indexed_reader(&p).unwrap();
+        let params = ExtractionParams {
+            mz_tolerance: MassTolerance {
+                value: 20.0,
+                unit: ToleranceUnit::Ppm,
+            },
+            n_cycles: 2,
+            top_n_ions: usize::MAX,
+            label_type: None,
+            intensity_rule: IntensityRule::MaxInWindow,
+        };
+        let result = extract_xic_unified(
+            reader.as_ref(),
+            &p,
+            3,
+            "PEPTIDEK",
+            2,
+            500.5,
+            &[],
+            &params,
+            20.0,
+        )
+        .unwrap();
+        assert_eq!(result.xic_data.target_scan, 3);
+        assert_eq!(
+            result.raw_scans.ms2_scans.len(),
+            3,
+            "expected all 3 MS2 scans in the isolation window to be extracted"
+        );
     }
 }
