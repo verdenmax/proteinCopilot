@@ -160,6 +160,22 @@ pub(crate) fn read_peaks(
     Ok((bytes_to_f64_vec(&mz_buf), bytes_to_f64_vec(&in_buf)))
 }
 
+/// Parses the isolation window from a property string's tab-separated tokens.
+///
+/// Uses `[7]` ActivationCenter and `[10]` ActivationWindow, returning
+/// `(target_mz, lower_offset, upper_offset)` with symmetric half-window
+/// offsets. Returns `None` when either field is absent or the window is not
+/// positive. Shared by `build_spectrum` and the indexed reader's index builder
+/// to keep index metadata and spectra coherent.
+pub(crate) fn isolation_window_from_tokens(toks: &[&str]) -> Option<(f64, f64, f64)> {
+    let center = toks.get(7).and_then(|t| t.trim().parse::<f64>().ok());
+    let window = toks.get(10).and_then(|t| t.trim().parse::<f64>().ok());
+    match (center, window) {
+        (Some(c), Some(w)) if w > 0.0 => Some((c, w / 2.0, w / 2.0)),
+        _ => None,
+    }
+}
+
 /// Builds a validated `Spectrum` from a property string + peak arrays.
 pub(crate) fn build_spectrum(
     property_str: &str,
@@ -194,17 +210,16 @@ pub(crate) fn build_spectrum(
             .filter(|&c| c != 0);
         let activation_center = toks.get(7).and_then(|t| t.trim().parse::<f64>().ok());
         let precursor_scan = toks.get(9).and_then(|t| t.trim().parse::<u32>().ok());
-        let activation_window = toks.get(10).and_then(|t| t.trim().parse::<f64>().ok());
         let mono_mz = toks.get(12).and_then(|t| t.trim().parse::<f64>().ok());
         let mz_val = mono_mz.or(activation_center).unwrap_or(0.0);
-        let isolation_window = match (activation_center, activation_window) {
-            (Some(center), Some(win)) if win > 0.0 => Some(IsolationWindow {
-                target_mz: center,
-                lower_offset: win / 2.0,
-                upper_offset: win / 2.0,
-            }),
-            _ => None,
-        };
+        let isolation_window =
+            isolation_window_from_tokens(&toks).map(|(target_mz, lower_offset, upper_offset)| {
+                IsolationWindow {
+                    target_mz,
+                    lower_offset,
+                    upper_offset,
+                }
+            });
         vec![PrecursorInfo {
             mz: mz_val,
             charge,

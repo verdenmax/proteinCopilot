@@ -26,6 +26,7 @@ pub mod error;
 pub mod index;
 pub mod indexed_mgf;
 pub mod indexed_mzml;
+pub mod indexed_pfb;
 pub mod mgf;
 pub mod mzml;
 pub mod pfb;
@@ -35,6 +36,7 @@ mod util;
 pub use error::SpectrumIoError;
 pub use indexed_mgf::IndexedMgfReader;
 pub use indexed_mzml::IndexedMzMLReader;
+pub use indexed_pfb::IndexedPfbReader;
 pub use reader::ScanMetaInfo;
 pub use reader::SpectrumReader;
 
@@ -124,7 +126,10 @@ pub fn create_indexed_reader(path: &Path) -> Result<Box<dyn SpectrumReader>, Spe
             let reader = IndexedMgfReader::open(path)?;
             Ok(Box::new(reader))
         }
-        SpectrumFormat::Pfb => Ok(Box::new(pfb::PfbReader)),
+        SpectrumFormat::Pfb => {
+            let reader = IndexedPfbReader::open(path)?;
+            Ok(Box::new(reader))
+        }
     }
 }
 
