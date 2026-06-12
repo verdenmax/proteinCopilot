@@ -146,7 +146,8 @@ impl EntrapmentAnalyzer {
                 example_target_protein: target,
             })
             .collect();
-        top_razor_families.sort_by(|a, b| b.count.cmp(&a.count));
+        top_razor_families
+            .sort_by(|a, b| b.count.cmp(&a.count).then_with(|| a.family.cmp(&b.family)));
         top_razor_families.truncate(10);
 
         EntrapmentSummary {
@@ -855,6 +856,91 @@ mod tests {
     #[test]
     fn test_extract_family_name_non_uniprot() {
         assert_eq!(extract_family_name("SOME_RANDOM_ID"), "SOME_RANDOM_ID");
+    }
+
+    #[test]
+    fn test_summary_top_razor_families_deterministic() {
+        use std::io::Write;
+
+        // `summary()` is a method on EntrapmentAnalyzer; build a minimal analyzer
+        // (the digest index is unused by summary but required by the constructor).
+        let mut fasta = tempfile::NamedTempFile::new().expect("create temp fasta");
+        write!(fasta, ">sp|P00001|TEST_HUMAN Test\nPEPTIDEKSAMPLER\n").expect("write fasta");
+        let analyzer =
+            EntrapmentAnalyzer::new(test_config(), fasta.path()).expect("build analyzer");
+
+        // Build an L0 trap PSM whose family is derived from `family`.
+        let make_l0 = |family: &str| -> ClassifiedPsm {
+            ClassifiedPsm {
+                psm: UnifiedPsm {
+                    peptide: "PEPTIDEK".into(),
+                    charge: Some(2),
+                    precursor_mz: Some(400.0),
+                    retention_time: None,
+                    rt_start: None,
+                    rt_stop: None,
+                    scan_number: Some(1),
+                    spectrum_file: Some("run".into()),
+                    protein_ids: format!("sp|Q00000|{family}_YEAST"),
+                    q_value: Some(0.001),
+                    modifications: vec![],
+                },
+                group: PsmGroup::Trap,
+                level: DiscriminabilityLevel::L0,
+                best_target_peptide: Some("PEPTIDEK".into()),
+                best_target_protein: Some("sp|P1|X_HUMAN".into()),
+                mismatches: Some(0),
+                delta_mass_da: Some(0.0),
+                diff_positions: None,
+                substitution_type: SubstitutionType::None,
+                edit_distance: Some(0),
+                alignment_detail: None,
+                provenance: None,
+            }
+        };
+
+        // 13 families (>10 to force truncation), several tied on count straddling
+        // the top-10 boundary: two families with count 2, eleven with count 1.
+        let mut classified: Vec<ClassifiedPsm> = Vec::new();
+        for fam in ["ZED", "ANT"] {
+            classified.push(make_l0(fam));
+            classified.push(make_l0(fam));
+        }
+        for i in 0..11 {
+            classified.push(make_l0(&format!("F{i:02}")));
+        }
+
+        // Expected: count desc, then family asc, truncated to 10.
+        // count 2: ANT, ZED ; count 1: F00..F07 (fills remaining 8 slots).
+        let expected = vec![
+            "ANT", "ZED", "F00", "F01", "F02", "F03", "F04", "F05", "F06", "F07",
+        ];
+
+        let first: Vec<String> = analyzer
+            .summary(&classified)
+            .top_razor_families
+            .iter()
+            .map(|r| r.family.clone())
+            .collect();
+        assert_eq!(
+            first, expected,
+            "top_razor_families must be ordered count-desc then family-asc"
+        );
+
+        // Repeat: each summary() builds a fresh HashMap (new random seed), so a
+        // missing tiebreaker would yield a run-dependent top-10 subset/order.
+        for _ in 0..16 {
+            let again: Vec<String> = analyzer
+                .summary(&classified)
+                .top_razor_families
+                .iter()
+                .map(|r| r.family.clone())
+                .collect();
+            assert_eq!(
+                again, first,
+                "top_razor_families ordering must be deterministic"
+            );
+        }
     }
 
     // -----------------------------------------------------------------------

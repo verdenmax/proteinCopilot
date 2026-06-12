@@ -290,21 +290,36 @@ impl TargetDigestIndex {
         let min_len = query_len.saturating_sub(len_tolerance);
         let max_len = query_len + len_tolerance;
 
-        // Extract k-mers from query
-        let query_kmers = extract_kmers(query.as_bytes(), self.kmer_k);
-        if query_kmers.is_empty() {
+        // Collect candidate peptide IDs. Normally the k-mer inverted index
+        // (pigeonhole prefilter) bounds the candidates, but a query shorter than
+        // `kmer_k` has no extractable k-mers and cannot be represented by the
+        // prefilter. In that case fall back to scanning all peptides — the
+        // length window + edit-distance checks below still prune non-matches.
+        if query.is_empty() {
             return Vec::new();
         }
-
-        // Collect candidate peptide IDs from k-mer hits
-        let mut candidate_ids: HashSet<u32> = HashSet::new();
-        for kh in &query_kmers {
-            if let Some(ids) = self.kmer_index.get(kh) {
-                for &id in ids {
-                    candidate_ids.insert(id);
+        let candidate_ids: Vec<u32> = if query.len() < self.kmer_k {
+            tracing::debug!(
+                query_len = query.len(),
+                kmer_k = self.kmer_k,
+                "query shorter than k-mer length; falling back to full length-window scan"
+            );
+            (0..self.all_peptides.len() as u32).collect()
+        } else {
+            let query_kmers = extract_kmers(query.as_bytes(), self.kmer_k);
+            if query_kmers.is_empty() {
+                return Vec::new();
+            }
+            let mut set: HashSet<u32> = HashSet::new();
+            for kh in &query_kmers {
+                if let Some(ids) = self.kmer_index.get(kh) {
+                    for &id in ids {
+                        set.insert(id);
+                    }
                 }
             }
-        }
+            set.into_iter().collect()
+        };
 
         // Filter and compute edit distance
         let mut results = Vec::new();
@@ -344,14 +359,20 @@ impl TargetDigestIndex {
             });
         }
 
-        // Sort by edit distance, then by |delta_mass|
+        // Sort by edit distance, then by |delta_mass|, then by sequence and
+        // protein accession for a fully deterministic order on ties (candidate
+        // IDs arrive from a HashSet, whose iteration order is nondeterministic).
         results.sort_by(|a, b| {
-            a.edit_distance.cmp(&b.edit_distance).then_with(|| {
-                a.delta_mass_da
-                    .abs()
-                    .partial_cmp(&b.delta_mass_da.abs())
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            })
+            a.edit_distance
+                .cmp(&b.edit_distance)
+                .then_with(|| {
+                    a.delta_mass_da
+                        .abs()
+                        .partial_cmp(&b.delta_mass_da.abs())
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+                .then_with(|| a.target_peptide.cmp(&b.target_peptide))
+                .then_with(|| a.target_protein.cmp(&b.target_protein))
         });
 
         results
@@ -571,5 +592,78 @@ mod tests {
         // Completely different peptide
         let matches = idx.find_similar("PEPTIDEK", 2, 2, &config);
         assert!(matches.is_empty());
+    }
+
+    #[test]
+    fn test_find_similar_tie_order_deterministic() {
+        use std::io::Write;
+        // Four distinct targets, each a single G->A substitution of the query
+        // "GSGSGSGK" at a different position. They therefore tie on BOTH sort
+        // keys (edit_distance == 1 and identical |delta_mass|). Candidate IDs
+        // come from a HashSet (nondeterministic iteration), so without a final
+        // tiebreaker the output order is run-dependent.
+        let mut f = tempfile::NamedTempFile::new().expect("create temp file");
+        write!(
+            f,
+            ">sp|P001|PROT_ONE\nASGSGSGK\n\
+             >sp|P002|PROT_TWO\nGSASGSGK\n\
+             >sp|P003|PROT_THREE\nGSGSASGK\n\
+             >sp|P004|PROT_FOUR\nGSGSGSAK\n"
+        )
+        .unwrap();
+        let config = SimilarityConfig::default();
+        let idx = TargetDigestIndex::from_fasta(f.path(), 0, 2).expect("build index");
+
+        // Deterministic expectation: equal keys break ties on target_peptide asc.
+        let expected = vec!["ASGSGSGK", "GSASGSGK", "GSGSASGK", "GSGSGSAK"];
+
+        // Repeat many times: each call builds a fresh HashSet (new random seed),
+        // so buggy ordering would diverge from the sorted expectation.
+        for _ in 0..32 {
+            let matches = idx.find_similar("GSGSGSGK", 2, 2, &config);
+            let seqs: Vec<&str> = matches.iter().map(|m| m.target_peptide.as_str()).collect();
+            assert_eq!(seqs.len(), 4, "expected 4 tied matches, got {matches:?}");
+            for m in &matches {
+                assert_eq!(m.edit_distance, 1, "all matches must tie on edit_distance");
+            }
+            // All four share an identical |delta_mass| (same G->A substitution).
+            let dm0 = matches[0].delta_mass_da.abs();
+            for m in &matches {
+                assert!(
+                    (m.delta_mass_da.abs() - dm0).abs() < 1e-9,
+                    "all matches must tie on |delta_mass|"
+                );
+            }
+            assert_eq!(
+                seqs, expected,
+                "tie order must be deterministic (target_peptide asc)"
+            );
+        }
+    }
+
+    #[test]
+    fn test_find_similar_short_query_fallback() {
+        use std::io::Write;
+        // "PEPTIK" (6 aa) and "AAAAAAR" (7 aa) are the tryptic peptides.
+        let mut f = tempfile::NamedTempFile::new().expect("create temp file");
+        write!(f, ">sp|P001|TEST_HUMAN Test\nPEPTIKAAAAAAR\n").unwrap();
+        let config = SimilarityConfig::default();
+        // max_edit_distance=0 => kmer_k = 6 / (0 + 1) = 6, larger than the
+        // 5-residue query, so the k-mer prefilter cannot represent the query.
+        let idx = TargetDigestIndex::from_fasta(f.path(), 0, 0).expect("build index");
+        assert!(
+            idx.kmer_k > "PEPTK".len(),
+            "test setup requires kmer_k > query length (kmer_k={})",
+            idx.kmer_k
+        );
+
+        // Query shorter than kmer_k must fall back to a full length-window scan
+        // and still find the near-match (edit distance 1: insertion of 'I').
+        let matches = idx.find_similar("PEPTK", 2, 2, &config);
+        let found = matches.iter().any(|m| m.target_peptide == "PEPTIK");
+        assert!(
+            found,
+            "short query (len < kmer_k) must fall back to full scan and find PEPTIK; got {matches:?}"
+        );
     }
 }

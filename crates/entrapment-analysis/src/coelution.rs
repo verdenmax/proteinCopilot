@@ -155,27 +155,23 @@ impl CoElutionIndex {
 
         let mut candidates = Vec::new();
 
-        // Binary search: find the first entry whose rt_stop >= trap_rt_start.
-        // Entries are sorted by rt_start.  We want entries where
-        //   entry.rt_stop >= trap_rt_start   AND   entry.rt_start <= trap_rt_stop
+        // Entries are sorted by `rt_start`, so only that key may be binary
+        // searched. A target overlaps the trap iff
+        //   entry.rt_start <= trap_rt_stop   AND   entry.rt_stop >= trap_rt_start.
         //
-        // Use partition_point on rt_stop to skip entries that end before the
-        // trap starts.  Since entries are sorted by rt_start (not rt_stop),
-        // we use partition_point to find the first entry with
-        // rt_start > trap_rt_stop and iterate from start to that point,
-        // but also filter by rt_stop >= trap_rt_start.
-        //
-        // More efficiently: start from the partition_point where
-        // entry.rt_start could overlap, and iterate forward.
-        let start_idx = entries.partition_point(|e| e.rt_stop < trap_rt_start);
+        // `partition_point` requires a predicate that is monotonic over the
+        // slice. Only `rt_start` is sorted, so we use it for the UPPER bound
+        // (first entry whose rt_start > trap_rt_stop). The lower bound depends on
+        // `rt_stop`, which is NOT sorted and therefore must be filtered linearly.
+        let end_idx = entries.partition_point(|e| e.rt_start <= trap_rt_stop);
 
-        for entry in entries[start_idx..].iter() {
-            if entry.rt_start > trap_rt_stop {
-                break;
+        for entry in entries[..end_idx].iter() {
+            if entry.rt_stop < trap_rt_start {
+                continue; // ends before the trap starts → no RT overlap
             }
 
-            // RT overlap confirmed (entry.rt_stop >= trap_rt_start by partition_point,
-            // and entry.rt_start <= trap_rt_stop by the loop guard).
+            // RT overlap confirmed: entry.rt_start <= trap_rt_stop (by end_idx)
+            // and entry.rt_stop >= trap_rt_start (by the guard above).
 
             // Skip same peptide.
             if entry.peptide == trap.peptide {
@@ -449,6 +445,58 @@ mod tests {
                 panic!("expected Heavy label form");
             }
         }
+    }
+
+    #[test]
+    fn test_overlap_with_smaller_rt_start_is_found() {
+        // Regression for the `partition_point` bug: a genuinely-overlapping
+        // target whose `rt_start` is SMALLER than the trap's must still be
+        // returned. The previous code called `partition_point` on the unsorted
+        // `rt_stop` key, which skipped such entries (false negatives).
+        //
+        // Entries (all in the same DIA window, mz ~500), sorted by rt_start:
+        //   E0 rt 10–100  -> overlaps trap 50–60 (small rt_start, large rt_stop)
+        //   E1 rt 20–25   -> ends before trap starts (no overlap)
+        //   E2 rt 30–35   -> ends before trap starts (no overlap)
+        //   E3 rt 55–70   -> overlaps trap 50–60
+        //   E4 rt 80–90   -> starts after trap ends (no overlap)
+        let (p0, g0) = make_target_psm("OVERLAPBIGK", 500.0, 10.0, 100.0, "run1");
+        let (p1, g1) = make_target_psm("NOOVERLAPAK", 501.0, 20.0, 25.0, "run1");
+        let (p2, g2) = make_target_psm("NOOVERLAPBK", 502.0, 30.0, 35.0, "run1");
+        let (p3, g3) = make_target_psm("OVERLAPLATEK", 503.0, 55.0, 70.0, "run1");
+        let (p4, g4) = make_target_psm("AFTERTRAPXK", 504.0, 80.0, 90.0, "run1");
+
+        let psms = vec![p0, p1, p2, p3, p4];
+        let groups = vec![g0, g1, g2, g3, g4];
+        let windows = default_windows();
+        let index = CoElutionIndex::build(&psms, &groups, &windows, None, 20);
+
+        // Trap elutes 50–60, mz=505 => same DIA window (center 500) as all targets.
+        let trap = make_trap_psm("TRAPPEP", 505.0, 50.0, 60.0, "run1");
+        let result = index.find_co_eluting(&trap, "run1");
+        let peptides: Vec<&str> = result.iter().map(|c| c.peptide.as_str()).collect();
+
+        assert!(
+            peptides.contains(&"OVERLAPBIGK"),
+            "overlapping target with a smaller rt_start than the trap must be found; got {peptides:?}"
+        );
+        assert!(
+            peptides.contains(&"OVERLAPLATEK"),
+            "later-eluting overlapping target must be found; got {peptides:?}"
+        );
+        assert!(
+            !peptides.contains(&"NOOVERLAPAK") && !peptides.contains(&"NOOVERLAPBK"),
+            "targets ending before the trap starts must NOT be found; got {peptides:?}"
+        );
+        assert!(
+            !peptides.contains(&"AFTERTRAPXK"),
+            "target starting after the trap ends must NOT be found; got {peptides:?}"
+        );
+        assert_eq!(
+            result.len(),
+            2,
+            "exactly two overlapping targets expected; got {peptides:?}"
+        );
     }
 
     #[test]
