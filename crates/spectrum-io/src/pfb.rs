@@ -98,6 +98,10 @@ pub(crate) fn read_header(r: &mut impl Read, path: &Path) -> Result<PfbHeader, S
             source: e,
         })?
         .len();
+    // Integrity gate: a well-formed PFB ends with exactly `scan_num` i64 footer
+    // offsets, so the footer is the last bytes of the file. This also bounds
+    // `scan_num` against the real file size. (Assumes no trailing data appended
+    // after the footer.)
     let expected = (scan_num as u64)
         .checked_mul(8)
         .and_then(|footer| addr_list_addr.checked_add(footer));

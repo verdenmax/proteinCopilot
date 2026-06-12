@@ -81,20 +81,23 @@ fn build_pfb_index(path: &Path) -> Result<ScanIndex, SpectrumIoError> {
             .and_then(|t| t.trim().parse::<f64>().ok())
             .unwrap_or(0.0);
         let isolation_window = pfb::isolation_window_from_tokens(&toks);
-        if entries
-            .insert(
+        if entries.contains_key(&scan) {
+            tracing::warn!(
                 scan,
-                ScanMeta {
-                    offset: off,
-                    rt_seconds,
-                    ms_level,
-                    isolation_window,
-                },
-            )
-            .is_some()
-        {
-            tracing::warn!(scan, path = %path.display(), "duplicate scan number in PFB index; keeping last");
+                path = %path.display(),
+                "duplicate scan number in PFB index; keeping first"
+            );
+            continue;
         }
+        entries.insert(
+            scan,
+            ScanMeta {
+                offset: off,
+                rt_seconds,
+                ms_level,
+                isolation_window,
+            },
+        );
     }
 
     Ok(ScanIndex::from_meta(entries, IndexSource::BuiltFromScan))
@@ -109,7 +112,19 @@ impl SpectrumReader for IndexedPfbReader {
         PfbReader.read_summary(path)
     }
 
-    fn read_spectrum(&self, _path: &Path, scan: u32) -> Result<Spectrum, SpectrumIoError> {
+    fn read_spectrum(&self, path: &Path, scan: u32) -> Result<Spectrum, SpectrumIoError> {
+        if path != self.path {
+            let canonical_self =
+                std::fs::canonicalize(&self.path).unwrap_or_else(|_| self.path.clone());
+            let canonical_path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+            if canonical_self != canonical_path {
+                tracing::warn!(
+                    "IndexedPfbReader opened for {:?} but read_spectrum called with {:?}; using indexed file",
+                    self.path,
+                    path
+                );
+            }
+        }
         let offset = self
             .index
             .get_offset(scan)
@@ -288,5 +303,30 @@ mod tests {
             err,
             SpectrumIoError::ScanNotFound { scan: 999, .. }
         ));
+    }
+
+    #[test]
+    fn duplicate_scan_keeps_first() {
+        // Two MS2 records both labelled scan 5, different peak counts.
+        let recs = vec![
+            (
+                "5\t2\t12.0\tFTMS\t2\t1000.0\t50\t501.0\tHCD\t1\t2.0\t27.0\t501.25",
+                vec![150.0, 250.0],
+                vec![10.0, 20.0],
+            ),
+            (
+                "5\t2\t12.0\tFTMS\t2\t1000.0\t50\t501.0\tHCD\t1\t2.0\t27.0\t501.25",
+                vec![150.0, 250.0, 350.0],
+                vec![30.0, 40.0, 50.0],
+            ),
+        ];
+        let (_d, p) = write_pfb(&recs);
+        let indexed = IndexedPfbReader::open(&p).unwrap();
+        assert_eq!(indexed.index().len(), 1); // one entry for scan 5
+        let a = indexed.read_spectrum(&p, 5).unwrap();
+        let b = PfbReader.read_spectrum(&p, 5).unwrap();
+        // Both keep the FIRST occurrence (2 peaks), so they agree.
+        assert_eq!(a.num_peaks(), 2);
+        assert_eq!(a.num_peaks(), b.num_peaks());
     }
 }
