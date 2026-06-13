@@ -641,6 +641,7 @@ fdr::
 - Shuffle 使用确定性种子（42）确保可复现
 - FDR 公式：`FDR(t) = decoys_at_t / targets_at_t`（竞争式 TDA）
 - q-value 单调化：从最差分数向最佳分数反向扫描，`q[i] = min(raw_fdr[i], q[i+1])`
+- 并列分数处理：相同分数的 PSM 先统一为该分数组末位（计入该分数全部 target+decoy）的 FDR，再做单调化，确保并列 PSM 获得相同 q-value 且与输入顺序无关
 
 **依赖**：`core`, `rand 0.8`（确定性 shuffle）
 
@@ -727,7 +728,8 @@ xic::
   2. list_scan_meta() → 从内存索引获取全部 scan 元数据（亚毫秒，零 I/O）
   3. 索引规划：
      ├─ MS2 轻标：筛选 same_isolation_window()，取目标 scan ±n_cycles
-     ├─ MS2 重标（DIA+SILAC）：筛选包含 heavy_precursor_mz 的窗口，按 RT 取 ±n_cycles
+     ├─ MS2 重标（DIA+SILAC）：筛选隔离窗口包含 heavy_precursor_mz 的扫描，按 RT 取 ±n_cycles
+     ├─ MS2 重标（DDA+SILAC）：用 heavy_precursor_mz 定位选择了重标前体的独立 MS2 扫描（find_dda_heavy_scan），按 RT 取 ±n_cycles
      └─ MS1：筛选覆盖轻+重 MS2 RT 范围的 MS1 scan
   4. 仅读取 ~30 个目标 scan（O(1) indexed seek）
   5. 一次性输出 XicData + RawScanData + IonMetadataEntry
@@ -739,7 +741,7 @@ xic::
 - `extract_xic_unified()` 接受 `&dyn SpectrumReader`，MCP Server 传入 `reader_cache` LRU 缓存的 `Arc<dyn SpectrumReader>`
 - 单次调用替代旧版两遍扫描模式，输出 `XicUnifiedResult` 包含 XIC 数据 + raw peaks + 离子元数据
 - DIA 重标窗口规划：`heavy_mz` 在 `[target_mz - lower, target_mz + upper]` 范围内匹配
-- DDA 重标：与轻标相同 scan，无需独立窗口规划
+- DDA 重标：用 `find_dda_heavy_scan()` 按前体 m/z 定位实际选择了重标前体（SILAC 偏移后）的独立 MS2 扫描提取重标碎片，**不复用轻标扫描**；对每个邻域扫描按前体 m/z 二次守卫；未找到对应扫描时置 `heavy_warning` 并返回空重标轨迹
 - 动态 MS1 修剪窗口根据肽段 K/R 数量和电荷态动态计算，确保 SILAC 重标前体不被截断
 - DDA 无隔离窗口时，对 raw MS2 克隆使用 ±300s RT 近邻预过滤防止内存暴涨
 - 入口处验证目标扫描必须为 MS2 级别
@@ -809,7 +811,8 @@ result-import::
 
 **功能**：
 - 内置 UniProt 常用物种数据库注册表（Human, Mouse, E. coli, Yeast 等）
-- HTTPS 下载 + 自动缓存到 `~/.proteincopilot/databases/`
+- HTTPS 流式下载（分块写入 + 增量 SHA256/蛋白计数，10 GiB 上限防止内存暴涨）+ 自动缓存到 `~/.proteincopilot/databases/`
+- `registry.json` 原子写入（临时文件 + rename，按进程唯一临时名避免并发冲突）+ 解析失败自愈（损坏时告警并回退空注册表，不再永久阻塞）
 - 缓存查询（已下载、大小、路径）
 
 **依赖**：`reqwest`, `serde`, `tracing`

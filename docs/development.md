@@ -144,8 +144,8 @@ cargo build --release -p protein-copilot-mcp-server
 - **b 离子**: `b_n = Σ(residue_1..n)` — 不含水
 - **y 离子**: `y_n = Σ(residue_{n+1}..end) + H₂O` — 含水（C 端保留 OH，N 端保留 H）
 - **m/z 转换**: `ion_mz = (ion_mass + charge × PROTON_MASS) / charge`
-- **当前限制**: 仅生成单电荷碎片（b¹⁺, y¹⁺）
-- **⚠️ 已知问题**: `matching.rs` 的碎片离子生成不应用固定修饰（`annotate.rs` 版本正确），待修复
+- **碎片电荷**: 默认生成单电荷碎片（b¹⁺, y¹⁺）；前体电荷 ≥3 时额外生成双电荷碎片（b²⁺, y²⁺）
+- **修饰应用**: `matching.rs` 碎片离子生成应用固定修饰，并按残基位置定位可变修饰（与前体质量一致，避免同种残基多位点过计数）；公开生成器 `generate_*_ions_with_charge` 委托至位置感知实现 `generate_*_ions_positional`
 - **未实现**: 中性丢失离子（b°/y° -18 Da, b\*/y\* -17 Da）、磷酸化丢失（-98 Da H₃PO₄）
 
 ### PPM 计算
