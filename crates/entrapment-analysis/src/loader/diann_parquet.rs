@@ -70,8 +70,7 @@ pub fn load_diann_parquet(path: &Path) -> Result<Vec<UnifiedPsm>, EntrapmentErro
         let rt_stop_col = get_float_column_optional(&batch, &schema, "RT.Stop");
         let qvalue_col = get_float_column_optional(&batch, &schema, "Q.Value");
         let run_col = get_string_column_optional(&batch, &schema, "Run");
-        let modified_seq_col =
-            get_string_column_optional(&batch, &schema, "Modified.Sequence");
+        let modified_seq_col = get_string_column_optional(&batch, &schema, "Modified.Sequence");
 
         for row in 0..batch.num_rows() {
             let peptide = get_str(&peptide_col, row).to_string();

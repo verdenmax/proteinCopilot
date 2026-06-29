@@ -95,42 +95,18 @@ impl ResultParser for PFindTsvParser {
             let file_name = record.get(i_file).unwrap_or_default();
             let sequence = record.get(i_seq).unwrap_or_default();
             let mod_str = record.get(i_mods).unwrap_or_default();
-            let pred_rt: f64 = record
-                .get(i_pred_rt)
-                .unwrap_or("0")
-                .parse()
-                .unwrap_or(0.0);
+            let pred_rt: f64 = record.get(i_pred_rt).unwrap_or("0").parse().unwrap_or(0.0);
             let proteins_str = record.get(i_proteins).unwrap_or_default();
-            let mh_plus: f64 = record
-                .get(i_mh_plus)
-                .unwrap_or("0")
-                .parse()
-                .unwrap_or(0.0);
-            let charge: i32 = record
-                .get(i_charge)
-                .unwrap_or("0")
-                .parse()
-                .unwrap_or(0);
-            let scan_no: u32 = record
-                .get(i_scan)
-                .unwrap_or("0")
-                .parse()
-                .unwrap_or(0);
+            let mh_plus: f64 = record.get(i_mh_plus).unwrap_or("0").parse().unwrap_or(0.0);
+            let charge: i32 = record.get(i_charge).unwrap_or("0").parse().unwrap_or(0);
+            let scan_no: u32 = record.get(i_scan).unwrap_or("0").parse().unwrap_or(0);
             let final_score: f64 = record
                 .get(i_final_score)
                 .unwrap_or("0")
                 .parse()
                 .unwrap_or(0.0);
-            let q_value: f64 = record
-                .get(i_qvalue)
-                .unwrap_or("0")
-                .parse()
-                .unwrap_or(0.0);
-            let delta_rt: f64 = record
-                .get(i_delta_rt)
-                .unwrap_or("0")
-                .parse()
-                .unwrap_or(0.0);
+            let q_value: f64 = record.get(i_qvalue).unwrap_or("0").parse().unwrap_or(0.0);
+            let delta_rt: f64 = record.get(i_delta_rt).unwrap_or("0").parse().unwrap_or(0.0);
 
             if charge <= 0 {
                 tracing::warn!(
@@ -283,8 +259,7 @@ mod tests {
 
     #[test]
     fn parse_double_mod() {
-        let mods =
-            parse_modifications("3,Carbamidomethyl[C];5,Carbamidomethyl[C];", &mod_masses());
+        let mods = parse_modifications("3,Carbamidomethyl[C];5,Carbamidomethyl[C];", &mod_masses());
         assert_eq!(mods.len(), 2);
         assert_eq!(mods[0].name, "Carbamidomethyl");
         assert_eq!(mods[1].name, "Carbamidomethyl");
@@ -318,10 +293,7 @@ mod tests {
     #[test]
     fn parse_proteins_multiple() {
         let proteins = parse_proteins("sp|P50475|SYAC_RAT/sp|Q9JMG1|EDF1_MOUSE/");
-        assert_eq!(
-            proteins,
-            vec!["sp|P50475|SYAC_RAT", "sp|Q9JMG1|EDF1_MOUSE"]
-        );
+        assert_eq!(proteins, vec!["sp|P50475|SYAC_RAT", "sp|Q9JMG1|EDF1_MOUSE"]);
     }
 
     #[test]
@@ -376,8 +348,8 @@ mod tests {
 
     #[test]
     fn parse_fixture_file() {
-        let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../tests/fixtures/pfind_sample.tsv");
+        let fixture =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/pfind_sample.tsv");
         if !fixture.exists() {
             // Skip if fixture not available
             return;
@@ -421,8 +393,8 @@ mod tests {
 
     #[test]
     fn detect_fixture_file() {
-        let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../tests/fixtures/pfind_sample.tsv");
+        let fixture =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/pfind_sample.tsv");
         if !fixture.exists() {
             return;
         }

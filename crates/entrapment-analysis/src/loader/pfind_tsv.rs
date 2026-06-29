@@ -150,14 +150,13 @@ pub fn load_pfind_tsv(path: &Path) -> Result<Vec<UnifiedPsm>, EntrapmentError> {
 
     let find_col = |name: &str| -> Option<usize> { headers.iter().position(|h| h == name) };
 
-    let peptide_idx =
-        find_col("PeptideSequence").ok_or_else(|| EntrapmentError::LoaderError {
-            format: "pFind TSV".to_string(),
-            detail: format!(
-                "missing essential column 'PeptideSequence' in '{}'",
-                path.display()
-            ),
-        })?;
+    let peptide_idx = find_col("PeptideSequence").ok_or_else(|| EntrapmentError::LoaderError {
+        format: "pFind TSV".to_string(),
+        detail: format!(
+            "missing essential column 'PeptideSequence' in '{}'",
+            path.display()
+        ),
+    })?;
 
     let charge_idx = find_col("Charge");
     let mh_plus_idx = find_col("MH+");
@@ -191,9 +190,7 @@ pub fn load_pfind_tsv(path: &Path) -> Result<Vec<UnifiedPsm>, EntrapmentError> {
 
         // Convert MH+ to precursor m/z: (MH+ + (charge-1) * proton) / charge
         let precursor_mz = match (mh_plus, charge) {
-            (Some(mh), Some(z)) if z > 0 => {
-                Some((mh + (z as f64 - 1.0) * PROTON_MASS) / z as f64)
-            }
+            (Some(mh), Some(z)) if z > 0 => Some((mh + (z as f64 - 1.0) * PROTON_MASS) / z as f64),
             _ => None,
         };
 
@@ -300,10 +297,7 @@ mod tests {
     #[test]
     fn test_parse_proteins() {
         assert_eq!(parse_proteins("sp|P50475|SYAC_RAT/"), "sp|P50475|SYAC_RAT");
-        assert_eq!(
-            parse_proteins("sp|P1|A/sp|P2|B/"),
-            "sp|P1|A;sp|P2|B"
-        );
+        assert_eq!(parse_proteins("sp|P1|A/sp|P2|B/"), "sp|P1|A;sp|P2|B");
         assert_eq!(parse_proteins(""), "");
         assert_eq!(parse_proteins("/"), "");
     }
@@ -348,8 +342,8 @@ mod tests {
 
     #[test]
     fn test_load_fixture() {
-        let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../tests/fixtures/pfind_sample.tsv");
+        let fixture =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/pfind_sample.tsv");
         if !fixture.exists() {
             // Skip if fixture not available
             return;

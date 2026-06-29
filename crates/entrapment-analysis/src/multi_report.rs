@@ -25,8 +25,8 @@ use crate::types::{
 
 /// Colours assigned to target candidates (cycled if > 10 candidates).
 const CANDIDATE_COLORS: &[&str] = &[
-    "#d62728", "#2ca02c", "#ff7f0e", "#9467bd", "#8c564b",
-    "#e377c2", "#bcbd22", "#17becf", "#1f77b4", "#aec7e8",
+    "#d62728", "#2ca02c", "#ff7f0e", "#9467bd", "#8c564b", "#e377c2", "#bcbd22", "#17becf",
+    "#1f77b4", "#aec7e8",
 ];
 
 /// Colour for trap-only peaks.
@@ -329,7 +329,10 @@ fn write_candidate_table(html: &mut String, prov: &MultiTargetProvenance) {
     let _ = write!(html, "</table>\n</div>\n");
 }
 
-fn count_target_matches_for_candidate(prov: &MultiTargetProvenance, candidate_index: usize) -> usize {
+fn count_target_matches_for_candidate(
+    prov: &MultiTargetProvenance,
+    candidate_index: usize,
+) -> usize {
     let light_count = prov
         .light
         .annotated_peaks
@@ -531,7 +534,8 @@ function norm(v) {{ return v / maxI * 100.0; }}
         }
 
         let var_name = format!("target_{ci}");
-        let trace_name = format!("[C{ci}] {pep} ({label})",
+        let trace_name = format!(
+            "[C{ci}] {pep} ({label})",
             ci = ci,
             pep = cand.peptide,
             label = label_form_str(&cand.label_form),
@@ -614,6 +618,7 @@ fn write_noise_trace(html: &mut String, mzs: &[f64], ints: &[f64]) {
 }
 
 /// Write a normalized bar trace for the top (trap) half.
+#[allow(clippy::too_many_arguments)]
 fn write_normalized_trace(
     html: &mut String,
     var_suffix: &str,
@@ -629,7 +634,10 @@ fn write_normalized_trace(
     let label_json: Vec<String> = if labels.is_empty() {
         ints.iter().map(|_| "\"\"".to_string()).collect()
     } else {
-        labels.iter().map(|l| format!("\"{}\"", html_escape(l))).collect()
+        labels
+            .iter()
+            .map(|l| format!("\"{}\"", html_escape(l)))
+            .collect()
     };
 
     let bar_width = if bold { 1.2 } else { 0.5 };
@@ -675,7 +683,10 @@ fn write_target_trace(
 ) {
     let mz_json: Vec<String> = mzs.iter().map(|v| format!("{v}")).collect();
     let int_json: Vec<String> = ints.iter().map(|v| format!("{v}")).collect();
-    let label_json: Vec<String> = labels.iter().map(|l| format!("\"{}\"", html_escape(l))).collect();
+    let label_json: Vec<String> = labels
+        .iter()
+        .map(|l| format!("\"{}\"", html_escape(l)))
+        .collect();
 
     let _ = write!(
         html,
@@ -734,10 +745,9 @@ fn write_attribution_table(html: &mut String, prov: &MultiTargetProvenance) {
 
         // Only emit sub-header when both mirrors exist.
         if mirrors.len() > 1 {
-            let _ = write!(
+            let _ = writeln!(
                 html,
-                r#"<h3 style="margin:12px 0 6px 0;font-size:0.95em;color:#555">{label} Scan ({scan})</h3>
-"#,
+                r#"<h3 style="margin:12px 0 6px 0;font-size:0.95em;color:#555">{label} Scan ({scan})</h3>"#,
                 label = label,
                 scan = mirror.scan_number,
             );
@@ -781,18 +791,16 @@ fn write_attribution_table(html: &mut String, prov: &MultiTargetProvenance) {
             );
         }
 
-        let _ = write!(html, "</table>\n");
+        let _ = writeln!(html, "</table>");
     }
 
-    let _ = write!(html, "</div>\n");
+    let _ = writeln!(html, "</div>");
 }
 
 fn format_target_match(m: &TargetIonMatch, prov: &MultiTargetProvenance) -> String {
     let cand = prov.candidates.get(m.candidate_index);
     let pep = cand.map(|c| c.peptide.as_str()).unwrap_or("?");
-    let label = cand
-        .map(|c| label_form_str(&c.label_form))
-        .unwrap_or("?");
+    let label = cand.map(|c| label_form_str(&c.label_form)).unwrap_or("?");
     format!(
         "<span class=\"color-dot\" style=\"background:{color}\"></span>[C{idx}] {pep} ({label}) → <b>{ion}</b> (Δ{ppm:+.1} ppm)",
         color = candidate_color(m.candidate_index),
@@ -867,8 +875,10 @@ th:hover {{ background: #e0e0e0; }}
 
     for prov in results {
         // Chimeric detection: consider both light and heavy shared counts.
-        let light_total = prov.light.trap_only_count + prov.light.shared_count
-            + prov.light.target_only_count + prov.light.unassigned_count;
+        let light_total = prov.light.trap_only_count
+            + prov.light.shared_count
+            + prov.light.target_only_count
+            + prov.light.unassigned_count;
         let heavy_shared = prov.heavy.as_ref().map_or(0, |h| h.shared_count);
         let heavy_total = prov.heavy.as_ref().map_or(0, |h| {
             h.trap_only_count + h.shared_count + h.target_only_count + h.unassigned_count
@@ -880,7 +890,11 @@ th:hover {{ background: #e0e0e0; }}
         } else {
             0.0
         };
-        let row_class = if shared_frac > 0.30 { " class=\"chimeric\"" } else { "" };
+        let row_class = if shared_frac > 0.30 {
+            " class=\"chimeric\""
+        } else {
+            ""
+        };
 
         let scan = prov.light.scan_number;
         let mz_str = if prov.trap_precursor_mz > 0.0 {
@@ -930,7 +944,9 @@ th:hover {{ background: #e0e0e0; }}
         );
     }
 
-    let _ = write!(html, r#"</tbody>
+    let _ = write!(
+        html,
+        r#"</tbody>
 </table>
 </div>
 <script>
@@ -996,7 +1012,8 @@ function sortTable(col) {{
     filterTable();
 }}
 </script>
-</body></html>"#);
+</body></html>"#
+    );
 
     html
 }
@@ -1141,7 +1158,10 @@ mod tests {
                 delta_ppm: -0.5,
             }],
         };
-        assert!(matches!(classify_peak(&target_only), PeakOrigin::TargetOnly));
+        assert!(matches!(
+            classify_peak(&target_only),
+            PeakOrigin::TargetOnly
+        ));
 
         let unassigned = MultiAnnotatedPeak {
             mz_observed: 400.0,

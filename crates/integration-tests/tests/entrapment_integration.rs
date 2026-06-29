@@ -254,8 +254,14 @@ similarity:
         .expect("should find DGFLLDGFPR row");
     let cols: Vec<&str> = l2_row.split('\t').collect();
     let header_cols: Vec<&str> = content.lines().next().unwrap().split('\t').collect();
-    let sub_type_idx = header_cols.iter().position(|&h| h == "substitution_type").unwrap();
-    let edit_dist_idx = header_cols.iter().position(|&h| h == "edit_distance").unwrap();
+    let sub_type_idx = header_cols
+        .iter()
+        .position(|&h| h == "substitution_type")
+        .unwrap();
+    let edit_dist_idx = header_cols
+        .iter()
+        .position(|&h| h == "edit_distance")
+        .unwrap();
     let sub_type_col = cols[sub_type_idx];
     let edit_dist_col = cols[edit_dist_idx];
     assert!(
@@ -295,10 +301,10 @@ fn test_v3_provenance_columns_in_tsv() {
 
     // Use a mix of levels to exercise different code paths
     let psms = vec![
-        make_psm("STTTGHLIYK", "sp|Q6CFZ6|EF1A_YARLI"),    // L0
-        make_psm("ELTALAPSTMK", "sp|P18616|ACT1_DICDI"),   // L1
-        make_psm("DGFLLDGFPR", "sp|P69428|KAD_YERPE"),     // L2
-        make_psm("IGSEVYHNLK", "sp|P00924|ENO2_YEAST"),    // L3
+        make_psm("STTTGHLIYK", "sp|Q6CFZ6|EF1A_YARLI"),  // L0
+        make_psm("ELTALAPSTMK", "sp|P18616|ACT1_DICDI"), // L1
+        make_psm("DGFLLDGFPR", "sp|P69428|KAD_YERPE"),   // L2
+        make_psm("IGSEVYHNLK", "sp|P00924|ENO2_YEAST"),  // L3
     ];
     let classified = analyzer
         .classify_all(&psms)
@@ -415,8 +421,7 @@ fn test_v3_mod_parser_integration() {
     assert!((mod_tuples[1].1 - 15.994915).abs() < 1e-6);
 
     // 3. N-terminal modification
-    let (stripped_nterm, mods_nterm) =
-        parse_modified_sequence("(UniMod:1)AAAC(UniMod:4)DEFMGK");
+    let (stripped_nterm, mods_nterm) = parse_modified_sequence("(UniMod:1)AAAC(UniMod:4)DEFMGK");
     assert_eq!(stripped_nterm, "AAACDEFMGK");
     assert_eq!(mods_nterm.len(), 2);
     assert_eq!(mods_nterm[0].position, 0); // N-term acetyl → position 0
@@ -431,8 +436,7 @@ fn test_v3_mod_parser_integration() {
     assert!(mods_plain.is_empty());
 
     // 5. Heavy SILAC labels
-    let (stripped_silac, mods_silac) =
-        parse_modified_sequence("PEPTIDEK(UniMod:259)");
+    let (stripped_silac, mods_silac) = parse_modified_sequence("PEPTIDEK(UniMod:259)");
     assert_eq!(stripped_silac, "PEPTIDEK");
     assert_eq!(mods_silac.len(), 1);
     assert_eq!(mods_silac[0].unimod_id, 259);
@@ -495,8 +499,10 @@ fn test_v3_provenance_trace_known_peptides() {
     );
     // The total should account for all peaks
     assert_eq!(
-        result_a.trap_matched_count + result_a.target_matched_count
-            + result_a.shared_count + result_a.unassigned_count,
+        result_a.trap_matched_count
+            + result_a.target_matched_count
+            + result_a.shared_count
+            + result_a.unassigned_count,
         observed_mz.len() as u32,
         "all peaks should be accounted for"
     );
@@ -511,8 +517,14 @@ fn test_v3_provenance_trace_known_peptides() {
         &tolerance,
         1,
     );
-    assert_eq!(result_b.trap_matched_count, 0, "no trap-only when sequences match");
-    assert_eq!(result_b.target_matched_count, 0, "no target-only when sequences match");
+    assert_eq!(
+        result_b.trap_matched_count, 0,
+        "no trap-only when sequences match"
+    );
+    assert_eq!(
+        result_b.target_matched_count, 0,
+        "no target-only when sequences match"
+    );
     // shared_ratio should be 1.0 for matched peaks
     if result_b.shared_count > 0 {
         assert!(
@@ -622,7 +634,10 @@ fn test_v3_classified_psm_provenance_roundtrip() {
     let deser: ClassifiedPsm =
         serde_json::from_str(&json).expect("deserialize ClassifiedPsm with provenance");
 
-    let prov = deser.provenance.as_ref().expect("provenance should be Some");
+    let prov = deser
+        .provenance
+        .as_ref()
+        .expect("provenance should be Some");
     assert_eq!(prov.trap_sequence, "DGFLLDGFPR");
     assert_eq!(prov.target_sequence, "NGFLLDGFPR");
     assert_eq!(prov.annotated_peaks.len(), 3);
@@ -769,8 +784,5 @@ provenance:
     assert_eq!(config_v3.provenance.max_fragment_charge, 3);
     assert!((config_v3.provenance.chimera_threshold - 0.5).abs() < 1e-6);
     assert_eq!(config_v3.provenance.min_peaks_for_analysis, 10);
-    assert_eq!(
-        config_v3.provenance.levels_to_trace,
-        vec!["L3", "L4"]
-    );
+    assert_eq!(config_v3.provenance.levels_to_trace, vec!["L3", "L4"]);
 }

@@ -86,7 +86,11 @@ pub fn parse_modified_sequence(modified_seq: &str) -> (String, Vec<ParsedModific
                     // Position is the index of the *preceding* residue.
                     // If the annotation appears at the start (N-terminal mod),
                     // position is 0.
-                    let position = if stripped.is_empty() { 0 } else { stripped.len() - 1 };
+                    let position = if stripped.is_empty() {
+                        0
+                    } else {
+                        stripped.len() - 1
+                    };
                     mods.push(ParsedModification {
                         position,
                         delta_mass,

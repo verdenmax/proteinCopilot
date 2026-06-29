@@ -119,7 +119,10 @@ impl SpectrumBuilder {
         // Log when MS2+ spectrum has no retention time — RT-based lookups
         // (XIC, scan auto-matching) will use 0.0 as fallback.
         if self.rt_min.is_none() && !matches!(ms_level, MsLevel::MS1) {
-            tracing::debug!(scan, "MS2 spectrum missing retention time, defaulting to 0.0");
+            tracing::debug!(
+                scan,
+                "MS2 spectrum missing retention time, defaulting to 0.0"
+            );
         }
 
         // Sort m/z + intensity arrays together by m/z ascending.

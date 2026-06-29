@@ -402,8 +402,7 @@ pub fn classify_single(
         (true, Some(cross)) => {
             // P1 fix: use strict `<` so delta_mass tiebreaker actually fires
             if (best_mm as u32) < cross.edit_distance
-                || ((best_mm as u32) == cross.edit_distance
-                    && best_dm <= cross.delta_mass_da.abs())
+                || ((best_mm as u32) == cross.edit_distance && best_dm <= cross.delta_mass_da.abs())
             {
                 BestMatch::Hamming {
                     mm: best_mm,
@@ -484,8 +483,7 @@ pub fn classify_single(
             // Modification-aware delta mass adjustment for cross-length matches.
             // Use alignment-based substitution positions (not char-by-char zip,
             // which gives wrong positions when insertions/deletions shift offsets).
-            let diff_pos =
-                extract_substitution_positions_from_alignment(&cross.alignment_detail);
+            let diff_pos = extract_substitution_positions_from_alignment(&cross.alignment_detail);
             let mod_adj = mod_mass_adjustment(&psm.modifications, &diff_pos);
             let adjusted_dm = cross.delta_mass_da - mod_adj;
 

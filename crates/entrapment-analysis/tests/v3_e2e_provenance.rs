@@ -5,7 +5,9 @@
 //! verifies classification levels, provenance counts, chimera flag, and output.
 
 use protein_copilot_entrapment_analysis::config::EntrapmentConfig;
-use protein_copilot_entrapment_analysis::output::{write_classified_tsv, write_run_metadata, EntrapmentRunMetadata};
+use protein_copilot_entrapment_analysis::output::{
+    write_classified_tsv, write_run_metadata, EntrapmentRunMetadata,
+};
 use protein_copilot_entrapment_analysis::provenance::{trace_provenance, IonOrigin};
 use protein_copilot_entrapment_analysis::report;
 use protein_copilot_entrapment_analysis::{
@@ -141,14 +143,14 @@ fn build_test_mgf() -> String {
     //   Peaks: trap b2, trap b4 (TrapOnly), target b3 (TargetOnly),
     //          shared y2, y4, y6 (Shared), noise 500.0, 800.0 (Unassigned)
     let scan1_peaks = vec![
-        (trap_b[1], 600.0),     // trap b2 → TrapOnly
-        (target_b[2], 500.0),   // target b3 → TargetOnly
-        (shared_y[1], 700.0),   // y2 → Shared
-        (trap_b[3], 800.0),     // trap b4 → TrapOnly
-        (shared_y[3], 750.0),   // y4 → Shared
-        (500.0, 300.0),         // noise → Unassigned
-        (shared_y[5], 650.0),   // y6 → Shared
-        (800.0, 200.0),         // noise → Unassigned
+        (trap_b[1], 600.0),   // trap b2 → TrapOnly
+        (target_b[2], 500.0), // target b3 → TargetOnly
+        (shared_y[1], 700.0), // y2 → Shared
+        (trap_b[3], 800.0),   // trap b4 → TrapOnly
+        (shared_y[3], 750.0), // y4 → Shared
+        (500.0, 300.0),       // noise → Unassigned
+        (shared_y[5], 650.0), // y6 → Shared
+        (800.0, 200.0),       // noise → Unassigned
     ];
 
     // Compute precursor m/z for DGFLLDGFPR, charge 2
@@ -156,11 +158,7 @@ fn build_test_mgf() -> String {
     let precursor_mz = (precursor_mass + 2.0 * PROTON) / 2.0;
 
     // Scan 2: spectrum for target PSM "PEPTIDEK" (will be Target, not traced)
-    let scan2_peaks = vec![
-        (200.0, 400.0),
-        (350.0, 500.0),
-        (500.0, 600.0),
-    ];
+    let scan2_peaks = vec![(200.0, 400.0), (350.0, 500.0), (500.0, 600.0)];
 
     // Scan 3: spectrum for L4 trap PSM "WWWWWWWK" (no target match)
     // Include some of its b-ions so provenance can be traced (trap-only ions)
@@ -168,11 +166,11 @@ fn build_test_mgf() -> String {
     let l4_precursor_mass: f64 = "WWWWWWWK".chars().map(aa_mass).sum::<f64>() + WATER;
     let l4_precursor_mz = (l4_precursor_mass + 2.0 * PROTON) / 2.0;
     let scan3_peaks = vec![
-        (l4_b[0], 500.0),  // b1 of WWWWWWWK
-        (l4_b[1], 600.0),  // b2
-        (l4_b[2], 700.0),  // b3
-        (l4_b[3], 800.0),  // b4
-        (400.0, 200.0),    // noise
+        (l4_b[0], 500.0), // b1 of WWWWWWWK
+        (l4_b[1], 600.0), // b2
+        (l4_b[2], 700.0), // b3
+        (l4_b[3], 800.0), // b4
+        (400.0, 200.0),   // noise
     ];
 
     let mut mgf = String::new();
@@ -228,14 +226,14 @@ fn test_provenance_trace_known_ions() {
 
     // Build observed spectrum: 2 trap b-ions, 1 target b-ion, 3 shared y-ions, 2 noise
     let observed_mz = vec![
-        trap_b[1],     // trap b2 → TrapOnly
-        target_b[2],   // target b3 → TargetOnly
-        shared_y[1],   // y2 → Shared
-        trap_b[3],     // trap b4 → TrapOnly
-        shared_y[3],   // y4 → Shared
-        500.0,         // noise → Unassigned
-        shared_y[5],   // y6 → Shared
-        800.0,         // noise → Unassigned
+        trap_b[1],   // trap b2 → TrapOnly
+        target_b[2], // target b3 → TargetOnly
+        shared_y[1], // y2 → Shared
+        trap_b[3],   // trap b4 → TrapOnly
+        shared_y[3], // y4 → Shared
+        500.0,       // noise → Unassigned
+        shared_y[5], // y6 → Shared
+        800.0,       // noise → Unassigned
     ];
     let observed_int = vec![600.0, 500.0, 700.0, 800.0, 750.0, 300.0, 650.0, 200.0];
 
@@ -438,7 +436,10 @@ fn test_e2e_classify_and_provenance_batch() {
     let prov2 = classified[2].provenance.as_ref().unwrap();
     assert_eq!(prov2.trap_sequence, "WWWWWWWK");
     assert_eq!(prov2.target_sequence, "");
-    assert!(prov2.trap_matched_count > 0, "L4 should have trap-only b-ions");
+    assert!(
+        prov2.trap_matched_count > 0,
+        "L4 should have trap-only b-ions"
+    );
     assert_eq!(prov2.target_matched_count, 0);
     assert_eq!(prov2.shared_count, 0);
     assert!(!prov2.is_chimeric);
@@ -457,11 +458,7 @@ fn test_e2e_output_files() {
 
     // FASTA
     let fasta_path = tmp_dir.path().join("target.fasta");
-    std::fs::write(
-        &fasta_path,
-        ">sp|P001|PRTN_HUMAN Test\nNGFLLDGFPRLASTK\n",
-    )
-    .unwrap();
+    std::fs::write(&fasta_path, ">sp|P001|PRTN_HUMAN Test\nNGFLLDGFPRLASTK\n").unwrap();
 
     // Config
     let config = EntrapmentConfig::from_yaml_str(&make_config_yaml()).unwrap();
@@ -473,8 +470,18 @@ fn test_e2e_output_files() {
 
     // PSMs
     let psms = vec![
-        make_psm("DGFLLDGFPR", "sp|Q001|TRAP_YEAST", Some(1), Some("test_spectra.mgf")),
-        make_psm("WWWWWWWK", "sp|Q002|TRAP_ECOLI", Some(3), Some("test_spectra.mgf")),
+        make_psm(
+            "DGFLLDGFPR",
+            "sp|Q001|TRAP_YEAST",
+            Some(1),
+            Some("test_spectra.mgf"),
+        ),
+        make_psm(
+            "WWWWWWWK",
+            "sp|Q002|TRAP_ECOLI",
+            Some(3),
+            Some("test_spectra.mgf"),
+        ),
     ];
 
     let mut classified = analyzer.classify_all(&psms).unwrap();
@@ -504,7 +511,12 @@ fn test_e2e_output_files() {
     // Data rows should have provenance values (non-empty)
     for line in &lines[1..] {
         let fields: Vec<&str> = line.split('\t').collect();
-        assert_eq!(fields.len(), 23, "expected 23 columns, got {}", fields.len());
+        assert_eq!(
+            fields.len(),
+            23,
+            "expected 23 columns, got {}",
+            fields.len()
+        );
         // trap_matched (index 18) should be non-empty
         assert!(!fields[18].is_empty(), "trap_matched should be populated");
     }
@@ -517,7 +529,10 @@ fn test_e2e_output_files() {
 
     let html = std::fs::read_to_string(&report_path).unwrap();
     assert!(html.contains("<!DOCTYPE html>") || html.contains("<html"));
-    assert!(html.len() > 100, "HTML report should have substantial content");
+    assert!(
+        html.len() > 100,
+        "HTML report should have substantial content"
+    );
 
     // Write run metadata
     let metadata = EntrapmentRunMetadata {
@@ -583,7 +598,10 @@ fn test_provenance_with_modifications() {
     );
 
     // b4 should match (unmodified prefix), b5 should match (includes mod)
-    assert_eq!(prov.trap_matched_count, 2, "b4 and b5 should match with mod");
+    assert_eq!(
+        prov.trap_matched_count, 2,
+        "b4 and b5 should match with mod"
+    );
     assert_eq!(prov.unassigned_count, 1, "noise peak");
 }
 
@@ -596,11 +614,7 @@ fn test_provenance_batch_no_scan_number_warns() {
     let tmp_dir = tempfile::tempdir().unwrap();
 
     let fasta_path = tmp_dir.path().join("target.fasta");
-    std::fs::write(
-        &fasta_path,
-        ">sp|P001|PRTN_HUMAN Test\nNGFLLDGFPRLASTK\n",
-    )
-    .unwrap();
+    std::fs::write(&fasta_path, ">sp|P001|PRTN_HUMAN Test\nNGFLLDGFPRLASTK\n").unwrap();
 
     let config = EntrapmentConfig::from_yaml_str(&make_config_yaml()).unwrap();
     let analyzer = EntrapmentAnalyzer::new(config.clone(), &fasta_path).unwrap();

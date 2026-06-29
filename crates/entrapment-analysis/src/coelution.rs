@@ -77,11 +77,15 @@ impl CoElutionIndex {
             }
 
             // Require all essential fields.
-            let (rt_start, rt_stop, precursor_mz, spectrum_file) =
-                match (psm.rt_start, psm.rt_stop, psm.precursor_mz, psm.spectrum_file.as_deref()) {
-                    (Some(s), Some(e), Some(mz), Some(f)) => (s, e, mz, f),
-                    _ => continue,
-                };
+            let (rt_start, rt_stop, precursor_mz, spectrum_file) = match (
+                psm.rt_start,
+                psm.rt_stop,
+                psm.precursor_mz,
+                psm.spectrum_file.as_deref(),
+            ) {
+                (Some(s), Some(e), Some(mz), Some(f)) => (s, e, mz, f),
+                _ => continue,
+            };
 
             let charge = psm.charge.unwrap_or(2);
 
@@ -108,7 +112,11 @@ impl CoElutionIndex {
 
         // Sort each run's entries by rt_start for binary search.
         for entries in by_run.values_mut() {
-            entries.sort_by(|a, b| a.rt_start.partial_cmp(&b.rt_start).unwrap_or(std::cmp::Ordering::Equal));
+            entries.sort_by(|a, b| {
+                a.rt_start
+                    .partial_cmp(&b.rt_start)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
         }
 
         Self {
@@ -320,13 +328,7 @@ mod tests {
         (psm, PsmGroup::Target)
     }
 
-    fn make_trap_psm(
-        peptide: &str,
-        mz: f64,
-        rt_start: f64,
-        rt_stop: f64,
-        run: &str,
-    ) -> UnifiedPsm {
+    fn make_trap_psm(peptide: &str, mz: f64, rt_start: f64, rt_stop: f64, run: &str) -> UnifiedPsm {
         UnifiedPsm {
             peptide: peptide.to_string(),
             charge: Some(2),
@@ -344,9 +346,21 @@ mod tests {
 
     fn default_windows() -> Vec<DiaWindow> {
         vec![
-            DiaWindow { center: 500.0, low: 487.5, high: 512.5 },
-            DiaWindow { center: 525.0, low: 512.5, high: 537.5 },
-            DiaWindow { center: 550.0, low: 537.5, high: 562.5 },
+            DiaWindow {
+                center: 500.0,
+                low: 487.5,
+                high: 512.5,
+            },
+            DiaWindow {
+                center: 525.0,
+                low: 512.5,
+                high: 537.5,
+            },
+            DiaWindow {
+                center: 550.0,
+                low: 537.5,
+                high: 562.5,
+            },
         ]
     }
 
@@ -367,7 +381,12 @@ mod tests {
         let trap = make_trap_psm("TRAPPEP", 502.0, 31.0, 34.0, "run1");
         let result = index.find_co_eluting(&trap, "run1");
 
-        assert_eq!(result.len(), 2, "expected 2 co-eluting targets, got {}", result.len());
+        assert_eq!(
+            result.len(),
+            2,
+            "expected 2 co-eluting targets, got {}",
+            result.len()
+        );
         let peptides: Vec<&str> = result.iter().map(|c| c.peptide.as_str()).collect();
         assert!(peptides.contains(&"AAAAAK"), "AAAAAK should co-elute");
         assert!(peptides.contains(&"BBBBCK"), "BBBBCK should co-elute");
@@ -404,7 +423,10 @@ mod tests {
         let trap = make_trap_psm("TRAPPEP", 500.0, 30.0, 35.0, "run1");
         let result = index.find_co_eluting(&trap, "run1");
 
-        assert!(result.is_empty(), "expected no co-eluting targets (different DIA window)");
+        assert!(
+            result.is_empty(),
+            "expected no co-eluting targets (different DIA window)"
+        );
     }
 
     #[test]
@@ -423,14 +445,22 @@ mod tests {
 
         assert_eq!(result.len(), 2, "expected light + heavy candidates");
 
-        let light = result.iter().find(|c| matches!(c.label_form, LabelForm::Light));
+        let light = result
+            .iter()
+            .find(|c| matches!(c.label_form, LabelForm::Light));
         assert!(light.is_some(), "should have a Light candidate");
 
-        let heavy = result.iter().find(|c| matches!(c.label_form, LabelForm::Heavy { .. }));
+        let heavy = result
+            .iter()
+            .find(|c| matches!(c.label_form, LabelForm::Heavy { .. }));
         assert!(heavy.is_some(), "should have a Heavy candidate");
 
         if let Some(h) = heavy {
-            if let LabelForm::Heavy { precursor_mz_heavy, residue_deltas } = &h.label_form {
+            if let LabelForm::Heavy {
+                precursor_mz_heavy,
+                residue_deltas,
+            } = &h.label_form
+            {
                 // STTSGHLVYK has 1 K => heavy_delta = 8.014199, charge=2 => +4.0071
                 let expected_heavy_mz = 548.0 + 8.014199 / 2.0;
                 assert!(

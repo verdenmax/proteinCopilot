@@ -57,7 +57,11 @@ pub fn parse_fasta(path: &Path) -> Result<Vec<FastaEntry>, SearchEngineError> {
                     let count = entries.len();
                     if count % fasta_progress_interval == 0 {
                         let elapsed = fasta_loop_start.elapsed().as_secs_f64();
-                        let rate = if elapsed > 0.0 { count as f64 / elapsed } else { 0.0 };
+                        let rate = if elapsed > 0.0 {
+                            count as f64 / elapsed
+                        } else {
+                            0.0
+                        };
                         tracing::info!(
                             progress = count,
                             rate = format!("{:.0}/s", rate),

@@ -62,7 +62,10 @@ mod tests {
         };
 
         let json = serde_json::to_string(&progress).unwrap();
-        assert!(!json.contains("error_category"), "None field should be skipped");
+        assert!(
+            !json.contains("error_category"),
+            "None field should be skipped"
+        );
 
         let restored: SearchProgress = serde_json::from_str(&json).unwrap();
         assert_eq!(restored.status, "Running");

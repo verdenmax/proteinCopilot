@@ -110,7 +110,8 @@ impl TargetDigestIndex {
     ) -> Result<Self, EntrapmentError> {
         let _span = tracing::info_span!("digest_from_fasta",
             file = %path.display(),
-        ).entered();
+        )
+        .entered();
         let entries = parse_fasta(path).map_err(|e| EntrapmentError::FastaError {
             path: path.to_path_buf(),
             detail: e.to_string(),
@@ -173,8 +174,16 @@ impl TargetDigestIndex {
 
             if (i + 1) % progress_interval == 0 || i + 1 == total {
                 let elapsed = loop_start.elapsed().as_secs_f64();
-                let rate = if elapsed > 0.0 { (i + 1) as f64 / elapsed } else { 0.0 };
-                let eta = if rate > 0.0 { (total - i - 1) as f64 / rate } else { 0.0 };
+                let rate = if elapsed > 0.0 {
+                    (i + 1) as f64 / elapsed
+                } else {
+                    0.0
+                };
+                let eta = if rate > 0.0 {
+                    (total - i - 1) as f64 / rate
+                } else {
+                    0.0
+                };
                 tracing::info!(
                     progress = i + 1,
                     total = total,
@@ -449,7 +458,7 @@ mod tests {
         assert!(!idx.peptides_of_length(8).is_empty()); // "PEPTIDEK" is 8 chars
 
         assert!(!idx.is_empty());
-        assert!(idx.len() > 0);
+        assert!(!idx.is_empty());
     }
 
     #[test]

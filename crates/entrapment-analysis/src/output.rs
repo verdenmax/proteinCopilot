@@ -276,7 +276,10 @@ pub fn write_razor_errors_tsv(psms: &[ClassifiedPsm], path: &Path) -> Result<(),
 // ---------------------------------------------------------------------------
 
 /// Write run metadata as pretty-printed JSON (2-space indent).
-pub fn write_run_metadata(metadata: &EntrapmentRunMetadata, path: &Path) -> Result<(), EntrapmentError> {
+pub fn write_run_metadata(
+    metadata: &EntrapmentRunMetadata,
+    path: &Path,
+) -> Result<(), EntrapmentError> {
     let json =
         serde_json::to_string_pretty(metadata).map_err(|e| EntrapmentError::OutputError {
             detail: format!("failed to serialise run metadata: {e}"),
@@ -578,7 +581,7 @@ mod tests {
     #[test]
     fn test_opt_to_string() {
         assert_eq!(opt_to_string(&Some(42)), "42");
-        assert_eq!(opt_to_string(&Some(3.14)), "3.14");
+        assert_eq!(opt_to_string(&Some(2.5)), "2.5");
         assert_eq!(opt_to_string(&Some("hello".to_owned())), "hello");
         assert_eq!(opt_to_string::<i32>(&None), "");
     }

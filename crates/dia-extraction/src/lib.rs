@@ -35,9 +35,8 @@ pub fn extract_dia_precursors(
     extractor: &dyn PrecursorExtractor,
     config: &DiaExtractionConfig,
 ) -> Result<DiaExtractionResult, DiaExtractionError> {
-    let _span = tracing::info_span!("extract_dia_precursors",
-        spectra_count = spectra.len(),
-    ).entered();
+    let _span =
+        tracing::info_span!("extract_dia_precursors", spectra_count = spectra.len(),).entered();
 
     let (ms1_refs, ms2_refs) = detection::separate_by_ms_level(spectra);
 
@@ -122,7 +121,10 @@ pub fn extract_dia_precursors(
         charge_distribution,
     };
 
-    tracing::info!(candidates = stats.total_precursors_extracted, "DIA extraction complete");
+    tracing::info!(
+        candidates = stats.total_precursors_extracted,
+        "DIA extraction complete"
+    );
 
     Ok(DiaExtractionResult {
         detected_mode,

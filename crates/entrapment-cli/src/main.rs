@@ -16,7 +16,8 @@ use protein_copilot_entrapment_analysis::config::{EntrapmentConfig, SimilarityCo
 use protein_copilot_entrapment_analysis::digest::TargetDigestIndex;
 use protein_copilot_entrapment_analysis::loader::{self, ResultFormat};
 use protein_copilot_entrapment_analysis::output::{
-    file_sha256, write_classified_tsv, write_razor_errors_tsv, write_run_metadata, EntrapmentRunMetadata,
+    file_sha256, write_classified_tsv, write_razor_errors_tsv, write_run_metadata,
+    EntrapmentRunMetadata,
 };
 use protein_copilot_entrapment_analysis::report;
 use protein_copilot_entrapment_analysis::similarity::classify_single;
@@ -125,7 +126,14 @@ fn main() {
             format,
             out,
             mzml_dir,
-        } => run_analyze(&results, &config, &target_fasta, format.as_ref(), &out, mzml_dir.as_deref()),
+        } => run_analyze(
+            &results,
+            &config,
+            &target_fasta,
+            format.as_ref(),
+            &out,
+            mzml_dir.as_deref(),
+        ),
         Commands::Report { classified, out } => run_report(&classified, out.as_deref()),
         Commands::Inspect {
             peptide,
@@ -204,11 +212,7 @@ fn run_analyze(
         let tagger = Tagger::new(&config)?;
         let groups: Vec<PsmGroup> = psms
             .iter()
-            .map(|psm| {
-                tagger
-                    .tag(&psm.protein_ids)
-                    .unwrap_or(PsmGroup::Target)
-            })
+            .map(|psm| tagger.tag(&psm.protein_ids).unwrap_or(PsmGroup::Target))
             .collect();
 
         println!("Running multi-target provenance tracing...");

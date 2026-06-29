@@ -8,9 +8,7 @@ use protein_copilot_core::search_params::MassTolerance;
 use protein_copilot_search_engine::matching::within_tolerance;
 
 use crate::provenance::{generate_theoretical_ions, TheoreticalIon};
-use crate::types::{
-    CoElutingCandidate, LabelForm, MirrorData, MultiAnnotatedPeak, TargetIonMatch,
-};
+use crate::types::{CoElutingCandidate, LabelForm, MirrorData, MultiAnnotatedPeak, TargetIonMatch};
 
 // ---------------------------------------------------------------------------
 // Core public function
@@ -67,8 +65,7 @@ pub fn trace_multi_target(
         // Match against each candidate's ions.
         let mut target_matches = Vec::new();
         for (ci, ions) in candidate_ions.iter().enumerate() {
-            if let Some((label, delta_ppm)) =
-                find_best_match_with_ppm(mz, ions, fragment_tolerance)
+            if let Some((label, delta_ppm)) = find_best_match_with_ppm(mz, ions, fragment_tolerance)
             {
                 target_matches.push(TargetIonMatch {
                     candidate_index: ci,
@@ -138,8 +135,7 @@ pub(crate) fn trace_mirror_with_trap_ions(
 
         let mut target_matches = Vec::new();
         for (ci, ions) in candidate_ions.iter().enumerate() {
-            if let Some((label, delta_ppm)) =
-                find_best_match_with_ppm(mz, ions, fragment_tolerance)
+            if let Some((label, delta_ppm)) = find_best_match_with_ppm(mz, ions, fragment_tolerance)
             {
                 target_matches.push(TargetIonMatch {
                     candidate_index: ci,
@@ -183,22 +179,14 @@ pub(crate) fn trace_mirror_with_trap_ions(
 /// For `Light` candidates, delegates directly to `generate_theoretical_ions`.
 /// For `Heavy` candidates, generates light ions first and then shifts them
 /// by the cumulative heavy-residue delta masses.
-fn generate_candidate_ions(
-    candidate: &CoElutingCandidate,
-    max_charge: i32,
-) -> Vec<TheoreticalIon> {
+fn generate_candidate_ions(candidate: &CoElutingCandidate, max_charge: i32) -> Vec<TheoreticalIon> {
     match &candidate.label_form {
         LabelForm::Light => {
             generate_theoretical_ions(&candidate.peptide, &candidate.modifications, max_charge)
         }
-        LabelForm::Heavy {
-            residue_deltas, ..
-        } => {
-            let light_ions = generate_theoretical_ions(
-                &candidate.peptide,
-                &candidate.modifications,
-                max_charge,
-            );
+        LabelForm::Heavy { residue_deltas, .. } => {
+            let light_ions =
+                generate_theoretical_ions(&candidate.peptide, &candidate.modifications, max_charge);
             shift_ions_heavy(&candidate.peptide, &light_ions, residue_deltas, max_charge)
         }
     }
@@ -481,15 +469,7 @@ mod tests {
             modifications: vec![],
         }];
 
-        let result = trace_multi_target(
-            &[],
-            &[],
-            "STTTG",
-            &[],
-            &candidates,
-            &tolerance_20ppm(),
-            1,
-        );
+        let result = trace_multi_target(&[], &[], "STTTG", &[], &candidates, &tolerance_20ppm(), 1);
 
         assert_eq!(result.annotated_peaks.len(), 0);
         assert_eq!(result.trap_only_count, 0);
@@ -523,15 +503,7 @@ mod tests {
 
     #[test]
     fn test_scan_number_is_zero() {
-        let result = trace_multi_target(
-            &[100.0],
-            &[1000.0],
-            "AG",
-            &[],
-            &[],
-            &tolerance_20ppm(),
-            1,
-        );
+        let result = trace_multi_target(&[100.0], &[1000.0], "AG", &[], &[], &tolerance_20ppm(), 1);
         assert_eq!(result.scan_number, 0);
     }
 
@@ -548,10 +520,7 @@ mod tests {
             .iter()
             .find(|i| i.label.starts_with("b1+1"))
             .expect("b1+1(H)");
-        let b1_light = light_ions
-            .iter()
-            .find(|i| i.label == "b1+1")
-            .expect("b1+1");
+        let b1_light = light_ions.iter().find(|i| i.label == "b1+1").expect("b1+1");
         assert!(
             (b1_heavy.mz - b1_light.mz).abs() < 0.001,
             "b1 should not be shifted; heavy={}, light={}",
@@ -564,10 +533,7 @@ mod tests {
             .iter()
             .find(|i| i.label.starts_with("y1+1"))
             .expect("y1+1(H)");
-        let y1_light = light_ions
-            .iter()
-            .find(|i| i.label == "y1+1")
-            .expect("y1+1");
+        let y1_light = light_ions.iter().find(|i| i.label == "y1+1").expect("y1+1");
         let expected_shift = 8.014199;
         assert!(
             (y1_heavy.mz - y1_light.mz - expected_shift).abs() < 0.001,

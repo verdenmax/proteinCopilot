@@ -44,8 +44,9 @@ impl DiannParser {
 }
 
 /// Compiled regex for UniMod notation in DIA-NN modified sequences.
-static UNIMOD_RE: std::sync::LazyLock<Regex> =
-    std::sync::LazyLock::new(|| Regex::new(r"\(UniMod:(\d+)\)").expect("UNIMOD_RE is a valid regex literal"));
+static UNIMOD_RE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
+    Regex::new(r"\(UniMod:(\d+)\)").expect("UNIMOD_RE is a valid regex literal")
+});
 
 /// Parse DIA-NN `Modified.Sequence` like `_AAAC(UniMod:4)DM(UniMod:35)K_`
 ///
@@ -117,7 +118,8 @@ impl ResultParser for DiannParser {
     fn parse(&self, path: &Path, unimod: &UnimodDb) -> Result<Vec<ImportedPsm>, ResultImportError> {
         let _span = tracing::info_span!("parse_diann",
             file = %path.display(),
-        ).entered();
+        )
+        .entered();
 
         if !path.exists() {
             return Err(ResultImportError::FileNotFound {

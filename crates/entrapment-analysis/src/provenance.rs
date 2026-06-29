@@ -379,15 +379,7 @@ mod tests {
         let observed: Vec<f64> = trap_ions.iter().map(|i| i.mz).collect();
         let intensities: Vec<f64> = vec![100.0; observed.len()];
 
-        let result = trace_provenance(
-            &observed,
-            &intensities,
-            "AGK",
-            "",
-            &[],
-            &ppm_tolerance(),
-            1,
-        );
+        let result = trace_provenance(&observed, &intensities, "AGK", "", &[], &ppm_tolerance(), 1);
 
         assert!(result.trap_matched_count > 0);
         assert_eq!(result.target_matched_count, 0);

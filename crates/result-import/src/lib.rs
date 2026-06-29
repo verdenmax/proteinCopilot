@@ -152,13 +152,10 @@ mod tests {
 
     #[test]
     fn detect_format_pfind_tsv() {
-        let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../tests/fixtures/pfind_sample.tsv");
+        let fixture =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/pfind_sample.tsv");
         if fixture.exists() {
-            assert_eq!(
-                detect_format(&fixture).unwrap(),
-                ImportFormat::PFindTsv
-            );
+            assert_eq!(detect_format(&fixture).unwrap(), ImportFormat::PFindTsv);
         }
     }
 

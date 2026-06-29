@@ -492,7 +492,11 @@ mod tests {
             precursor_mz_heavy: 556.13,
             residue_deltas: vec![(9, 8.014199)],
         };
-        if let LabelForm::Heavy { precursor_mz_heavy, residue_deltas } = form {
+        if let LabelForm::Heavy {
+            precursor_mz_heavy,
+            residue_deltas,
+        } = form
+        {
             assert!((precursor_mz_heavy - 556.13).abs() < 0.01);
             assert_eq!(residue_deltas.len(), 1);
         } else {
@@ -522,13 +526,11 @@ mod tests {
             mz_observed: 285.155,
             intensity: 45230.0,
             trap_ion: Some("b3+1".to_string()),
-            target_matches: vec![
-                TargetIonMatch {
-                    candidate_index: 0,
-                    ion_label: "b3+1".to_string(),
-                    delta_ppm: -2.1,
-                },
-            ],
+            target_matches: vec![TargetIonMatch {
+                candidate_index: 0,
+                ion_label: "b3+1".to_string(),
+                delta_ppm: -2.1,
+            }],
         };
         assert!(peak.trap_ion.is_some());
         assert_eq!(peak.target_matches.len(), 1);

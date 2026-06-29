@@ -3,18 +3,18 @@
 //! Provides L0-L4 discriminability levels for each trap PSM, identifying
 //! razor attribution errors, L/I isomers, near-identical homologs, and true trap hits.
 
+pub mod coelution;
 pub mod config;
 pub mod digest;
 pub mod error;
 pub mod levenshtein;
 pub mod loader;
 pub mod mirror_plot;
-pub mod output;
 pub mod mod_parser;
-pub mod provenance;
-pub mod coelution;
 pub mod multi_provenance;
 pub mod multi_report;
+pub mod output;
+pub mod provenance;
 pub mod report;
 pub mod similarity;
 pub mod tagger;
@@ -86,8 +86,16 @@ impl EntrapmentAnalyzer {
             result.push(self.classify(psm)?);
             if (i + 1) % progress_interval == 0 || i + 1 == total {
                 let elapsed = loop_start.elapsed().as_secs_f64();
-                let rate = if elapsed > 0.0 { (i + 1) as f64 / elapsed } else { 0.0 };
-                let eta = if rate > 0.0 { (total - i - 1) as f64 / rate } else { 0.0 };
+                let rate = if elapsed > 0.0 {
+                    (i + 1) as f64 / elapsed
+                } else {
+                    0.0
+                };
+                let eta = if rate > 0.0 {
+                    (total - i - 1) as f64 / rate
+                } else {
+                    0.0
+                };
                 tracing::info!(
                     progress = i + 1,
                     total = total,
@@ -97,7 +105,10 @@ impl EntrapmentAnalyzer {
                 );
             }
         }
-        tracing::info!(classified_count = result.len(), "entrapment classification complete");
+        tracing::info!(
+            classified_count = result.len(),
+            "entrapment classification complete"
+        );
         Ok(result)
     }
 
@@ -286,9 +297,7 @@ pub fn trace_provenance_batch(
             // Resolve scan number: direct or via RT-based lookup.
             let scan_number = if let Some(s) = cpsm.psm.scan_number.filter(|&s| s > 0) {
                 s
-            } else if let (Some(rt), Some(mz)) =
-                (cpsm.psm.retention_time, cpsm.psm.precursor_mz)
-            {
+            } else if let (Some(rt), Some(mz)) = (cpsm.psm.retention_time, cpsm.psm.precursor_mz) {
                 // Derive tolerance from RT.Start / RT.Stop, or use config default.
                 let tol = match (cpsm.psm.rt_start, cpsm.psm.rt_stop) {
                     (Some(start), Some(stop)) if stop > start => (stop - start) / 2.0,
@@ -566,9 +575,7 @@ pub fn trace_multi_target_provenance(
             // Resolve scan number: direct or via RT-based lookup.
             let scan_number = if let Some(s) = cpsm.psm.scan_number.filter(|&s| s > 0) {
                 s
-            } else if let (Some(rt), Some(mz)) =
-                (cpsm.psm.retention_time, cpsm.psm.precursor_mz)
-            {
+            } else if let (Some(rt), Some(mz)) = (cpsm.psm.retention_time, cpsm.psm.precursor_mz) {
                 let tol = match (cpsm.psm.rt_start, cpsm.psm.rt_stop) {
                     (Some(start), Some(stop)) if stop > start => (stop - start) / 2.0,
                     _ => config.provenance.rt_tolerance_min,
@@ -647,105 +654,106 @@ pub fn trace_multi_target_provenance(
                 if precursor_mz <= 0.0 {
                     None
                 } else {
+                    let seq_chars: Vec<char> = cpsm.psm.peptide.chars().collect();
+                    let total_delta: f64 = seq_chars
+                        .iter()
+                        .map(|&c| match c {
+                            'K' => silac.heavy_k_delta,
+                            'R' => silac.heavy_r_delta,
+                            _ => 0.0,
+                        })
+                        .sum();
 
-                let seq_chars: Vec<char> = cpsm.psm.peptide.chars().collect();
-                let total_delta: f64 = seq_chars
-                    .iter()
-                    .map(|&c| match c {
-                        'K' => silac.heavy_k_delta,
-                        'R' => silac.heavy_r_delta,
-                        _ => 0.0,
-                    })
-                    .sum();
+                    let has_heavy_candidates = candidates
+                        .iter()
+                        .any(|c| !matches!(c.label_form, types::LabelForm::Light));
 
-                let has_heavy_candidates = candidates.iter().any(|c| !matches!(c.label_form, types::LabelForm::Light));
+                    if total_delta > 0.0 && has_heavy_candidates {
+                        let charge = cpsm.psm.charge.unwrap_or(2) as f64;
+                        let heavy_mz = precursor_mz + total_delta / charge;
 
-                if total_delta > 0.0 && has_heavy_candidates {
-                    let charge = cpsm.psm.charge.unwrap_or(2) as f64;
-                    let heavy_mz = precursor_mz + total_delta / charge;
+                        let heavy_tol = match (cpsm.psm.rt_start, cpsm.psm.rt_stop) {
+                            (Some(start), Some(stop)) if stop > start => (stop - start) / 2.0,
+                            _ => config.provenance.rt_tolerance_min,
+                        };
+                        let heavy_rt = cpsm.psm.retention_time.unwrap_or(0.0);
 
-                    let heavy_tol = match (cpsm.psm.rt_start, cpsm.psm.rt_stop) {
-                        (Some(start), Some(stop)) if stop > start => (stop - start) / 2.0,
-                        _ => config.provenance.rt_tolerance_min,
-                    };
-                    let heavy_rt = cpsm.psm.retention_time.unwrap_or(0.0);
-
-                    match reader.find_by_rt(&mzml_path, heavy_rt, heavy_mz, heavy_tol) {
-                        Ok(Some((heavy_scan, _delta))) => {
-                            if heavy_scan == scan_number {
-                                tracing::debug!(
-                                    scan = heavy_scan,
-                                    "heavy scan equals light scan, skipping heavy mirror"
-                                );
-                                None
-                            } else {
-                            match reader.read_spectrum(&mzml_path, heavy_scan) {
-                                Ok(heavy_spec) => {
-                                    // Generate trap heavy theoretical ions.
-                                    let residue_deltas: Vec<(usize, f64)> = seq_chars
-                                        .iter()
-                                        .enumerate()
-                                        .filter_map(|(i, &c)| match c {
-                                            'K' => Some((i, silac.heavy_k_delta)),
-                                            'R' => Some((i, silac.heavy_r_delta)),
-                                            _ => None,
-                                        })
-                                        .collect();
-
-                                    let trap_light_ions =
-                                        crate::provenance::generate_theoretical_ions(
-                                            &cpsm.psm.peptide,
-                                            &cpsm.psm.modifications,
-                                            config.provenance.max_fragment_charge,
-                                        );
-                                    let trap_heavy_ions =
-                                        multi_provenance::shift_ions_heavy(
-                                            &cpsm.psm.peptide,
-                                            &trap_light_ions,
-                                            &residue_deltas,
-                                            config.provenance.max_fragment_charge,
-                                        );
-
-                                    let mut heavy_data =
-                                        multi_provenance::trace_mirror_with_trap_ions(
-                                            &heavy_spec.mz_array,
-                                            &heavy_spec.intensity_array,
-                                            &trap_heavy_ions,
-                                            &candidates,
-                                            &tolerance,
-                                            config.provenance.max_fragment_charge,
-                                        );
-                                    heavy_data.scan_number = heavy_scan;
-
-                                    Some(heavy_data)
-                                }
-                                Err(err) => {
+                        match reader.find_by_rt(&mzml_path, heavy_rt, heavy_mz, heavy_tol) {
+                            Ok(Some((heavy_scan, _delta))) => {
+                                if heavy_scan == scan_number {
                                     tracing::debug!(
                                         scan = heavy_scan,
-                                        error = %err,
-                                        "could not read heavy scan, skipping heavy mirror"
+                                        "heavy scan equals light scan, skipping heavy mirror"
                                     );
                                     None
+                                } else {
+                                    match reader.read_spectrum(&mzml_path, heavy_scan) {
+                                        Ok(heavy_spec) => {
+                                            // Generate trap heavy theoretical ions.
+                                            let residue_deltas: Vec<(usize, f64)> = seq_chars
+                                                .iter()
+                                                .enumerate()
+                                                .filter_map(|(i, &c)| match c {
+                                                    'K' => Some((i, silac.heavy_k_delta)),
+                                                    'R' => Some((i, silac.heavy_r_delta)),
+                                                    _ => None,
+                                                })
+                                                .collect();
+
+                                            let trap_light_ions =
+                                                crate::provenance::generate_theoretical_ions(
+                                                    &cpsm.psm.peptide,
+                                                    &cpsm.psm.modifications,
+                                                    config.provenance.max_fragment_charge,
+                                                );
+                                            let trap_heavy_ions =
+                                                multi_provenance::shift_ions_heavy(
+                                                    &cpsm.psm.peptide,
+                                                    &trap_light_ions,
+                                                    &residue_deltas,
+                                                    config.provenance.max_fragment_charge,
+                                                );
+
+                                            let mut heavy_data =
+                                                multi_provenance::trace_mirror_with_trap_ions(
+                                                    &heavy_spec.mz_array,
+                                                    &heavy_spec.intensity_array,
+                                                    &trap_heavy_ions,
+                                                    &candidates,
+                                                    &tolerance,
+                                                    config.provenance.max_fragment_charge,
+                                                );
+                                            heavy_data.scan_number = heavy_scan;
+
+                                            Some(heavy_data)
+                                        }
+                                        Err(err) => {
+                                            tracing::debug!(
+                                                scan = heavy_scan,
+                                                error = %err,
+                                                "could not read heavy scan, skipping heavy mirror"
+                                            );
+                                            None
+                                        }
+                                    }
                                 }
                             }
+                            Ok(None) => {
+                                tracing::debug!(
+                                    peptide = %cpsm.psm.peptide,
+                                    heavy_mz = heavy_mz,
+                                    "no heavy scan found, skipping heavy mirror"
+                                );
+                                None
+                            }
+                            Err(err) => {
+                                tracing::debug!(error = %err, "heavy scan lookup failed");
+                                None
                             }
                         }
-                        Ok(None) => {
-                            tracing::debug!(
-                                peptide = %cpsm.psm.peptide,
-                                heavy_mz = heavy_mz,
-                                "no heavy scan found, skipping heavy mirror"
-                            );
-                            None
-                        }
-                        Err(err) => {
-                            tracing::debug!(error = %err, "heavy scan lookup failed");
-                            None
-                        }
+                    } else {
+                        None
                     }
-                } else {
-                    None
-                }
                 } // end precursor_mz guard
             } else {
                 None
@@ -753,7 +761,10 @@ pub fn trace_multi_target_provenance(
 
             // Compute trap heavy precursor m/z for metadata (reuses SILAC logic).
             let trap_precursor_mz_heavy = config.provenance.silac.as_ref().and_then(|silac| {
-                let total_delta: f64 = cpsm.psm.peptide.chars()
+                let total_delta: f64 = cpsm
+                    .psm
+                    .peptide
+                    .chars()
                     .map(|c| match c {
                         'K' => silac.heavy_k_delta,
                         'R' => silac.heavy_r_delta,
@@ -783,12 +794,10 @@ pub fn trace_multi_target_provenance(
 
             // Generate per-PSM HTML report if configured.
             if config.provenance.generate_per_psm_reports {
-                let report_path = output_dir
-                    .join("provenance")
-                    .join(format!(
-                        "{}_{}_scan{}.html",
-                        run_name, cpsm.psm.peptide, prov.light.scan_number
-                    ));
+                let report_path = output_dir.join("provenance").join(format!(
+                    "{}_{}_scan{}.html",
+                    run_name, cpsm.psm.peptide, prov.light.scan_number
+                ));
                 if let Err(err) = multi_report::render_multi_provenance_report(&prov, &report_path)
                 {
                     tracing::warn!(

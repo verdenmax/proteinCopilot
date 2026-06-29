@@ -26,7 +26,11 @@ pub fn correlate_ms1_ms2(
         .map(|ms2| correlate_single(ms1_spectra, ms2))
         .collect();
 
-    tracing::info!(ms1 = ms1_spectra.len(), ms2 = ms2_spectra.len(), "MS1-MS2 correlation complete");
+    tracing::info!(
+        ms1 = ms1_spectra.len(),
+        ms2 = ms2_spectra.len(),
+        "MS1-MS2 correlation complete"
+    );
 
     result
 }
