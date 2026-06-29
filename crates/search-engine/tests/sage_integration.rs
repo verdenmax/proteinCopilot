@@ -85,7 +85,7 @@ async fn sage_search_produces_results() {
                 result
                     .psms
                     .iter()
-                    .filter(|p| !p.is_decoy && p.q_value.map_or(false, |q| q <= 0.01))
+                    .filter(|p| !p.is_decoy && p.q_value.is_some_and(|q| q <= 0.01))
                     .count()
             );
 

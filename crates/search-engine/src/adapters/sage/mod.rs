@@ -88,7 +88,11 @@ impl SearchEngineAdapter for SageAdapter {
             let reader = protein_copilot_spectrum_io::create_indexed_reader(path).map_err(|e| {
                 CoreError::SearchEngineError {
                     engine: "Sage".into(),
-                    detail: format!("Failed to create indexed reader for {}: {}", path.display(), e),
+                    detail: format!(
+                        "Failed to create indexed reader for {}: {}",
+                        path.display(),
+                        e
+                    ),
                     suggestion: "Check that the input file exists and is a valid mzML/mgf file"
                         .into(),
                 }
@@ -372,7 +376,9 @@ impl SearchEngineAdapter for SageAdapter {
                 entry.q_value = psm.q_value;
             }
         }
-        let peptides: Vec<PeptideResult> = peptide_map.into_values().collect();
+        let mut peptides: Vec<PeptideResult> = peptide_map.into_values().collect();
+        // Deterministic ordering: HashMap iteration order is unspecified.
+        peptides.sort_by(|a, b| a.sequence.cmp(&b.sequence));
 
         // ── Build protein-level results ──────────────────────────────────
         let mut protein_map: HashMap<String, ProteinResult> = HashMap::new();
@@ -418,7 +424,9 @@ impl SearchEngineAdapter for SageAdapter {
                     .count() as u64;
             }
         }
-        let proteins: Vec<ProteinResult> = protein_map.into_values().collect();
+        let mut proteins: Vec<ProteinResult> = protein_map.into_values().collect();
+        // Deterministic ordering: HashMap iteration order is unspecified.
+        proteins.sort_by(|a, b| a.accession.cmp(&b.accession));
 
         // ── Build summary ────────────────────────────────────────────────
         let target_psms: Vec<&Psm> = psms.iter().filter(|p| !p.is_decoy).collect();

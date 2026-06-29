@@ -5,12 +5,25 @@
 
 use protein_copilot_core::search_params::{ModPosition, Modification};
 
+/// Sentinel residue position for a peptide N-terminal (or global) modification.
+pub const NTERM_POS: usize = usize::MAX;
+/// Sentinel residue position for a peptide C-terminal modification.
+///
+/// Distinct from [`NTERM_POS`] so an N-terminal and a C-terminal mod are treated
+/// as separate chemical sites and can co-occur on the same peptide.
+pub const CTERM_POS: usize = usize::MAX - 1;
+
+/// Returns true if `pos` is a terminal sentinel rather than a 0-based residue index.
+pub fn is_terminal_pos(pos: usize) -> bool {
+    pos == NTERM_POS || pos == CTERM_POS
+}
+
 /// A single modification applied at a specific site.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ModSite {
     /// Index of the modification in the input `variable_mods` slice.
     pub mod_index: usize,
-    /// 0-based residue position in the peptide, or `usize::MAX` for terminal.
+    /// 0-based residue position in the peptide, or [`NTERM_POS`]/[`CTERM_POS`] for terminal.
     pub residue_pos: usize,
 }
 
@@ -32,8 +45,8 @@ pub struct ModCombination {
 /// - `ProteinNTerm`: position 0 only if `is_protein_nterm`
 /// - `ProteinCTerm`: last position only if `is_protein_cterm`
 ///
-/// Returns: `Vec<(mod_index, Vec<residue_positions>)>` where `usize::MAX`
-/// represents a terminal position.
+/// Returns: `Vec<(mod_index, Vec<residue_positions>)>` where [`NTERM_POS`]
+/// / [`CTERM_POS`] represent the corresponding peptide terminus.
 pub fn find_applicable_sites(
     sequence: &str,
     variable_mods: &[Modification],
@@ -51,7 +64,7 @@ pub fn find_applicable_sites(
             ModPosition::Anywhere => {
                 if m.residues.is_empty() {
                     // Global variable mod — applies once as terminal
-                    positions.push(usize::MAX);
+                    positions.push(NTERM_POS);
                 } else {
                     for (i, &ch) in chars.iter().enumerate() {
                         if m.residues.contains(&ch) {
@@ -62,14 +75,14 @@ pub fn find_applicable_sites(
             }
             ModPosition::AnyNTerm => {
                 if m.residues.is_empty() || (!chars.is_empty() && m.residues.contains(&chars[0])) {
-                    positions.push(usize::MAX);
+                    positions.push(NTERM_POS);
                 }
             }
             ModPosition::AnyCTerm => {
                 if m.residues.is_empty()
                     || (!chars.is_empty() && m.residues.contains(&chars[last_pos]))
                 {
-                    positions.push(usize::MAX);
+                    positions.push(CTERM_POS);
                 }
             }
             ModPosition::ProteinNTerm => {
@@ -77,7 +90,7 @@ pub fn find_applicable_sites(
                     && (m.residues.is_empty()
                         || (!chars.is_empty() && m.residues.contains(&chars[0])))
                 {
-                    positions.push(usize::MAX);
+                    positions.push(NTERM_POS);
                 }
             }
             ModPosition::ProteinCTerm => {
@@ -85,7 +98,7 @@ pub fn find_applicable_sites(
                     && (m.residues.is_empty()
                         || (!chars.is_empty() && m.residues.contains(&chars[last_pos])))
                 {
-                    positions.push(usize::MAX);
+                    positions.push(CTERM_POS);
                 }
             }
         }
@@ -103,7 +116,9 @@ pub fn find_applicable_sites(
 /// Uses iterative backtracking to enumerate combinations respecting:
 /// - `max_mods`: maximum total variable modifications per peptide
 /// - Each residue position can only be modified once
-/// - Terminal sites (`usize::MAX`) are exclusive per modification index
+/// - Terminal sites ([`NTERM_POS`] / [`CTERM_POS`]) are each a single chemical
+///   site, so two mods on the same terminus are mutually exclusive while an
+///   N-term and a C-term mod can co-occur
 ///
 /// Always includes the empty combination (no variable mods, mass_delta=0).
 pub fn enumerate_combinations(
@@ -152,14 +167,11 @@ pub fn enumerate_combinations(
 
         if current_sites.len() < max_k {
             for (j, &(mod_idx, pos, mass)) in items.iter().enumerate().skip(last_idx + 1) {
-                // Skip if position already occupied.
-                // For terminal mods (usize::MAX): only one mod per terminus allowed,
-                // regardless of which modification — a terminus is a single chemical site.
-                let pos_conflict = if pos == usize::MAX {
-                    current_sites.iter().any(|s| s.residue_pos == usize::MAX)
-                } else {
-                    current_sites.iter().any(|s| s.residue_pos == pos)
-                };
+                // Skip if this site is already occupied. Residue positions conflict
+                // by index; the N- and C-termini (NTERM_POS / CTERM_POS) are distinct
+                // single chemical sites, so each conflicts only with its own kind —
+                // letting one N-term and one C-term mod co-occur.
+                let pos_conflict = current_sites.iter().any(|s| s.residue_pos == pos);
                 if pos_conflict {
                     continue;
                 }
@@ -346,5 +358,37 @@ mod tests {
             combos.iter().all(|c| c.sites.len() <= 1),
             "two terminal mods must not co-occur on the same terminus"
         );
+    }
+
+    #[test]
+    fn enumerate_nterm_and_cterm_mods_coexist() {
+        // Distinct termini are distinct chemical sites: an N-term and a C-term
+        // variable mod must be enumerable together (doubly-modified form).
+        let acetyl_nterm = Modification {
+            name: "Acetyl".to_string(),
+            mass_delta: 42.010565,
+            residues: vec![],
+            position: ModPosition::AnyNTerm,
+        };
+        let amide_cterm = Modification {
+            name: "Amidation".to_string(),
+            mass_delta: -0.984016,
+            residues: vec![],
+            position: ModPosition::AnyCTerm,
+        };
+        let mods = vec![acetyl_nterm, amide_cterm];
+        let sites = find_applicable_sites("PEPTIDEK", &mods, false, false);
+        assert_eq!(sites.len(), 2);
+
+        let combos = enumerate_combinations(&mods, &sites, 3);
+        // empty + N alone + C alone + both = 4
+        assert_eq!(combos.len(), 4, "N-term and C-term mods must be combinable");
+        let both = combos.iter().find(|c| c.sites.len() == 2);
+        assert!(
+            both.is_some(),
+            "doubly-modified (N-term + C-term) form must exist"
+        );
+        let both = both.unwrap();
+        assert!((both.mass_delta - (42.010565 - 0.984016)).abs() < 1e-6);
     }
 }

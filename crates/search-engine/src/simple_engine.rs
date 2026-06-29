@@ -220,7 +220,8 @@ impl SimpleSearchEngine {
             let _span = tracing::info_span!("parse_fasta",
                 path = %params.database_path,
                 protein_count = tracing::field::Empty,
-            ).entered();
+            )
+            .entered();
             let fasta_path = Path::new(&params.database_path);
             let proteins = parse_fasta(fasta_path).inspect_err(|e| {
                 diagnostics.fail_stage(&e.to_string());
@@ -240,7 +241,8 @@ impl SimpleSearchEngine {
                 proteins = proteins.len(),
                 enzyme = ?params.enzyme,
                 peptide_count = tracing::field::Empty,
-            ).entered();
+            )
+            .entered();
 
             let digest_total = proteins.len();
             let digest_progress_interval = 1000;
@@ -258,8 +260,16 @@ impl SimpleSearchEngine {
 
                 if (di + 1) % digest_progress_interval == 0 || di + 1 == digest_total {
                     let elapsed = digest_loop_start.elapsed().as_secs_f64();
-                    let rate = if elapsed > 0.0 { (di + 1) as f64 / elapsed } else { 0.0 };
-                    let eta = if rate > 0.0 { (digest_total - di - 1) as f64 / rate } else { 0.0 };
+                    let rate = if elapsed > 0.0 {
+                        (di + 1) as f64 / elapsed
+                    } else {
+                        0.0
+                    };
+                    let eta = if rate > 0.0 {
+                        (digest_total - di - 1) as f64 / rate
+                    } else {
+                        0.0
+                    };
                     tracing::info!(
                         progress = di + 1,
                         total = digest_total,
@@ -319,18 +329,18 @@ impl SimpleSearchEngine {
         // Step 3: Pre-scan file summaries so we can stream spectra during search
         // while preserving progress reporting and final summary counts.
         diagnostics.begin_stage("matching");
-        let _match_span = tracing::info_span!("match_spectra",
-            spectrum_count = tracing::field::Empty,
-        ).entered();
+        let _match_span =
+            tracing::info_span!("match_spectra", spectrum_count = tracing::field::Empty,).entered();
         report("Scanning spectrum summaries", 0.12);
         let mut total_ms2_spectra: u64 = 0;
         for file_path in input_files {
-            let reader = protein_copilot_spectrum_io::create_indexed_reader(file_path).map_err(|e| {
-                let detail = e.to_string();
-                diagnostics.fail_stage(&detail);
-                diagnostics.set_error(ErrorCategory::InputData, &detail);
-                SearchEngineError::IoError { detail }
-            })?;
+            let reader =
+                protein_copilot_spectrum_io::create_indexed_reader(file_path).map_err(|e| {
+                    let detail = e.to_string();
+                    diagnostics.fail_stage(&detail);
+                    diagnostics.set_error(ErrorCategory::InputData, &detail);
+                    SearchEngineError::IoError { detail }
+                })?;
             let summary = reader.read_summary(file_path).map_err(|e| {
                 let detail = e.to_string();
                 diagnostics.fail_stage(&detail);
@@ -359,12 +369,13 @@ impl SimpleSearchEngine {
         let stream_progress_interval: u64 = 500;
 
         for file_path in input_files {
-            let reader = protein_copilot_spectrum_io::create_indexed_reader(file_path).map_err(|e| {
-                let detail = e.to_string();
-                diagnostics.fail_stage(&detail);
-                diagnostics.set_error(ErrorCategory::InputData, &detail);
-                SearchEngineError::IoError { detail }
-            })?;
+            let reader =
+                protein_copilot_spectrum_io::create_indexed_reader(file_path).map_err(|e| {
+                    let detail = e.to_string();
+                    diagnostics.fail_stage(&detail);
+                    diagnostics.set_error(ErrorCategory::InputData, &detail);
+                    SearchEngineError::IoError { detail }
+                })?;
             let mut handler = |spectrum: Spectrum| {
                 if spectrum.ms_level != MsLevel::MS2 {
                     return Ok(true);
@@ -385,10 +396,20 @@ impl SimpleSearchEngine {
 
                 Self::collect_psms_for_spectrum(&spectrum, params, &all_peptides, &mut psms);
 
-                if processed_ms2_spectra % stream_progress_interval == 0 || processed_ms2_spectra == total_ms2_spectra {
+                if processed_ms2_spectra % stream_progress_interval == 0
+                    || processed_ms2_spectra == total_ms2_spectra
+                {
                     let elapsed = stream_loop_start.elapsed().as_secs_f64();
-                    let rate = if elapsed > 0.0 { processed_ms2_spectra as f64 / elapsed } else { 0.0 };
-                    let eta = if rate > 0.0 { (total_ms2_spectra - processed_ms2_spectra) as f64 / rate } else { 0.0 };
+                    let rate = if elapsed > 0.0 {
+                        processed_ms2_spectra as f64 / elapsed
+                    } else {
+                        0.0
+                    };
+                    let eta = if rate > 0.0 {
+                        (total_ms2_spectra - processed_ms2_spectra) as f64 / rate
+                    } else {
+                        0.0
+                    };
                     tracing::info!(
                         progress = processed_ms2_spectra,
                         total = total_ms2_spectra,
@@ -491,8 +512,16 @@ impl SimpleSearchEngine {
 
             if (i + 1) % progress_interval == 0 || i + 1 == total_spectra {
                 let elapsed = loop_start.elapsed().as_secs_f64();
-                let rate = if elapsed > 0.0 { (i + 1) as f64 / elapsed } else { 0.0 };
-                let eta = if rate > 0.0 { (total_spectra - i - 1) as f64 / rate } else { 0.0 };
+                let rate = if elapsed > 0.0 {
+                    (i + 1) as f64 / elapsed
+                } else {
+                    0.0
+                };
+                let eta = if rate > 0.0 {
+                    (total_spectra - i - 1) as f64 / rate
+                } else {
+                    0.0
+                };
                 tracing::info!(
                     progress = i + 1,
                     total = total_spectra,
@@ -619,8 +648,16 @@ impl SearchEngineAdapter for SimpleSearchEngine {
 
             if (di + 1) % digest_progress_interval2 == 0 || di + 1 == digest_total2 {
                 let elapsed = digest_loop_start2.elapsed().as_secs_f64();
-                let rate = if elapsed > 0.0 { (di + 1) as f64 / elapsed } else { 0.0 };
-                let eta = if rate > 0.0 { (digest_total2 - di - 1) as f64 / rate } else { 0.0 };
+                let rate = if elapsed > 0.0 {
+                    (di + 1) as f64 / elapsed
+                } else {
+                    0.0
+                };
+                let eta = if rate > 0.0 {
+                    (digest_total2 - di - 1) as f64 / rate
+                } else {
+                    0.0
+                };
                 tracing::info!(
                     progress = di + 1,
                     total = digest_total2,
@@ -752,7 +789,7 @@ fn aggregate_peptides(psms: &[Psm]) -> Vec<PeptideResult> {
         entry.2 += 1;
     }
 
-    peptide_map
+    let mut results: Vec<PeptideResult> = peptide_map
         .into_iter()
         .map(|(seq, (best_score, accessions, count))| PeptideResult {
             sequence: seq,
@@ -761,7 +798,10 @@ fn aggregate_peptides(psms: &[Psm]) -> Vec<PeptideResult> {
             q_value: None,
             psm_count: count,
         })
-        .collect()
+        .collect();
+    // Deterministic ordering: HashMap iteration order is unspecified.
+    results.sort_by(|a, b| a.sequence.cmp(&b.sequence));
+    results
 }
 
 fn aggregate_proteins(psms: &[Psm], proteins: &[crate::fasta::FastaEntry]) -> Vec<ProteinResult> {
@@ -776,7 +816,7 @@ fn aggregate_proteins(psms: &[Psm], proteins: &[crate::fasta::FastaEntry]) -> Ve
         }
     }
 
-    protein_peptides
+    let mut results: Vec<ProteinResult> = protein_peptides
         .into_iter()
         .map(|(acc, peptides)| {
             let description = proteins
@@ -820,7 +860,10 @@ fn aggregate_proteins(psms: &[Psm], proteins: &[crate::fasta::FastaEntry]) -> Ve
                 unique_peptide_count: peptide_count, // simplified: all unique
             }
         })
-        .collect()
+        .collect();
+    // Deterministic ordering: HashMap iteration order is unspecified.
+    results.sort_by(|a, b| a.accession.cmp(&b.accession));
+    results
 }
 
 fn build_summary(psms: &[Psm], total_spectra: u64, duration: f64) -> SearchResultSummary {
@@ -1135,5 +1178,52 @@ mod tests {
         );
         assert!(recorded.iter().any(|s| s.contains("Matching")));
         assert!(recorded.last().unwrap().contains("Aggregating"));
+    }
+
+    // ---- BUG 4: deterministic output ordering (sorted) ----
+
+    fn make_psm(seq: &str, accession: &str, score: f64) -> Psm {
+        Psm {
+            spectrum_scan: 1,
+            peptide_sequence: seq.to_string(),
+            modifications: vec![],
+            charge: 2,
+            precursor_mz: 500.0,
+            calculated_mz: 500.0,
+            delta_mass_ppm: 0.0,
+            score,
+            q_value: None,
+            protein_accessions: vec![accession.to_string()],
+            is_decoy: false,
+            extra: None,
+        }
+    }
+
+    #[test]
+    fn aggregate_peptides_returns_sorted_by_sequence() {
+        let psms = vec![
+            make_psm("ZPEPTIDEK", "P003", 0.9),
+            make_psm("APEPTIDEK", "P001", 0.8),
+            make_psm("MPEPTIDEK", "P002", 0.7),
+        ];
+        let result = aggregate_peptides(&psms);
+        let seqs: Vec<&str> = result.iter().map(|p| p.sequence.as_str()).collect();
+        let mut sorted = seqs.clone();
+        sorted.sort_unstable();
+        assert_eq!(seqs, sorted, "peptides must be sorted by sequence");
+    }
+
+    #[test]
+    fn aggregate_proteins_returns_sorted_by_accession() {
+        let psms = vec![
+            make_psm("PEPTIDEK", "P003", 0.9),
+            make_psm("ANSTHERK", "P001", 0.8),
+            make_psm("LASTONER", "P002", 0.7),
+        ];
+        let result = aggregate_proteins(&psms, &[]);
+        let accs: Vec<&str> = result.iter().map(|p| p.accession.as_str()).collect();
+        let mut sorted = accs.clone();
+        sorted.sort_unstable();
+        assert_eq!(accs, sorted, "proteins must be sorted by accession");
     }
 }

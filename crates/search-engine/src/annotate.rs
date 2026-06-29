@@ -258,6 +258,8 @@ fn generate_b_entries(
     sequence: &str,
     fixed_mods: &[Modification],
     max_charge: u32,
+    is_protein_nterm: bool,
+    is_protein_cterm: bool,
 ) -> Option<Vec<FragmentEntry>> {
     let chars: Vec<char> = sequence.chars().collect();
     let n = chars.len();
@@ -272,7 +274,13 @@ fn generate_b_entries(
         let mass = crate::chemistry::residue_mass(aa)?;
         cumulative += mass;
         let prefix_len = frag_idx + 1;
-        let mod_delta = mod_delta_fragment(&chars[..prefix_len], fixed_mods, true);
+        let mod_delta = mod_delta_fragment(
+            &chars[..prefix_len],
+            fixed_mods,
+            true,
+            is_protein_nterm,
+            is_protein_cterm,
+        );
         let neutral = cumulative + mod_delta;
 
         for z in 1..=max_z {
@@ -292,6 +300,8 @@ fn generate_y_entries(
     sequence: &str,
     fixed_mods: &[Modification],
     max_charge: u32,
+    is_protein_nterm: bool,
+    is_protein_cterm: bool,
 ) -> Option<Vec<FragmentEntry>> {
     let chars: Vec<char> = sequence.chars().collect();
     let n = chars.len();
@@ -309,7 +319,13 @@ fn generate_y_entries(
         let mass = crate::chemistry::residue_mass(aa)?;
         cumulative += mass;
         let suffix_start = n - 1 - i;
-        let mod_delta = mod_delta_fragment(&chars[suffix_start..], fixed_mods, false);
+        let mod_delta = mod_delta_fragment(
+            &chars[suffix_start..],
+            fixed_mods,
+            false,
+            is_protein_nterm,
+            is_protein_cterm,
+        );
         let neutral = cumulative + mod_delta;
 
         for z in 1..=max_z {
@@ -348,7 +364,8 @@ pub fn annotate_spectrum(
         scan = spectrum.scan_number,
         peptide = %peptide_sequence,
         charge = charge,
-    ).entered();
+    )
+    .entered();
     // --- Validation ---
     if charge <= 0 {
         return Err(SearchEngineError::ExecutionError {
@@ -392,20 +409,32 @@ pub fn annotate_spectrum(
     // --- Generate theoretical fragment ions (with modifications, multi-charge) ---
     let max_frag_charge: u32 = if charge >= 3 { 2 } else { 1 };
 
-    let b_entries = generate_b_entries(peptide_sequence, fixed_modifications, max_frag_charge)
-        .ok_or_else(|| SearchEngineError::ExecutionError {
-            detail: format!(
-                "cannot generate b-ions for '{}': non-standard residue",
-                peptide_sequence
-            ),
-        })?;
-    let y_entries = generate_y_entries(peptide_sequence, fixed_modifications, max_frag_charge)
-        .ok_or_else(|| SearchEngineError::ExecutionError {
-            detail: format!(
-                "cannot generate y-ions for '{}': non-standard residue",
-                peptide_sequence
-            ),
-        })?;
+    let b_entries = generate_b_entries(
+        peptide_sequence,
+        fixed_modifications,
+        max_frag_charge,
+        is_protein_nterm,
+        is_protein_cterm,
+    )
+    .ok_or_else(|| SearchEngineError::ExecutionError {
+        detail: format!(
+            "cannot generate b-ions for '{}': non-standard residue",
+            peptide_sequence
+        ),
+    })?;
+    let y_entries = generate_y_entries(
+        peptide_sequence,
+        fixed_modifications,
+        max_frag_charge,
+        is_protein_nterm,
+        is_protein_cterm,
+    )
+    .ok_or_else(|| SearchEngineError::ExecutionError {
+        detail: format!(
+            "cannot generate y-ions for '{}': non-standard residue",
+            peptide_sequence
+        ),
+    })?;
 
     let exp_mz = &spectrum.mz_array;
     let exp_int = &spectrum.intensity_array;
@@ -575,10 +604,16 @@ pub fn annotate_heavy_spectrum(
     let n = chars.len();
 
     // Heavy b-ions
-    let light_b = generate_b_entries(peptide_sequence, fixed_modifications, max_frag_charge)
-        .ok_or_else(|| SearchEngineError::ExecutionError {
-            detail: format!("cannot generate b-ions for '{}'", peptide_sequence),
-        })?;
+    let light_b = generate_b_entries(
+        peptide_sequence,
+        fixed_modifications,
+        max_frag_charge,
+        is_protein_nterm,
+        is_protein_cterm,
+    )
+    .ok_or_else(|| SearchEngineError::ExecutionError {
+        detail: format!("cannot generate b-ions for '{}'", peptide_sequence),
+    })?;
     let heavy_b_entries: Vec<FragmentEntry> = light_b
         .iter()
         .map(|e| {
@@ -594,10 +629,16 @@ pub fn annotate_heavy_spectrum(
         .collect();
 
     // Heavy y-ions
-    let light_y = generate_y_entries(peptide_sequence, fixed_modifications, max_frag_charge)
-        .ok_or_else(|| SearchEngineError::ExecutionError {
-            detail: format!("cannot generate y-ions for '{}'", peptide_sequence),
-        })?;
+    let light_y = generate_y_entries(
+        peptide_sequence,
+        fixed_modifications,
+        max_frag_charge,
+        is_protein_nterm,
+        is_protein_cterm,
+    )
+    .ok_or_else(|| SearchEngineError::ExecutionError {
+        detail: format!("cannot generate y-ions for '{}'", peptide_sequence),
+    })?;
     let heavy_y_entries: Vec<FragmentEntry> = light_y
         .iter()
         .map(|e| {
@@ -1015,16 +1056,17 @@ mod tests {
         };
 
         // Generate b-ions WITH and WITHOUT the N-term mod
-        let b_no_mod: Vec<f64> = generate_b_entries(seq, &[], 1)
+        let b_no_mod: Vec<f64> = generate_b_entries(seq, &[], 1, false, false)
             .unwrap()
             .iter()
             .map(|e| e.mz)
             .collect();
-        let b_with_mod: Vec<f64> = generate_b_entries(seq, std::slice::from_ref(&tmt_mod), 1)
-            .unwrap()
-            .iter()
-            .map(|e| e.mz)
-            .collect();
+        let b_with_mod: Vec<f64> =
+            generate_b_entries(seq, std::slice::from_ref(&tmt_mod), 1, false, false)
+                .unwrap()
+                .iter()
+                .map(|e| e.mz)
+                .collect();
 
         // All b-ions should be shifted by the TMT mass
         assert_eq!(b_no_mod.len(), b_with_mod.len());
@@ -1037,12 +1079,12 @@ mod tests {
         }
 
         // y-ions should NOT be affected by N-term mod
-        let y_no_mod: Vec<f64> = generate_y_entries(seq, &[], 1)
+        let y_no_mod: Vec<f64> = generate_y_entries(seq, &[], 1, false, false)
             .unwrap()
             .iter()
             .map(|e| e.mz)
             .collect();
-        let y_with_mod: Vec<f64> = generate_y_entries(seq, &[tmt_mod], 1)
+        let y_with_mod: Vec<f64> = generate_y_entries(seq, &[tmt_mod], 1, false, false)
             .unwrap()
             .iter()
             .map(|e| e.mz)

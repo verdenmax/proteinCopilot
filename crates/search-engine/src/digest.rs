@@ -37,7 +37,8 @@ pub fn digest(
         protein = %protein_accession,
         enzyme = ?enzyme,
         missed_cleavages = missed_cleavages,
-    ).entered();
+    )
+    .entered();
     let result = digest_with_length(sequence, protein_accession, enzyme, missed_cleavages, 6, 50);
     tracing::info!(peptides = result.len(), "digestion complete");
     result
@@ -56,6 +57,36 @@ pub fn digest_with_length(
     max_length: u32,
 ) -> Vec<DigestedPeptide> {
     let chars: Vec<char> = sequence.chars().collect();
+
+    // NonSpecific cleaves at every position, so the enzymatic fragment loop
+    // (windowed by missed cleavages) caps peptide length at `mc + 1`. Instead,
+    // enumerate every substring whose length is within [min_length, max_length].
+    if matches!(enzyme, Enzyme::NonSpecific) {
+        let len = chars.len();
+        let min = min_length as usize;
+        let max = (max_length as usize).max(min);
+        let mut peptides = Vec::new();
+        for start in 0..len {
+            let last = (start + max).min(len);
+            for end in (start + min)..=last {
+                if end <= start {
+                    continue;
+                }
+                let combined: String = chars[start..end].iter().collect();
+                if let Some(mass) = peptide_mass(&combined) {
+                    peptides.push(DigestedPeptide {
+                        sequence: combined,
+                        protein_accession: protein_accession.to_string(),
+                        neutral_mass: mass,
+                        is_protein_nterm: start == 0,
+                        is_protein_cterm: end == len,
+                    });
+                }
+            }
+        }
+        return peptides;
+    }
+
     let cleavage_sites = find_cleavage_sites(&chars, enzyme);
     let fragments = split_at_sites(&chars, &cleavage_sites);
     let num_fragments = fragments.len();
@@ -360,6 +391,36 @@ mod tests {
         assert_eq!(peptides.len(), 1);
         assert!(peptides[0].is_protein_nterm);
         assert!(peptides[0].is_protein_cterm);
+    }
+
+    // ---- BUG 3: NonSpecific enumerates all substrings in [min,max] ----
+
+    #[test]
+    fn nonspecific_yields_peptides_across_length_range() {
+        // 12 standard residues; expect every substring of length 6..=8.
+        let seq = "ACDEFGHIKLMN";
+        let peptides = digest_with_length(seq, "P001", &Enzyme::NonSpecific, 0, 6, 8);
+        assert!(
+            !peptides.is_empty(),
+            "NonSpecific must yield peptides, not nothing"
+        );
+        for p in &peptides {
+            let l = p.sequence.chars().count();
+            assert!(
+                (6..=8).contains(&l),
+                "length {l} out of [6,8]: {}",
+                p.sequence
+            );
+        }
+        // n-L+1 substrings per length: 7 + 6 + 5 = 18
+        assert_eq!(
+            peptides.len(),
+            18,
+            "all substrings in [6,8] should be enumerated"
+        );
+        assert!(peptides.iter().any(|p| p.sequence == "ACDEFG"));
+        assert!(peptides.iter().any(|p| p.sequence == "ACDEFGHI"));
+        assert!(peptides.iter().any(|p| p.sequence == "GHIKLMN"));
     }
 
     // ---- FIX B: UTF-8-safe digestion (char-index vs byte-offset) ----

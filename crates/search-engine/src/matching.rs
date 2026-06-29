@@ -37,7 +37,7 @@ pub struct PeptideMatch {
     /// Total theoretical b/y ions.
     pub total_ions: u32,
     /// Variable modifications applied in this match.
-    /// Each entry is (Modification, 0-based residue position or usize::MAX for terminal).
+    /// Each entry is (Modification, 0-based residue position or NTERM_POS/CTERM_POS for terminal).
     pub applied_variable_mods: Vec<(Modification, usize)>,
 }
 
@@ -76,23 +76,38 @@ fn calc_delta_ppm(observed: f64, theoretical: f64) -> f64 {
 /// For residue-specific mods: adds `mass_delta` for each matching residue.
 /// For N-term mods: adds `mass_delta` to b-ions (which contain the N-terminus).
 /// For C-term mods: adds `mass_delta` to y-ions (which contain the C-terminus).
+/// Protein-terminal mods (`ProteinNTerm`/`ProteinCTerm`) only apply when the
+/// peptide actually sits at the matching protein terminus, mirroring
+/// [`apply_fixed_mods`] so fragments and precursor stay consistent.
 pub(crate) fn mod_delta_fragment(
     residues: &[char],
     fixed_mods: &[Modification],
     is_b_ion: bool,
+    is_protein_nterm: bool,
+    is_protein_cterm: bool,
 ) -> f64 {
     use protein_copilot_core::search_params::ModPosition;
     let mut delta = 0.0;
     for m in fixed_mods {
         if m.residues.is_empty() {
             match m.position {
-                ModPosition::AnyNTerm | ModPosition::ProteinNTerm => {
+                ModPosition::AnyNTerm => {
                     if is_b_ion {
                         delta += m.mass_delta;
                     }
                 }
-                ModPosition::AnyCTerm | ModPosition::ProteinCTerm => {
+                ModPosition::ProteinNTerm => {
+                    if is_b_ion && is_protein_nterm {
+                        delta += m.mass_delta;
+                    }
+                }
+                ModPosition::AnyCTerm => {
                     if !is_b_ion {
+                        delta += m.mass_delta;
+                    }
+                }
+                ModPosition::ProteinCTerm => {
+                    if !is_b_ion && is_protein_cterm {
                         delta += m.mass_delta;
                     }
                 }
@@ -128,7 +143,7 @@ pub fn generate_b_ions_with_charge(
     max_charge: i32,
 ) -> Vec<f64> {
     let chars: Vec<char> = sequence.chars().collect();
-    generate_b_ions_positional(&chars, fixed_mods, &[], max_charge)
+    generate_b_ions_positional(&chars, fixed_mods, &[], max_charge, false, false)
 }
 
 /// Generates theoretical singly-charged y-ion m/z values for a peptide,
@@ -147,7 +162,7 @@ pub fn generate_y_ions_with_charge(
     max_charge: i32,
 ) -> Vec<f64> {
     let chars: Vec<char> = sequence.chars().collect();
-    generate_y_ions_positional(&chars, fixed_mods, &[], max_charge)
+    generate_y_ions_positional(&chars, fixed_mods, &[], max_charge, false, false)
 }
 
 // ---------------------------------------------------------------------------
@@ -171,6 +186,8 @@ fn generate_b_ions_positional(
     nonpositional_mods: &[Modification],
     position_deltas: &[f64],
     max_charge: i32,
+    is_protein_nterm: bool,
+    is_protein_cterm: bool,
 ) -> Vec<f64> {
     let n = chars.len();
     let max_z = max_charge.max(1) as usize;
@@ -186,7 +203,13 @@ fn generate_b_ions_positional(
         cumulative += mass;
         cumulative_var += position_deltas.get(frag_idx).copied().unwrap_or(0.0);
         let prefix_len = frag_idx + 1;
-        let mod_delta = mod_delta_fragment(&chars[..prefix_len], nonpositional_mods, true);
+        let mod_delta = mod_delta_fragment(
+            &chars[..prefix_len],
+            nonpositional_mods,
+            true,
+            is_protein_nterm,
+            is_protein_cterm,
+        );
         let neutral = cumulative + mod_delta + cumulative_var;
 
         for z in 1..=max_z {
@@ -206,6 +229,8 @@ fn generate_y_ions_positional(
     nonpositional_mods: &[Modification],
     position_deltas: &[f64],
     max_charge: i32,
+    is_protein_nterm: bool,
+    is_protein_cterm: bool,
 ) -> Vec<f64> {
     let n = chars.len();
     let max_z = max_charge.max(1) as usize;
@@ -224,7 +249,13 @@ fn generate_y_ions_positional(
         cumulative += mass;
         let suffix_start = n - 1 - i;
         cumulative_var += position_deltas.get(suffix_start).copied().unwrap_or(0.0);
-        let mod_delta = mod_delta_fragment(&chars[suffix_start..], nonpositional_mods, false);
+        let mod_delta = mod_delta_fragment(
+            &chars[suffix_start..],
+            nonpositional_mods,
+            false,
+            is_protein_nterm,
+            is_protein_cterm,
+        );
         let neutral = cumulative + mod_delta + cumulative_var;
 
         for z in 1..=max_z {
@@ -337,7 +368,7 @@ fn apply_fixed_mods(
 ///
 /// Splits the applied sites into two complementary pieces:
 /// - `nonpositional`: `fixed_mods` plus any *terminal/global* variable mods
-///   (`residue_pos == usize::MAX`). These are applied via [`mod_delta_fragment`]
+///   (`is_terminal_pos(residue_pos)`). These are applied via [`mod_delta_fragment`]
 ///   exactly as before, preserving N-term/C-term/global handling.
 /// - `position_deltas`: a per-residue-position mass-delta vector of length
 ///   `seq_len`, where `position_deltas[i]` is the total mass of site-localized
@@ -357,7 +388,7 @@ fn resolve_combined_mods(
 
     for site in applied_sites {
         let base_mod = &variable_mods[site.mod_index];
-        if site.residue_pos == usize::MAX {
+        if crate::varmod::is_terminal_pos(site.residue_pos) {
             // Terminal/global variable mod — handled identically to fixed mods.
             nonpositional.push(base_mod.clone());
         } else if let Some(slot) = position_deltas.get_mut(site.residue_pos) {
@@ -439,12 +470,16 @@ pub fn match_spectrum(
                         &nonpositional_mods,
                         &position_deltas,
                         max_frag_charge,
+                        peptide.is_protein_nterm,
+                        peptide.is_protein_cterm,
                     );
                     let y_ions = generate_y_ions_positional(
                         &pep_chars,
                         &nonpositional_mods,
                         &position_deltas,
                         max_frag_charge,
+                        peptide.is_protein_nterm,
+                        peptide.is_protein_cterm,
                     );
 
                     let total_theoretical = (b_ions.len() + y_ions.len()) as u32;
@@ -568,12 +603,16 @@ pub fn match_spectrum_all(
                             &nonpositional_mods,
                             &position_deltas,
                             max_frag_charge,
+                            peptide.is_protein_nterm,
+                            peptide.is_protein_cterm,
                         );
                         let y_ions = generate_y_ions_positional(
                             &pep_chars,
                             &nonpositional_mods,
                             &position_deltas,
                             max_frag_charge,
+                            peptide.is_protein_nterm,
+                            peptide.is_protein_cterm,
                         );
 
                         let total_theoretical = (b_ions.len() + y_ions.len()) as u32;
@@ -1292,10 +1331,10 @@ mod tests {
         let deltas = vec![0.0, 0.0, 0.0, phospho, 0.0, 0.0];
         let zero = vec![0.0; seq.len()];
 
-        let b_mod = generate_b_ions_positional(&seq, &[], &deltas, 1);
-        let b_un = generate_b_ions_positional(&seq, &[], &zero, 1);
-        let y_mod = generate_y_ions_positional(&seq, &[], &deltas, 1);
-        let y_un = generate_y_ions_positional(&seq, &[], &zero, 1);
+        let b_mod = generate_b_ions_positional(&seq, &[], &deltas, 1, false, false);
+        let b_un = generate_b_ions_positional(&seq, &[], &zero, 1, false, false);
+        let y_mod = generate_y_ions_positional(&seq, &[], &deltas, 1, false, false);
+        let y_un = generate_y_ions_positional(&seq, &[], &zero, 1, false, false);
 
         assert_eq!(b_mod.len(), 5, "b1..b5");
         assert_eq!(y_mod.len(), 5, "y1..y5");
@@ -1347,5 +1386,65 @@ mod tests {
             "complementary b3+y3 delta must equal one phospho, got {}",
             b3_delta + y3_delta
         );
+    }
+
+    // ---- BUG 1: protein-terminal fixed mods gated on peptide terminus ----
+
+    #[test]
+    fn protein_terminal_fixed_mod_only_shifts_terminal_peptides() {
+        use protein_copilot_core::search_params::ModPosition;
+        let acetyl = Modification {
+            name: "Acetyl".to_string(),
+            mass_delta: 42.010565,
+            residues: vec![],
+            position: ModPosition::ProteinNTerm,
+        };
+        let chars = ['P', 'E', 'P'];
+
+        // INTERNAL peptide: protein-N-term mod must NOT shift the b-ion.
+        let internal =
+            mod_delta_fragment(&chars, std::slice::from_ref(&acetyl), true, false, false);
+        assert!(
+            internal.abs() < 1e-9,
+            "protein N-term fixed mod must not shift fragments of an internal peptide, got {internal}"
+        );
+        // TERMINAL peptide: protein-N-term mod SHIFTS the b-ion.
+        let terminal = mod_delta_fragment(&chars, std::slice::from_ref(&acetyl), true, true, false);
+        assert!(
+            (terminal - 42.010565).abs() < 1e-6,
+            "protein N-term fixed mod must shift fragments of a protein-N-term peptide, got {terminal}"
+        );
+    }
+
+    #[test]
+    fn positional_fragments_gate_protein_terminal_mod() {
+        use protein_copilot_core::search_params::ModPosition;
+        let acetyl = Modification {
+            name: "Acetyl".to_string(),
+            mass_delta: 42.010565,
+            residues: vec![],
+            position: ModPosition::ProteinNTerm,
+        };
+        let seq: Vec<char> = "PEPTIK".chars().collect();
+        let zero = vec![0.0; seq.len()];
+
+        // Internal: b-ions must equal the unmodified b-ions.
+        let internal =
+            generate_b_ions_positional(&seq, std::slice::from_ref(&acetyl), &zero, 1, false, false);
+        let plain = generate_b_ions_positional(&seq, &[], &zero, 1, false, false);
+        assert_eq!(
+            internal, plain,
+            "internal peptide must not get protein N-term shift"
+        );
+
+        // Protein N-term peptide: every b-ion shifts by the mod mass.
+        let terminal =
+            generate_b_ions_positional(&seq, std::slice::from_ref(&acetyl), &zero, 1, true, false);
+        for (t, p) in terminal.iter().zip(plain.iter()) {
+            assert!(
+                (t - p - 42.010565).abs() < 1e-6,
+                "terminal b-ion must shift by acetyl"
+            );
+        }
     }
 }
