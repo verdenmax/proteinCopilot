@@ -5,15 +5,15 @@
 ## 1. 四层职责
 
 ```text
-┌──────────────────────────────────────────────────────────┐
-│ 用户交互层   MCP Client（Copilot CLI / Claude Desktop）      │  自然语言进、结果出
-├──────────────────────────────────────────────────────────┤
-│ AI 编排层    .github/agents + prompts + LLM                 │  意图、推参理由、解释、诊断
-├──────────────────────────────────────────────────────────┤
-│ MCP Tool 层  crates/mcp-server（bin）                        │  ~25 工具，组装确定性能力
-├──────────────────────────────────────────────────────────┤
-│ 计算/引擎层  13 个 library crate + 搜索引擎 adapter           │  确定性：解析/打分/FDR/推断
-└──────────────────────────────────────────────────────────┘
++------------------------------------------------------------+
+| 用户交互层   MCP Client（Copilot CLI / Claude Desktop）      |  自然语言进、结果出
++------------------------------------------------------------+
+| AI 编排层    .github/agents + prompts + LLM                 |  意图、推参理由、解释、诊断
++------------------------------------------------------------+
+| MCP Tool 层  crates/mcp-server（bin）                        |  27 工具，组装确定性能力
++------------------------------------------------------------+
+| 计算/引擎层  13 个 library crate + 搜索引擎 adapter           |  确定性：解析/打分/FDR/推断
++------------------------------------------------------------+
 ```
 
 确定性逻辑全在下两层（Rust），推理在上两层（LLM）。两者不混：Rust 不调 LLM，LLM 不算 FDR。
@@ -23,54 +23,54 @@
 15 个 crate（13 库 + 1 bin + 1 集成测试）。`mcp-server` 是唯一 bin，组装全部库；`core` 是共享底座，无内部依赖。
 
 ```text
-              ┌──────── core ────────┐   fasta-db   (两者无内部依赖)
-              │ spectrum  search_     │
-              │ params/result/ai_     │
-              │ decision/label/engine │
-              └───────────────────────┘
-        ┌───────────┼───────────┐
+              +-------- core --------+   fasta-db   (两者无内部依赖)
+              | spectrum  search_    |
+              | params/result/ai_    |
+              | decision/label/engine|
+              +----------------------+
+        +-----------+-----------+
    spectrum-io     fdr      dia-extraction
-        │           │
+        |           |
   param-recommend  protein-inference
-        │
-   search-engine ──(fdr, param-recommend, spectrum-io)
-        ├──────────────┬───────────────┬──────────────┐
+        |
+   search-engine --(fdr, param-recommend, spectrum-io)
+        +--------------+---------------+--------------+
        xic        result-import       report     entrapment-analysis
-                                                        │
+                                                       |
                                                   entrapment-cli
-        └───────────── mcp-server 依赖全部库 ─────────────┘
+        +------------- mcp-server 依赖全部库 -------------+
 ```
 
 依赖边（非 dev）：
 - `core`、`fasta-db`：无内部依赖
-- `spectrum-io`/`fdr`/`dia-extraction` → core
-- `param-recommend` → core, spectrum-io
-- `protein-inference` → core, fdr
-- `search-engine` → core, fdr, param-recommend, spectrum-io
-- `xic` → core, search-engine, spectrum-io
-- `result-import` → core, search-engine, spectrum-io
-- `report` → core, search-engine, xic
-- `entrapment-analysis` → core, search-engine, spectrum-io
-- `entrapment-cli` → entrapment-analysis
-- `mcp-server` → 全部 12 个库
+- `spectrum-io`/`fdr`/`dia-extraction` -> core
+- `param-recommend` -> core, spectrum-io
+- `protein-inference` -> core, fdr
+- `search-engine` -> core, fdr, param-recommend, spectrum-io
+- `xic` -> core, search-engine, spectrum-io
+- `result-import` -> core, search-engine, spectrum-io
+- `report` -> core, search-engine, xic
+- `entrapment-analysis` -> core, search-engine, spectrum-io
+- `entrapment-cli` -> entrapment-analysis
+- `mcp-server` -> 全部 12 个库
 
-`search-engine ↔ report` 没有环：search-engine 仅在 **dev-dependencies** 引 report。
+`search-engine` 与 `report` 没有环：search-engine 仅在 **dev-dependencies** 引 report。
 
 ## 3. 一次 DDA 搜索的数据流
 
 ```text
-read_spectra(file) ─▶ SpectrumSummary           [spectrum-io]
-recommend_params(summary) ─▶ AiDecision<Params>  [param-recommend]
-run_search(params) ─▶ run_id（后台执行）          [mcp-server 异步]
-   └─ digest ▶ match ▶ score ▶ target-decoy FDR  [search-engine + fdr]
-get_search_status(run_id) ─▶ Completed
-generate_summary(run_id) ─▶ 1% FDR 统计           [report]
-export_results(run_id) ─▶ psm/peptide/protein.tsv + result.json + run_metadata.json
-infer_proteins(run_id) ─▶ parsimony + razor + 蛋白FDR + 覆盖率  [protein-inference]
+read_spectra(file) --> SpectrumSummary           [spectrum-io]
+recommend_params(summary) --> AiDecision<Params>  [param-recommend]
+run_search(params) --> run_id（后台执行）          [mcp-server 异步]
+   +- digest > match > score > target-decoy FDR   [search-engine + fdr]
+get_search_status(run_id) --> Completed
+generate_summary(run_id) --> 1% FDR 统计           [report]
+export_results(run_id) --> psm/peptide/protein.tsv + result.json + run_metadata.json
+infer_proteins(run_id) --> parsimony + razor + 蛋白FDR + 覆盖率  [protein-inference]
 ```
 
-DIA 旁路：`extract_dia_precursors(file)` → 缓存 → `run_search(dia_run_id=...)`。
-导入旁路：`import_search_results(DIA-NN/pFind/json)` → run_id → 同样可注释/XIC/汇总。
+DIA 旁路：`extract_dia_precursors(file)` -> 缓存 -> `run_search(dia_run_id=...)`。
+导入旁路：`import_search_results(DIA-NN/pFind/json)` -> run_id -> 同样可注释/XIC/汇总。
 
 ## 4. 搜索引擎通过 Adapter 抽象
 
@@ -90,4 +90,4 @@ DIA 旁路：`extract_dia_precursors(file)` → 缓存 → `run_search(dia_run_i
 
 ## 7. 往下读
 
-各子系统内部见 L3：[谱图IO](L3-spectrum-io.md) · [搜索](L3-search-engine.md) · [FDR+推断](L3-fdr-protein.md) · [entrapment](L3-entrapment.md) · [XIC+DIA](L3-xic-dia.md) · [导入](L3-result-import.md) · [MCP](L3-mcp-server.md)。
+各子系统内部见 L3：[谱图IO](L3-spectrum-io.md)、[搜索](L3-search-engine.md)、[FDR+推断](L3-fdr-protein.md)、[entrapment](L3-entrapment.md)、[XIC+DIA](L3-xic-dia.md)、[导入](L3-result-import.md)、[MCP](L3-mcp-server.md)。

@@ -1,6 +1,6 @@
-# ProteinCopilot 分层文档（L1–L4）
+# ProteinCopilot 分层文档（L1-L4）
 
-按"深度递进"组织的文档，从整体认知一路读到 crate 核心源码。建议按 L1 → L2 → L3 → L4 顺序阅读，也可按需直达。
+按"深度递进"组织的文档，从整体认知一路读到 crate 核心源码。建议按 L1 -> L2 -> L3 -> L4 顺序阅读，也可按需直达。
 
 ## 阅读顺序
 
@@ -27,8 +27,8 @@
 - [L3-mcp-server.md](L3-mcp-server.md) — MCP Server / 工具层
 
 ## L4 — 逐 crate 核心路径
-core · spectrum-io · param-recommend · search-engine · fdr · protein-inference ·
-xic · dia-extraction · result-import · report · fasta-db · entrapment-analysis ·
-entrapment-cli · mcp-server · integration-tests
+core, spectrum-io, param-recommend, search-engine, fdr, protein-inference,
+xic, dia-extraction, result-import, report, fasta-db, entrapment-analysis,
+entrapment-cli, mcp-server, integration-tests
 
 > 约定：纯 ASCII 图，无 mermaid/图片；术语用蛋白组学领域词；代码块用简化片段，完整逻辑以源码为准。
