@@ -1,6 +1,6 @@
 # L3 — MCP Server / 工具层
 
-承接 [L2](L2-architecture.md)。本篇讲清最上层 `mcp-server`（workspace 唯一 bin crate）如何把全部确定性库 crate 组装成 **27 个 MCP 工具**，经 stdio 暴露给 LLM 客户端（Copilot CLI / Claude Desktop），以及异步搜索模型、三类缓存、结构化 I/O 与历史持久化。
+承接 [L2](L2-architecture.md)。本篇讲清最上层 `mcp-server`（workspace 的 MCP 服务 bin crate）如何把全部确定性库 crate 组装成 **27 个 MCP 工具**，经 stdio 暴露给 LLM 客户端（Copilot CLI / Claude Desktop），以及异步搜索模型、三类缓存、结构化 I/O 与历史持久化。
 
 ## 1. 职责与位置
 

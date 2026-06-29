@@ -12,7 +12,7 @@
 +------------------------------------------------------------+
 | MCP Tool 层  crates/mcp-server（bin）                        |  27 工具，组装确定性能力
 +------------------------------------------------------------+
-| 计算/引擎层  13 个 library crate + 搜索引擎 adapter           |  确定性：解析/打分/FDR/推断
+| 计算/引擎层  12 个 library crate + 搜索引擎 adapter           |  确定性：解析/打分/FDR/推断
 +------------------------------------------------------------+
 ```
 
@@ -20,7 +20,7 @@
 
 ## 2. Workspace 与 crate 依赖
 
-15 个 crate（13 库 + 1 bin + 1 集成测试）。`mcp-server` 是唯一 bin，组装全部库；`core` 是共享底座，无内部依赖。
+15 个 crate（12 库 + 2 bin + 1 集成测试）。`mcp-server`（bin `protein-copilot-mcp`）组装全部 12 个库；`entrapment-cli`（bin `entrapment`）是独立 CLI；`core` 是共享底座，无内部依赖。
 
 ```text
               +-------- core --------+   fasta-db   (两者无内部依赖)
