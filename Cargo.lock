@@ -1711,6 +1711,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -1763,6 +1764,7 @@ version = "0.1.0"
 dependencies = [
  "arrow",
  "chrono",
+ "csv",
  "parquet",
  "protein-copilot-core",
  "protein-copilot-search-engine",

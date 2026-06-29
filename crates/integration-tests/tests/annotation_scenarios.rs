@@ -22,6 +22,35 @@ fn assert_annotation_ok(spectrum: &Spectrum, peptide: &str, charge: i32) {
     assert!(ann.total_ions > 0, "should have theoretical ions");
 }
 
+/// Build peaks at the EXACT theoretical heavy fragment m/z for a SILAC peptide.
+///
+/// b-ion `k` shifts by the heavy delta of prefix `[..k]`, y-ion `k` by the
+/// suffix `[n-k..]`, matching annotate's heavy formula. This guarantees the
+/// synthetic heavy scan contains real, matchable heavy peaks.
+fn exact_heavy_peaks(
+    peptide: &str,
+    base: f64,
+    label: &protein_copilot_core::label::LabelType,
+) -> Vec<(f64, f64)> {
+    use protein_copilot_core::label::total_heavy_delta;
+    let (b_ions, y_ions) = theoretical_fragments(peptide);
+    let n = peptide.len();
+    let mut peaks = Vec::new();
+    for (num, mz) in b_ions {
+        peaks.push((
+            mz + total_heavy_delta(&peptide[..num as usize], label),
+            base,
+        ));
+    }
+    for (num, mz) in y_ions {
+        peaks.push((
+            mz + total_heavy_delta(&peptide[n - num as usize..], label),
+            base,
+        ));
+    }
+    peaks
+}
+
 // ─── Scenario ①: DDA + non-SILAC ──────────────────────────────────────────
 
 #[test]
@@ -74,7 +103,7 @@ fn scenario_2_dda_silac_heavy_annotation_succeeds() {
     assert_annotation_ok(&light_spectrum, peptide, 2);
 
     // Heavy annotation should work on a spectrum with shifted peaks
-    let heavy_peaks = heavy_shifted_peaks(peptide, &light_peaks, &label);
+    let heavy_peaks = exact_heavy_peaks(peptide, 1000.0, &label);
     let heavy_prec_mz =
         protein_copilot_core::label::compute_heavy_precursor_mz(precursor_mz, 2, peptide, &label);
     let heavy_spectrum = make_ms2(
@@ -115,6 +144,31 @@ fn scenario_2_dda_silac_heavy_annotation_succeeds() {
         "heavy m/z ({}) should exceed light m/z ({})",
         heavy_ann.precursor_mz,
         precursor_mz
+    );
+    // Real heavy fragments must be matched, not just enumerated.
+    assert!(
+        heavy_ann.matched_ions > 0,
+        "heavy scan should match real heavy fragment peaks"
+    );
+    let annotated = heavy_ann
+        .peaks
+        .iter()
+        .filter(|p| p.annotation.is_some())
+        .count() as u32;
+    assert_eq!(
+        annotated, heavy_ann.matched_ions,
+        "every matched ion must annotate a heavy peak"
+    );
+    // K is C-terminal → y-ions carry the +8.014 shift; verify a y-ion landed heavier.
+    let light_y: Vec<(u32, f64)> = theoretical_fragments(peptide).1;
+    let shifted = heavy_ann.y_ions.iter().filter(|i| i.matched).any(|i| {
+        light_y
+            .iter()
+            .any(|(n, mz)| *n == i.number && i.theoretical_mz - mz > 5.0)
+    });
+    assert!(
+        shifted,
+        "a matched heavy y-ion must exceed its light m/z by ~8 Da"
     );
 }
 
@@ -168,7 +222,7 @@ fn scenario_4_dia_silac_heavy_annotation_succeeds() {
     assert_annotation_ok(&light_spectrum, peptide, 2);
 
     // Heavy annotation
-    let heavy_peaks = heavy_shifted_peaks(peptide, &light_peaks, &label);
+    let heavy_peaks = exact_heavy_peaks(peptide, 1000.0, &label);
     let heavy_prec_mz =
         protein_copilot_core::label::compute_heavy_precursor_mz(precursor_mz, 2, peptide, &label);
     let heavy_spectrum = make_ms2(
@@ -195,6 +249,24 @@ fn scenario_4_dia_silac_heavy_annotation_succeeds() {
     .unwrap();
 
     assert!(heavy_ann.total_ions > 0);
+    // Heavy scan carries real, matchable peaks (R-terminal → y-ions +10.008).
+    assert!(
+        heavy_ann.matched_ions > 0,
+        "heavy scan should match real heavy fragment peaks"
+    );
+    let annotated = heavy_ann
+        .peaks
+        .iter()
+        .filter(|p| p.annotation.is_some())
+        .count() as u32;
+    assert_eq!(annotated, heavy_ann.matched_ions);
+    let light_y: Vec<(u32, f64)> = theoretical_fragments(peptide).1;
+    let shifted = heavy_ann.y_ions.iter().filter(|i| i.matched).any(|i| {
+        light_y
+            .iter()
+            .any(|(n, mz)| *n == i.number && i.theoretical_mz - mz > 5.0)
+    });
+    assert!(shifted, "a matched heavy y-ion must exceed its light m/z");
 }
 
 // ─── Zero-offset edge case ────────────────────────────────────────────────

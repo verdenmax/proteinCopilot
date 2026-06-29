@@ -156,12 +156,13 @@ pub fn build_search_result(
     let mut metadata = RunMetadata::new(params.clone(), engine_info.clone(), input_files);
     metadata.run_id = run_id;
 
-    let raw_files: Vec<String> = psms
+    let mut raw_files: Vec<String> = psms
         .iter()
         .map(|p| p.raw_name.clone())
         .collect::<HashSet<_>>()
         .into_iter()
         .collect();
+    raw_files.sort();
 
     let search_result = SearchResult {
         run_id,
@@ -351,6 +352,45 @@ mod tests {
                 rt_delta_min: None,
             },
         ]
+    }
+
+    /// Build a minimal matched PSM with the given raw_name (for ordering tests).
+    fn matched_psm(raw_name: &str) -> ImportedPsm {
+        ImportedPsm {
+            sequence: "PEPTIDE".to_string(),
+            charge: 2,
+            precursor_mz: 400.19,
+            rt_min: 10.0,
+            modifications: vec![],
+            score: Some(0.01),
+            q_value: Some(0.01),
+            protein_accessions: vec!["P12345".to_string()],
+            raw_name: raw_name.to_string(),
+            matched_scan: Some(100),
+            rt_delta_min: Some(0.1),
+        }
+    }
+
+    #[test]
+    fn raw_files_are_deterministically_sorted() {
+        // Many raw files supplied in reverse order must always yield ascending,
+        // deterministic raw_files ordering (no HashSet nondeterminism).
+        let names: Vec<String> = (0..10).rev().map(|i| format!("run_{i:02}")).collect();
+        let psms: Vec<ImportedPsm> = names.iter().map(|n| matched_psm(n)).collect();
+        let report = MatchReport {
+            total_psms: psms.len(),
+            matched: psms.len(),
+            unmatched: 0,
+            median_rt_delta_min: 0.0,
+            max_rt_delta_min: 0.0,
+            per_file: HashMap::new(),
+        };
+
+        let (_, import) = build_search_result(&psms, report, "custom_json", vec![]);
+
+        let mut expected: Vec<String> = names;
+        expected.sort();
+        assert_eq!(import.raw_files, expected);
     }
 
     #[test]

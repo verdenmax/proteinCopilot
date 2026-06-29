@@ -14,6 +14,27 @@ use crate::FastaDbError;
 /// proteome databases.
 const MAX_FASTA_DOWNLOAD_BYTES: u64 = 10 * 1024 * 1024 * 1024;
 
+/// Maximum time to wait for the TCP/TLS connection to be established.
+const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Maximum idle time between received body bytes. A stalled server (no data for
+/// this long) fails the read instead of hanging forever; this is per-read, not a
+/// total cap, so large legitimate downloads still complete.
+const READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// Builds the HTTP client used for FASTA downloads with bounded connect and
+/// read timeouts so a slow or stalled server can never hang the download.
+fn build_download_client() -> Result<reqwest::Client, FastaDbError> {
+    reqwest::Client::builder()
+        .connect_timeout(CONNECT_TIMEOUT)
+        .read_timeout(READ_TIMEOUT)
+        .build()
+        .map_err(|e| FastaDbError::NetworkError {
+            url: String::new(),
+            detail: format!("failed to build HTTP client: {e}"),
+        })
+}
+
 /// Result of a successful download.
 #[derive(Debug, Clone)]
 pub struct DownloadResult {
@@ -63,7 +84,10 @@ impl StreamingProteinCounter {
 pub async fn download_fasta(url: &str, dest_path: &Path) -> Result<DownloadResult, FastaDbError> {
     tracing::info!(url = url, dest = %dest_path.display(), "starting FASTA download");
 
-    let mut response = reqwest::get(url)
+    let client = build_download_client()?;
+    let mut response = client
+        .get(url)
+        .send()
         .await
         .map_err(|e| FastaDbError::NetworkError {
             url: url.to_string(),
@@ -275,5 +299,15 @@ mod tests {
         let streamed = format!("{:x}", hasher.finalize());
 
         assert_eq!(streamed, expected);
+    }
+
+    #[test]
+    fn download_client_builds_with_timeouts() {
+        // The download client must be constructible and carry bounded
+        // connect/read timeouts so a stalled server cannot hang indefinitely.
+        let client = build_download_client();
+        assert!(client.is_ok(), "client must build: {:?}", client.err());
+        assert!(CONNECT_TIMEOUT > std::time::Duration::ZERO);
+        assert!(READ_TIMEOUT > std::time::Duration::ZERO);
     }
 }

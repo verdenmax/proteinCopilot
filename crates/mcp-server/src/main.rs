@@ -16,10 +16,9 @@ use tools::ProteinCopilotServer;
 async fn main() {
     // Initialize tracing (respects RUST_LOG env var)
     // PROTEIN_LOG_JSON=1 switches to structured JSON output
-    let env_filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("info"));
+    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
 
-    let use_json = std::env::var("PROTEIN_LOG_JSON").map_or(false, |v| v == "1");
+    let use_json = std::env::var("PROTEIN_LOG_JSON").is_ok_and(|v| v == "1");
 
     if use_json {
         tracing_subscriber::registry()

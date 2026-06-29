@@ -34,10 +34,10 @@ async fn full_pipeline_read_search_annotate() {
     let mgf = mgf_path();
     let fasta = fasta_path();
 
-    if !mgf.exists() || !fasta.exists() {
-        eprintln!("Skipping: fixture files not found at {:?}", mgf);
-        return;
-    }
+    assert!(
+        mgf.exists() && fasta.exists(),
+        "required fixtures missing: {mgf:?} / {fasta:?}"
+    );
 
     // Step 1: Read spectra
     let file_info = detect_format(&mgf).unwrap();

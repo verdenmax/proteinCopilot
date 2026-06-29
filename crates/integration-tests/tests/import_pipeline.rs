@@ -63,14 +63,23 @@ fn import_custom_json_parses_psms() {
 
     // Verify second PSM has oxidation modification (unimod:35)
     assert_eq!(psms[1].sequence, "DGFLLDGFPR");
-    // unimod:35 = Oxidation — check if parsed
-    if !psms[1].modifications.is_empty() {
-        let m = &psms[1].modifications[0];
-        assert!(
-            m.name.contains("Oxidation") || m.mass_delta.abs() > 0.0,
-            "modification should be Oxidation"
-        );
-    }
+    // unimod:35 = Oxidation — must be parsed and present unconditionally
+    assert!(
+        !psms[1].modifications.is_empty(),
+        "DGFLLDGFPR with modify [[7,35]] must yield an oxidation modification"
+    );
+    assert_eq!(
+        psms[1].modifications.len(),
+        1,
+        "exactly one oxidation expected"
+    );
+    let m = &psms[1].modifications[0];
+    assert!(
+        m.name.contains("Oxidation") || (m.mass_delta - 15.994915).abs() < 0.001,
+        "modification should be Oxidation (UniMod:35, +15.994915 Da), got name={:?} delta={}",
+        m.name,
+        m.mass_delta
+    );
 
     // Verify third PSM — no K/R (zero offset scenario)
     assert_eq!(psms[2].sequence, "PEPTIDE");

@@ -39,7 +39,7 @@ use protein_copilot_result_import::{
     custom_json::CustomJsonParser,
     diann::DiannParser,
     pfind_tsv::PFindTsvParser,
-    scan_matcher::{match_scans, ScanMatcherConfig},
+    scan_matcher::{match_scans, validate_raw_name, ScanMatcherConfig},
     unimod::UnimodDb,
     ImportFormat, ImportResult, ResultParser,
 };
@@ -933,13 +933,11 @@ fn find_precursor_in_ms1(
         return None;
     }
     // Find the MS1 scan closest to the target RT
-    let closest = ms1_scans
-        .iter()
-        .min_by(|a, b| {
-            let da = (a.retention_time_min - target_rt_min).abs();
-            let db = (b.retention_time_min - target_rt_min).abs();
-            da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
-        })?;
+    let closest = ms1_scans.iter().min_by(|a, b| {
+        let da = (a.retention_time_min - target_rt_min).abs();
+        let db = (b.retention_time_min - target_rt_min).abs();
+        da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+    })?;
 
     let tol_da = theoretical_mz * tol_ppm * 1e-6;
     let mut best_mz = None;
@@ -1431,7 +1429,12 @@ impl ProteinCopilotServer {
         let summary = reader
             .read_summary(path)
             .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
-        tracing::info!(ms1 = summary.ms1_count, ms2 = summary.ms2_count, total = summary.total_spectra, "completed");
+        tracing::info!(
+            ms1 = summary.ms1_count,
+            ms2 = summary.ms2_count,
+            total = summary.total_spectra,
+            "completed"
+        );
         Ok(Json(summary))
     }
 
@@ -1515,9 +1518,7 @@ impl ProteinCopilotServer {
         tracing::info!("started");
         let presets = ParamRecommender::list_presets();
         tracing::info!(count = presets.len(), "completed");
-        Json(PresetsResponse {
-            presets,
-        })
+        Json(PresetsResponse { presets })
     }
 
     /// Execute a database search asynchronously.
@@ -2190,10 +2191,17 @@ impl ProteinCopilotServer {
         Parameters(input): Parameters<GenerateSummaryInput>,
     ) -> Result<Json<SearchResultSummary>, ErrorData> {
         let _span = tracing::info_span!("mcp_tool", name = "generate_summary").entered();
-        tracing::info!(run_id = input.run_id.as_deref().unwrap_or("direct"), "started");
+        tracing::info!(
+            run_id = input.run_id.as_deref().unwrap_or("direct"),
+            "started"
+        );
         let result = self.get_result(&input.result, &input.run_id)?;
         let summary = ReportGenerator::generate_summary(&result);
-        tracing::info!(psms_1pct = summary.psms_at_1pct_fdr, id_rate = summary.identification_rate, "completed");
+        tracing::info!(
+            psms_1pct = summary.psms_at_1pct_fdr,
+            id_rate = summary.identification_rate,
+            "completed"
+        );
         Ok(Json(summary))
     }
 
@@ -2306,7 +2314,7 @@ impl ProteinCopilotServer {
         if let Some(ref filter) = input.status_filter {
             entries.retain(|e| e.status.starts_with(filter.as_str()));
         }
-        entries.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        entries.sort_by_key(|e| std::cmp::Reverse(e.created_at));
         entries.truncate(limit);
         tracing::info!(count = entries.len(), "completed");
         Json(ListSearchesResponse { searches: entries })
@@ -2435,7 +2443,12 @@ impl ProteinCopilotServer {
                 let precursor_mz =
                     (base_mass + mod_mass + charge as f64 * PROTON_MASS) / charge as f64;
                 reader
-                    .find_by_rt(&spectrum_file, rt, precursor_mz, RT_AUTO_LOOKUP_TOLERANCE_MIN)
+                    .find_by_rt(
+                        &spectrum_file,
+                        rt,
+                        precursor_mz,
+                        RT_AUTO_LOOKUP_TOLERANCE_MIN,
+                    )
                     .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?
                     .map(|(scan, _)| scan)
                     .ok_or_else(|| {
@@ -2688,8 +2701,7 @@ impl ProteinCopilotServer {
                             20.0,
                         ) {
                             annotation.precursor_mz = observed;
-                            annotation.delta_mass_ppm = (observed
-                                - annotation.theoretical_mz)
+                            annotation.delta_mass_ppm = (observed - annotation.theoretical_mz)
                                 / annotation.theoretical_mz
                                 * 1e6;
                         }
@@ -2703,36 +2715,30 @@ impl ProteinCopilotServer {
                                 heavy_theo,
                                 20.0,
                             ) {
-                                ha.delta_mass_ppm = Some(
-                                    (obs_heavy - heavy_theo) / heavy_theo * 1e6,
-                                );
+                                ha.delta_mass_ppm =
+                                    Some((obs_heavy - heavy_theo) / heavy_theo * 1e6);
                             } else {
                                 ha.delta_mass_ppm = None;
                             }
                         }
 
-                        let unified_data =
-                            protein_copilot_report::unified_types::UnifiedViewData {
-                                source_file: source_file.clone(),
-                                annotation,
-                                xic: Some(unified_result.xic_data),
-                                raw_scans: Some(unified_result.raw_scans),
-                                ion_metadata: unified_result.ion_metadata,
-                                peptide_info: make_peptide_info(
-                                    &peptide_seq,
-                                    charge,
-                                    annotation_theo_mz,
-                                ),
-                            };
+                        let unified_data = protein_copilot_report::unified_types::UnifiedViewData {
+                            source_file: source_file.clone(),
+                            annotation,
+                            xic: Some(unified_result.xic_data),
+                            raw_scans: Some(unified_result.raw_scans),
+                            ion_metadata: unified_result.ion_metadata,
+                            peptide_info: make_peptide_info(
+                                &peptide_seq,
+                                charge,
+                                annotation_theo_mz,
+                            ),
+                        };
 
-                        ReportGenerator::render_unified(
-                            &unified_data,
-                            &out_path,
-                            plotly_mode,
-                        )
-                        .map_err(|e| {
-                            mcp_core_err(protein_copilot_core::error::CoreError::from(e))
-                        })?;
+                        ReportGenerator::render_unified(&unified_data, &out_path, plotly_mode)
+                            .map_err(|e| {
+                                mcp_core_err(protein_copilot_core::error::CoreError::from(e))
+                            })?;
                         render_mode = "unified+xic";
                     } else {
                         render_unified_without_xic()?;
@@ -3332,11 +3338,9 @@ impl ProteinCopilotServer {
                      Supported formats: custom_json, diann_parquet, pfind_tsv",
                 ));
             }
-            ImportFormat::PFindTsv => {
-                PFindTsvParser
-                    .parse(&result_path, &unimod)
-                    .map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, e.to_string()))?
-            }
+            ImportFormat::PFindTsv => PFindTsvParser
+                .parse(&result_path, &unimod)
+                .map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, e.to_string()))?,
         };
 
         // Apply run_filter for formats that don't handle it internally (e.g. pFind TSV)
@@ -3367,13 +3371,13 @@ impl ProteinCopilotServer {
             // pFind TSV already has scan numbers — build MatchReport directly
             let mut per_file = std::collections::HashMap::new();
             for psm in &psms {
-                let entry = per_file
-                    .entry(psm.raw_name.clone())
-                    .or_insert(protein_copilot_result_import::FileMatchStats {
+                let entry = per_file.entry(psm.raw_name.clone()).or_insert(
+                    protein_copilot_result_import::FileMatchStats {
                         total: 0,
                         matched: 0,
                         ms2_count: 0,
-                    });
+                    },
+                );
                 entry.total += 1;
                 entry.matched += 1;
             }
@@ -3417,21 +3421,29 @@ impl ProteinCopilotServer {
             ));
         }
 
-        // Collect actual mzML paths used (for downstream annotate_spectrum/extract_xic)
-        let mzml_files: Vec<PathBuf> = psms
+        // Collect actual mzML paths used (for downstream annotate_spectrum/extract_xic).
+        // pFind imports skip RT scan matching (which validates raw names), so
+        // confine names to mzml_dir here too, rejecting path traversal. Sort the
+        // unique names so mzml_files (and thus metadata.input_files) is
+        // deterministic across imports rather than HashSet-ordered.
+        let mut raw_names: Vec<&str> = psms
             .iter()
             .map(|p| p.raw_name.as_str())
             .collect::<std::collections::HashSet<_>>()
             .into_iter()
-            .map(|raw| {
-                let mzml = mzml_dir.join(format!("{raw}.mzML"));
-                if mzml.exists() {
-                    mzml
-                } else {
-                    mzml_dir.join(format!("{raw}.mzml"))
-                }
-            })
             .collect();
+        raw_names.sort_unstable();
+        let mut mzml_files: Vec<PathBuf> = Vec::with_capacity(raw_names.len());
+        for raw in raw_names {
+            validate_raw_name(raw)
+                .map_err(|e| mcp_err(ErrorCode::INVALID_PARAMS, e.to_string()))?;
+            let mzml = mzml_dir.join(format!("{raw}.mzML"));
+            mzml_files.push(if mzml.exists() {
+                mzml
+            } else {
+                mzml_dir.join(format!("{raw}.mzml"))
+            });
+        }
 
         if mzml_files.len() > 1 {
             tracing::warn!(
@@ -3780,9 +3792,10 @@ impl ProteinCopilotServer {
         drop(_enter);
         let cache_dir = default_cache_dir(&input.cache_dir);
         let force = input.force.unwrap_or(false);
-        let result = protein_copilot_fasta_db::download_database(&input.database_id, &cache_dir, force)
-            .await
-            .map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, e))?;
+        let result =
+            protein_copilot_fasta_db::download_database(&input.database_id, &cache_dir, force)
+                .await
+                .map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, e))?;
         tracing::info!(path = %result.path, "completed");
         Ok(Json(result))
     }
@@ -4035,7 +4048,9 @@ impl ProteinCopilotServer {
 
         let level_idx = headers.iter().position(|h| h == columns::LEVEL);
         let delta_idx = headers.iter().position(|h| h == columns::DELTA_MASS_DA);
-        let target_protein_idx = headers.iter().position(|h| h == columns::BEST_TARGET_PROTEIN);
+        let target_protein_idx = headers
+            .iter()
+            .position(|h| h == columns::BEST_TARGET_PROTEIN);
 
         let mut level_counts = std::collections::HashMap::<String, usize>::new();
         let mut delta_masses: Vec<f64> = Vec::new();
@@ -4076,7 +4091,7 @@ impl ProteinCopilotServer {
         }
 
         let mut top_families: Vec<_> = protein_families.into_iter().collect();
-        top_families.sort_by(|a, b| b.1.cmp(&a.1));
+        top_families.sort_by_key(|b| std::cmp::Reverse(b.1));
         top_families.truncate(20);
 
         let stats = AnalyzeEntrapmentStatsOutput {
@@ -4258,15 +4273,9 @@ impl ProteinCopilotServer {
         );
 
         // Generate output path
-        let output_path = input
-            .output_path
-            .map(PathBuf::from)
-            .unwrap_or_else(|| {
-                PathBuf::from(format!(
-                    "./provenance_scan{}.html",
-                    input.scan_number
-                ))
-            });
+        let output_path = input.output_path.map(PathBuf::from).unwrap_or_else(|| {
+            PathBuf::from(format!("./provenance_scan{}.html", input.scan_number))
+        });
 
         // Ensure parent directory exists
         if let Some(parent) = output_path.parent() {
@@ -4453,5 +4462,90 @@ mod tests {
             "poisoned lock must self-heal, not return INTERNAL_ERROR"
         );
         assert!(err.message.contains("not found"));
+    }
+
+    /// Build a minimal valid pFind TSV (16 columns) from `(file_name, scan)`
+    /// rows for import-path tests.
+    fn write_pfind_tsv(dir: &std::path::Path, rows: &[(&str, u32)]) -> String {
+        let path = dir.join("pfind.tsv");
+        let mut s = String::from(
+            "FileName\tPeptideSequence\tModifications\tPepMass\tPredRT\tCleavageType\tProNCTerm\tProteins\tMH+\tCharge\tScanNo\tRawScore\tDeltaMassPPM\tDeltaRT(Min)\tFinalScore\tQValue\n",
+        );
+        for (raw, scan) in rows {
+            s.push_str(&format!(
+                "{raw}\tPEPTIDEK\t\t900.4\t15.1\t3\t0\tsp|P12345|TEST/\t901.4\t2\t{scan}\t10.0\t1.0\t0.0\t0.001\t0\n"
+            ));
+        }
+        std::fs::write(&path, s).expect("write pfind tsv");
+        path.to_string_lossy().to_string()
+    }
+
+    /// ISSUE 3: pFind import bypasses RT scan matching, so a traversal raw_name
+    /// must be rejected before it is joined onto mzml_dir.
+    #[test]
+    fn pfind_import_rejects_traversal_raw_name() {
+        let server = ProteinCopilotServer::new();
+        let dir = tempfile::TempDir::new().unwrap();
+        let tsv = write_pfind_tsv(dir.path(), &[("../evil", 100)]);
+
+        let input = ImportSearchResultsInput {
+            result_file: tsv,
+            format: "pfind_tsv".to_string(),
+            mzml_dir: dir.path().to_string_lossy().to_string(),
+            unimod_path: None,
+            rt_tolerance_min: 0.5,
+            filter_qvalue: 1.0,
+            run_filter: None,
+        };
+
+        let err = match server.import_search_results(Parameters(input)) {
+            Ok(_) => panic!("traversal raw_name must be rejected"),
+            Err(e) => e,
+        };
+        assert!(
+            err.message.contains("invalid raw file name") || err.message.contains("evil"),
+            "expected raw-name rejection, got: {}",
+            err.message
+        );
+    }
+
+    /// ISSUE 1: input_files derived from pFind raw names must be deterministically
+    /// sorted, not in HashSet order, so annotate_spectrum/extract_xic pick a
+    /// stable first file across imports.
+    #[test]
+    fn pfind_import_input_files_sorted() {
+        let server = ProteinCopilotServer::new();
+        let dir = tempfile::TempDir::new().unwrap();
+        let names: Vec<String> = (0..8).rev().map(|i| format!("run_{i:02}")).collect();
+        let rows: Vec<(&str, u32)> = names
+            .iter()
+            .enumerate()
+            .map(|(i, n)| (n.as_str(), (i + 1) as u32))
+            .collect();
+        let tsv = write_pfind_tsv(dir.path(), &rows);
+
+        let input = ImportSearchResultsInput {
+            result_file: tsv,
+            format: "pfind_tsv".to_string(),
+            mzml_dir: dir.path().to_string_lossy().to_string(),
+            unimod_path: None,
+            rt_tolerance_min: 0.5,
+            filter_qvalue: 1.0,
+            run_filter: None,
+        };
+
+        let run_id = server
+            .import_search_results(Parameters(input))
+            .expect("import should succeed")
+            .0
+            .run_id;
+        let result = server.get_result(&None, &Some(run_id)).expect("cached run");
+
+        let mut expected = result.metadata.input_files.clone();
+        expected.sort();
+        assert_eq!(
+            result.metadata.input_files, expected,
+            "input_files must be sorted deterministically"
+        );
     }
 }

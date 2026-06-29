@@ -37,3 +37,6 @@ dirs = "6"
 lru = "0.12"
 bincode = "1"
 csv = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"

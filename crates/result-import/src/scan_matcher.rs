@@ -45,9 +45,7 @@ pub fn match_scans(
     config: &ScanMatcherConfig,
     reader_factory: &ReaderFactory,
 ) -> Result<MatchReport, ResultImportError> {
-    let _span = tracing::info_span!("match_scans",
-        psm_count = psms.len(),
-    ).entered();
+    let _span = tracing::info_span!("match_scans", psm_count = psms.len(),).entered();
 
     // Group PSMs by raw_name
     let mut groups: HashMap<String, Vec<usize>> = HashMap::new();
@@ -122,8 +120,16 @@ pub fn match_scans(
             processed_count += 1;
             if processed_count % progress_interval == 0 || processed_count == total_psm_count {
                 let elapsed = loop_start.elapsed().as_secs_f64();
-                let rate = if elapsed > 0.0 { processed_count as f64 / elapsed } else { 0.0 };
-                let eta = if rate > 0.0 { (total_psm_count - processed_count) as f64 / rate } else { 0.0 };
+                let rate = if elapsed > 0.0 {
+                    processed_count as f64 / elapsed
+                } else {
+                    0.0
+                };
+                let eta = if rate > 0.0 {
+                    (total_psm_count - processed_count) as f64 / rate
+                } else {
+                    0.0
+                };
                 tracing::info!(
                     progress = processed_count,
                     total = total_psm_count,
@@ -155,7 +161,11 @@ pub fn match_scans(
     };
     let max_rt_delta = all_rt_deltas.last().copied().unwrap_or(0.0);
 
-    tracing::info!(matched = total_matched, unmatched = total_unmatched, "scan matching complete");
+    tracing::info!(
+        matched = total_matched,
+        unmatched = total_unmatched,
+        "scan matching complete"
+    );
 
     Ok(MatchReport {
         total_psms: psms.len(),
@@ -270,7 +280,12 @@ pub fn find_best_match(
 /// Validates that an externally supplied `raw_name` is a bare file-name
 /// component, so that `mzml_dir.join(format!("{raw_name}.mzML"))` cannot escape
 /// `mzml_dir` via path separators or `..` (path-traversal confinement).
-fn validate_raw_name(raw_name: &str) -> Result<(), ResultImportError> {
+///
+/// Returns [`ResultImportError::InvalidRawName`] for empty names, `.`/`..`, or
+/// names containing any path separator. Callers that bypass [`match_scans`]
+/// (e.g. pFind TSV imports that already carry scan numbers) must call this
+/// before joining a raw name onto a directory.
+pub fn validate_raw_name(raw_name: &str) -> Result<(), ResultImportError> {
     let invalid = raw_name.is_empty()
         || raw_name == "."
         || raw_name == ".."
