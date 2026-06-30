@@ -1266,6 +1266,13 @@ impl ProteinCopilotServer {
         }
     }
 
+    /// Returns the full tool catalog (name, description, input/output JSON
+    /// Schema) without starting the stdio server. Used by the `--list-tools`
+    /// CLI mode and by documentation generators.
+    pub fn list_tools(&self) -> Vec<rmcp::model::Tool> {
+        self.tool_router.list_all()
+    }
+
     /// Get or create a cached indexed reader for the given file path.
     fn get_or_create_reader(&self, path: &Path) -> Result<Arc<dyn SpectrumReader>, ErrorData> {
         let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());

@@ -113,6 +113,10 @@ def render(tools):
     out.append("\n## 启动与接入\n")
     out.append("```bash\n# 直接运行已编译的二进制（推荐发布形态）\n./protein-copilot-mcp\n\n"
                "# 或从源码运行\ncargo run --release -p protein-copilot-mcp-server\n```\n")
+    out.append("命令行自检（无需客户端，直接在终端查看工具契约）：\n")
+    out.append("```bash\n./protein-copilot-mcp --list-tools          # 文本目录：参数/类型/范围/默认/输出\n"
+               "./protein-copilot-mcp --list-tools --json   # 完整 JSON Schema（机器可读）\n"
+               "./protein-copilot-mcp --help                # 用法\n```\n")
     out.append("在 MCP 客户端（Copilot CLI / Claude Desktop 等）中登记：\n")
     out.append("```json\n{\n  \"mcpServers\": {\n    \"protein-copilot\": {\n"
                "      \"command\": \"/path/to/protein-copilot-mcp\",\n"

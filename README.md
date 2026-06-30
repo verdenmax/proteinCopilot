@@ -84,7 +84,7 @@ crates/
 
 ## MCP Tools（27 个）
 
-> 下表为速查摘要。**完整接口契约**（每个工具的输入参数、必填/默认、类型定义、输出结构）见自动生成的 [`docs/mcp-tools.md`](docs/mcp-tools.md)（由 `scripts/gen_mcp_tools_doc.py` 从二进制 `tools/list` 生成）。
+> 下表为速查摘要。**完整接口契约**（每个工具的输入参数、必填/默认、类型定义、输出结构）见自动生成的 [`docs/mcp-tools.md`](docs/mcp-tools.md)（由 `scripts/gen_mcp_tools_doc.py` 从二进制 `tools/list` 生成）。也可在终端直接查看：`protein-copilot-mcp --list-tools`（文本目录）或 `--list-tools --json`（完整 JSON Schema）。
 
 | Tool | 功能 |
 |------|------|

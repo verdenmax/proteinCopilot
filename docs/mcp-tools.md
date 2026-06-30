@@ -15,6 +15,14 @@
 cargo run --release -p protein-copilot-mcp-server
 ```
 
+命令行自检（无需客户端，直接在终端查看工具契约）：
+
+```bash
+./protein-copilot-mcp --list-tools          # 文本目录：参数/类型/范围/默认/输出
+./protein-copilot-mcp --list-tools --json   # 完整 JSON Schema（机器可读）
+./protein-copilot-mcp --help                # 用法
+```
+
 在 MCP 客户端（Copilot CLI / Claude Desktop 等）中登记：
 
 ```json
