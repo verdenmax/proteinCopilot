@@ -38,6 +38,7 @@ cargo run --release -p protein-copilot-mcp-server
 
 - 所有工具的输入/输出均为结构化 JSON，类型见下方「参数」表与「共享数据类型」。
 - 描述文本为二进制 `#[schemars]` 原文（即客户端实际收到的内容），故为英文。
+- 生成的 HTML/TSV 默认写入 `./output/`，可用 `PROTEIN_OUTPUT_DIR` 改基目录；返回路径为绝对路径。
 - 搜索为异步：`run_search` 立即返回 `run_id`，用 `get_search_status` 轮询，完成后 `generate_summary` / `export_results` / `infer_proteins`。
 
 

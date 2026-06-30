@@ -92,6 +92,39 @@ protein-copilot-mcp --help                # 用法
 
 完整接口契约见 [`docs/mcp-tools.md`](docs/mcp-tools.md)；分层文档见 [`docs/levels/`](docs/levels/README.md)。
 
+### 典型用法（自然语言驱动）
+
+接入客户端后，用自然语言即可走完整流程——LLM 会按需调用下列工具：
+
+```text
+你：帮我分析 /data/sample.mzML，数据库用人类的。
+  -> read_spectra(/data/sample.mzML)              # 谱图特征摘要
+  -> prepare_search(organism="human")             # 推荐参数 + 解析 FASTA
+  -> run_search(...)                              # 立即返回 run_id（后台搜索）
+
+你：好了吗？
+  -> get_search_status(run_id)                    # 阶段 + 进度%（必要时 diagnose_search）
+
+你：给我结果。
+  -> generate_summary(run_id)                      # 1% FDR 统计摘要
+  -> infer_proteins(run_id)                        # parsimony + razor + 蛋白级 FDR
+  -> export_results(run_id)                        # psm/peptide/protein.tsv + json
+
+你：把扫描 12345 的肽段画出来。
+  -> annotate_spectrum(run_id, scan_number=12345)  # b/y 离子标注 HTML（绝对路径返回）
+  -> extract_xic(run_id, scan_number=12345)        # 碎片离子 XIC（支持 SILAC）
+```
+
+生成的 HTML/TSV 默认写入 `./output/`，可用 `PROTEIN_OUTPUT_DIR` 改到任意目录；返回的路径均为绝对路径。
+
+### 环境变量
+
+| 变量 | 作用 | 默认 |
+|------|------|------|
+| `RUST_LOG` | 日志级别（写 stderr） | `info` |
+| `PROTEIN_LOG_JSON` | 设 `1` 时日志输出 JSON | 关 |
+| `PROTEIN_OUTPUT_DIR` | 生成文件的基目录 | `./output` |
+
 ## 快速测试
 
 ```bash

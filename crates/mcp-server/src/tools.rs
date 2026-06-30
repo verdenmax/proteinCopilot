@@ -855,9 +855,26 @@ fn default_filter_qvalue() -> f64 {
 
 /// Helper to create MCP error with suggestion from CoreError
 fn mcp_core_err(err: protein_copilot_core::error::CoreError) -> ErrorData {
+    let code = core_err_code(&err);
     let suggestion = err.suggestion().to_string();
     let message = format!("{err}\n\nSuggestion: {suggestion}");
-    ErrorData::new(ErrorCode::INTERNAL_ERROR, message, None)
+    ErrorData::new(code, message, None)
+}
+
+/// Classify a [`CoreError`] into the right JSON-RPC error code: user-input /
+/// data problems are `INVALID_PARAMS` (the caller can fix them), genuine
+/// system/engine failures are `INTERNAL_ERROR`.
+fn core_err_code(err: &protein_copilot_core::error::CoreError) -> ErrorCode {
+    use protein_copilot_core::error::CoreError as E;
+    match err {
+        E::SpectrumParseError { .. }
+        | E::InvalidSearchParams { .. }
+        | E::FileNotFound { .. }
+        | E::UnsupportedFormat { .. }
+        | E::ResultParseError { .. }
+        | E::ValidationError { .. } => ErrorCode::INVALID_PARAMS,
+        E::SearchEngineError { .. } | E::SshConnectionError { .. } => ErrorCode::INTERNAL_ERROR,
+    }
 }
 
 fn default_cache_dir(override_dir: &Option<String>) -> std::path::PathBuf {
@@ -915,6 +932,51 @@ fn organism_to_database_id(organism: &str) -> Option<&'static str> {
 /// Helper to create MCP error from any Display error
 fn mcp_err(code: ErrorCode, err: impl std::fmt::Display) -> ErrorData {
     ErrorData::new(code, err.to_string(), None)
+}
+
+/// Base directory for default-generated output files. Honors the
+/// `PROTEIN_OUTPUT_DIR` environment variable so clients can redirect where
+/// HTML/TSV artifacts land; defaults to `output/` relative to the CWD.
+fn output_base_dir() -> std::path::PathBuf {
+    std::env::var_os("PROTEIN_OUTPUT_DIR")
+        .filter(|v| !v.is_empty())
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from("output"))
+}
+
+/// Default output path for a generated file, under [`output_base_dir`].
+fn default_output_path(file_name: &str) -> std::path::PathBuf {
+    output_base_dir().join(file_name)
+}
+
+/// Make a path absolute (join with the CWD if relative) so returned output
+/// paths are unambiguous regardless of how the client launched the server.
+fn absolutize(p: &std::path::Path) -> std::path::PathBuf {
+    if p.is_absolute() {
+        p.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map(|d| d.join(p))
+            .unwrap_or_else(|_| p.to_path_buf())
+    }
+}
+
+/// Ensure the parent directory of `path` exists, creating it if needed.
+fn ensure_parent_dir(path: &std::path::Path) -> Result<(), ErrorData> {
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() && !parent.exists() {
+            std::fs::create_dir_all(parent).map_err(|e| {
+                mcp_err(
+                    ErrorCode::INTERNAL_ERROR,
+                    format!(
+                        "failed to create output directory {}: {e}",
+                        parent.display()
+                    ),
+                )
+            })?;
+        }
+    }
+    Ok(())
 }
 
 /// Find the observed precursor m/z from the closest MS1 scan.
@@ -2623,8 +2685,10 @@ impl ProteinCopilotServer {
         }
 
         let out_path = input.output_path.map(PathBuf::from).unwrap_or_else(|| {
-            PathBuf::from(format!("output/annotation_scan{}.html", resolved_scan))
+            default_output_path(&format!("annotation_scan{}.html", resolved_scan))
         });
+        let out_path = absolutize(&out_path);
+        ensure_parent_dir(&out_path)?;
 
         let is_mzml = spectrum_file
             .extension()
@@ -3213,7 +3277,9 @@ impl ProteinCopilotServer {
         let out_path = input
             .output_path
             .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from(format!("output/xic_scan{}.html", resolved_scan)));
+            .unwrap_or_else(|| default_output_path(&format!("xic_scan{}.html", resolved_scan)));
+        let out_path = absolutize(&out_path);
+        ensure_parent_dir(&out_path)?;
 
         let plotly_mode = input
             .plotly_mode
@@ -4281,20 +4347,10 @@ impl ProteinCopilotServer {
 
         // Generate output path
         let output_path = input.output_path.map(PathBuf::from).unwrap_or_else(|| {
-            PathBuf::from(format!("./provenance_scan{}.html", input.scan_number))
+            default_output_path(&format!("provenance_scan{}.html", input.scan_number))
         });
-
-        // Ensure parent directory exists
-        if let Some(parent) = output_path.parent() {
-            if !parent.as_os_str().is_empty() && !parent.exists() {
-                std::fs::create_dir_all(parent).map_err(|e| {
-                    mcp_err(
-                        ErrorCode::INTERNAL_ERROR,
-                        format!("failed to create output directory: {e}"),
-                    )
-                })?;
-            }
-        }
+        let output_path = absolutize(&output_path);
+        ensure_parent_dir(&output_path)?;
 
         // Render mirror plot
         render_mirror_plot(&provenance, &output_path).map_err(|e| {
@@ -4335,6 +4391,50 @@ mod tests {
             env!("CARGO_MANIFEST_DIR"),
             name
         )
+    }
+
+    #[test]
+    fn user_input_errors_map_to_invalid_params() {
+        use protein_copilot_core::error::CoreError;
+        let unsupported = CoreError::UnsupportedFormat {
+            format: "py".to_string(),
+            supported: vec!["mzML".to_string(), "mgf".to_string()],
+        };
+        assert_eq!(core_err_code(&unsupported), ErrorCode::INVALID_PARAMS);
+        let not_found = CoreError::FileNotFound {
+            path: std::path::PathBuf::from("/no/such"),
+        };
+        assert_eq!(core_err_code(&not_found), ErrorCode::INVALID_PARAMS);
+        let engine = CoreError::SearchEngineError {
+            engine: "Sage".to_string(),
+            detail: "boom".to_string(),
+            suggestion: "retry".to_string(),
+        };
+        assert_eq!(core_err_code(&engine), ErrorCode::INTERNAL_ERROR);
+    }
+
+    #[test]
+    fn output_path_respects_env() {
+        std::env::remove_var("PROTEIN_OUTPUT_DIR");
+        assert_eq!(
+            default_output_path("a.html"),
+            std::path::PathBuf::from("output").join("a.html")
+        );
+        std::env::set_var("PROTEIN_OUTPUT_DIR", "/tmp/pc_out");
+        assert_eq!(
+            default_output_path("a.html"),
+            std::path::PathBuf::from("/tmp/pc_out").join("a.html")
+        );
+        std::env::remove_var("PROTEIN_OUTPUT_DIR");
+    }
+
+    #[test]
+    fn absolutize_makes_relative_absolute() {
+        let abs = absolutize(std::path::Path::new("output/x.html"));
+        assert!(abs.is_absolute(), "relative path should become absolute");
+        assert!(abs.ends_with("output/x.html"));
+        let already = std::path::Path::new("/tmp/y.html");
+        assert_eq!(absolutize(already), already.to_path_buf());
     }
 
     /// Minimal-but-valid `SearchParams` (passes `validate()`), with a chosen
