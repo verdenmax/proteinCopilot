@@ -35,6 +35,63 @@ AI 驱动的蛋白质组学质谱搜索与结果解释平台。
 **搜索诊断**：`diagnose_search(run_id)` → 阶段耗时 + 7 条异常检测规则 + 分级修复建议
 **陷阱库分析**：`classify_entrapment_hits` → L0-L4 同源性分级 + Levenshtein edit distance 跨长匹配 + SubstitutionType 注释（Q/K、等质量二肽等）+ HTML 交互报告 + CLI 独立工具
 
+## 安装与使用
+
+ProteinCopilot 以**单个 MCP 二进制** `protein-copilot-mcp` 发布。用户在自己的 MCP 客户端
+（GitHub Copilot CLI / Claude Desktop 等）里登记该二进制即可使用，无需阅读源码。
+
+> 下文仓库地址 `verdenmax/proteinCopilot` 为占位，请替换为实际公开仓库。
+
+**方式一：下载预编译二进制（推荐，免装 Rust）**
+
+到 Releases 页下载对应平台的压缩包并解压：
+
+| 平台 | 资产 |
+|------|------|
+| Linux x86_64（静态） | `protein-copilot-mcp-x86_64-unknown-linux-musl.tar.gz` |
+| Linux x86_64（glibc） | `protein-copilot-mcp-x86_64-unknown-linux-gnu.tar.gz` |
+| macOS (Intel) | `protein-copilot-mcp-x86_64-apple-darwin.tar.gz` |
+| macOS (Apple Silicon) | `protein-copilot-mcp-aarch64-apple-darwin.tar.gz` |
+| Windows x86_64 | `protein-copilot-mcp-x86_64-pc-windows-msvc.zip` |
+
+**方式二：用 Cargo 从源码安装**（需 Rust 1.85+）
+
+```bash
+cargo install --git https://github.com/verdenmax/proteinCopilot.git \
+  -p protein-copilot-mcp-server
+# 安装后二进制名为 protein-copilot-mcp
+```
+
+**方式三：Docker**
+
+```bash
+docker build -t protein-copilot-mcp .
+docker run -i --rm protein-copilot-mcp        # 通过 stdio 提供 MCP 服务
+```
+
+**接入 MCP 客户端**：在客户端配置中登记该二进制（命令路径换成你的实际路径）：
+
+```json
+{
+  "mcpServers": {
+    "protein-copilot": {
+      "command": "/path/to/protein-copilot-mcp",
+      "env": { "RUST_LOG": "info" }
+    }
+  }
+}
+```
+
+**查看工具契约**（无需客户端，直接在终端）：
+
+```bash
+protein-copilot-mcp --list-tools          # 文本目录：每个工具的参数/类型/范围/默认/输出
+protein-copilot-mcp --list-tools --json   # 完整 JSON Schema
+protein-copilot-mcp --help                # 用法
+```
+
+完整接口契约见 [`docs/mcp-tools.md`](docs/mcp-tools.md)；分层文档见 [`docs/levels/`](docs/levels/README.md)。
+
 ## 快速测试
 
 ```bash

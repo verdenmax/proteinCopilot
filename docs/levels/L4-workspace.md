@@ -80,7 +80,7 @@ cargo test -p protein-copilot-fdr --offline # 单 crate
 
 - `rustfmt.toml`：`max_width = 100`、`use_field_init_shorthand = true`。
 - `.clippy.toml`：`avoid-breaking-exported-api = false`（允许 clippy 提示破坏导出 API 的改法）。
-- warnings 当 error：写在 `copilot-instructions.md` §6（"CI 中视为错误"）与 `rust.instructions.md`。注意仓库当前无 `.github/workflows`、根也无 `[workspace.lints]`，故这是提交前人工跑 clippy 守门的约定，而非编译期 `deny` 强制。
+- warnings 当 error：写在 `copilot-instructions.md` §6（"CI 中视为错误"）与 `rust.instructions.md`。`.github/workflows/ci.yml` 在 push/PR 上跑 `cargo fmt --check`、`cargo clippy --workspace --all-targets -- -D warnings`、`cargo test --workspace`，把该约定落为 CI 强制（本地仍以提交前人工跑 clippy 守门）。
 
 clippy 与 fmt 是合并前的硬门槛：任一报错都视为未完成。声称功能完成前，必须贴出 `cargo test --workspace --offline` 全绿与 `cargo clippy --workspace --offline` 零警告的实际输出作为证据。
 

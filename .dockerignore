@@ -1,0 +1,10 @@
+target/
+.git/
+.github/
+.worktrees/
+.superpowers/
+.proteincopilot/
+output/
+docs/*.html
+*.idx
+mcp_stderr.log
