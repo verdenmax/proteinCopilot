@@ -82,7 +82,9 @@ crates/
     (+5 more prompts: dia, spectrum-annotation, prd-creation, task-*)
 ```
 
-## MCP Tools（28 个）
+## MCP Tools（27 个）
+
+> 下表为速查摘要。**完整接口契约**（每个工具的输入参数、必填/默认、类型定义、输出结构）见自动生成的 [`docs/mcp-tools.md`](docs/mcp-tools.md)（由 `scripts/gen_mcp_tools_doc.py` 从二进制 `tools/list` 生成）。
 
 | Tool | 功能 |
 |------|------|
@@ -112,6 +114,7 @@ crates/
 | `classify_entrapment_hits` | 运行陷阱库分类流程（L0-L4 分级 + HTML 报告） |
 | `analyze_entrapment_stats` | 从已分类 TSV 生成统计分析 |
 | `find_similar_targets` | 查找肽段在 target 库中的最相似序列 |
+| `annotate_provenance` | 标注命中溯源（谱图证据 + 多靶 SILAC 链路） |
 
 ## 架构原则
 
@@ -155,6 +158,8 @@ Phase 2 计划：`tasks/002-phase2-production-platform.md`
 陷阱库分析：`docs/entrapment-analysis.md`
 架构设计：`docs/architecture.md`
 架构演示：`docs/architecture.html`
+MCP 工具接口契约：[`docs/mcp-tools.md`](docs/mcp-tools.md)（自动生成）
+分层文档 L1-L4：[`docs/levels/`](docs/levels/README.md)
 
 ## 大文件性能优化
 
