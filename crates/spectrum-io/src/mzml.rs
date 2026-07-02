@@ -27,7 +27,8 @@ use std::io::BufRead;
 use std::path::Path;
 
 use protein_copilot_core::spectrum::{
-    IsolationWindow, MsLevel, PrecursorInfo, Spectrum, SpectrumFormat, SpectrumSummary,
+    IsolationWindow, MsLevel, PrecursorInfo, Spectrum, SpectrumFormat,
+    SpectrumRepresentation, SpectrumSummary,
 };
 use quick_xml::events::Event;
 use quick_xml::Reader;
@@ -71,6 +72,8 @@ struct SpectrumBuilder {
     cur_precursor_source_scan: Option<u32>,
     mz_array: Vec<f64>,
     intensity_array: Vec<f64>,
+    /// mzML CV term: MS:1000127 = centroid, MS:1000128 = profile
+    representation: SpectrumRepresentation,
 }
 
 impl SpectrumBuilder {
@@ -130,13 +133,35 @@ impl SpectrumBuilder {
         let mut intensity_array = self.intensity_array;
         crate::util::sort_peaks_by_mz(&mut mz_array, &mut intensity_array);
 
-        Spectrum::new(
+        // On-load centroiding: if the spectrum is explicitly profile-mode,
+        // apply centroiding so downstream consumers always receive centroided
+        // data.  Spectra already marked centroid or with unknown
+        // representation are left as-is.
+        if self.representation == SpectrumRepresentation::Profile {
+            let (cent_mz, cent_int) = crate::util::centroid_spectrum(
+                &mz_array,
+                &intensity_array,
+                1e-3,
+            );
+            if !cent_mz.is_empty() {
+                mz_array = cent_mz;
+                intensity_array = cent_int;
+            }
+        }
+
+        let rep = if self.representation == SpectrumRepresentation::Profile {
+            SpectrumRepresentation::Centroid
+        } else {
+            self.representation
+        };
+        Spectrum::new_with_rep(
             scan,
             ms_level,
             self.rt_min.unwrap_or(0.0),
             self.precursors,
             mz_array,
             intensity_array,
+            rep,
         )
         .map_err(|e| SpectrumIoError::ValidationError {
             scan,
@@ -424,6 +449,14 @@ where
                         }
                         "MS:1000576" if in_binary_data_array => {
                             array_meta.is_zlib = false;
+                        }
+                        "MS:1000127" if in_spectrum => {
+                            // centroid spectrum
+                            builder.representation = SpectrumRepresentation::Centroid;
+                        }
+                        "MS:1000128" if in_spectrum => {
+                            // profile spectrum
+                            builder.representation = SpectrumRepresentation::Profile;
                         }
                         _ => {}
                     }

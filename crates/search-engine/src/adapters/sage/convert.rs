@@ -3,10 +3,19 @@
 use protein_copilot_core::search_params::{
     MassTolerance, ModPosition, Modification, ToleranceUnit,
 };
-use protein_copilot_core::spectrum::{MsLevel, Spectrum};
+use protein_copilot_core::spectrum::{MsLevel, Spectrum, SpectrumRepresentation};
 use sage_core::mass::Tolerance as SageTolerance;
 use sage_core::modification::ModificationSpecificity;
 use sage_core::spectrum::{Precursor as SagePrecursor, RawSpectrum, Representation};
+
+/// Map our `SpectrumRepresentation` to sage's `Representation`.
+fn to_sage_repr(r: SpectrumRepresentation) -> Representation {
+    match r {
+        SpectrumRepresentation::Centroid => Representation::Centroid,
+        SpectrumRepresentation::Profile => Representation::Profile,
+        SpectrumRepresentation::Unknown => Representation::Centroid,
+    }
+}
 
 /// Convert our Spectrum to sage RawSpectrum.
 ///
@@ -43,7 +52,7 @@ pub fn spectrum_to_raw(spec: &Spectrum, file_id: usize) -> RawSpectrum {
         ms_level,
         id: spec.scan_number.to_string(),
         precursors,
-        representation: Representation::Centroid,
+        representation: to_sage_repr(spec.representation),
         scan_start_time: spec.retention_time_min as f32,
         ion_injection_time: 0.0,
         total_ion_current: spec.intensity_array.iter().sum::<f64>() as f32,
@@ -156,6 +165,7 @@ mod tests {
             }],
             mz_array: vec![100.0, 200.0, 300.5, 400.75],
             intensity_array: vec![1000.0, 2000.0, 500.0, 3000.0],
+            representation: SpectrumRepresentation::Centroid,
         }
     }
 
@@ -215,6 +225,7 @@ mod tests {
             precursors: vec![],
             mz_array: vec![100.0],
             intensity_array: vec![1000.0],
+            representation: SpectrumRepresentation::Centroid,
         };
         let raw = spectrum_to_raw(&spec, 0);
         assert_eq!(raw.ms_level, 1);

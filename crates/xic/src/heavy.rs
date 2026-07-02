@@ -7,7 +7,7 @@
 use crate::extract::TargetIon;
 use crate::IonType;
 use protein_copilot_core::label::{residue_heavy_delta, total_heavy_delta, LabelType};
-use protein_copilot_core::spectrum::{IsolationWindow, Spectrum};
+use protein_copilot_core::spectrum::{IsolationWindow, Spectrum, SpectrumRepresentation};
 
 /// Compute heavy-label m/z for a precursor ion.
 ///
@@ -347,6 +347,7 @@ mod tests {
                     upper_offset: 0.35,
                 }),
             }],
+            representation: SpectrumRepresentation::Centroid,
         }
     }
 
@@ -369,6 +370,7 @@ mod tests {
                     upper_offset: half_width,
                 }),
             }],
+            representation: SpectrumRepresentation::Centroid,
         }
     }
 }

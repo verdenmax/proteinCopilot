@@ -25,7 +25,7 @@ use protein_copilot_core::engine::{HealthStatus, SearchEngineAdapter};
 use protein_copilot_core::protein_group::InferenceResult;
 use protein_copilot_core::search_params::SearchParams;
 use protein_copilot_core::search_result::{SearchResult, SearchResultSummary};
-use protein_copilot_core::spectrum::{AcquisitionMode, Spectrum, SpectrumSummary};
+use protein_copilot_core::spectrum::{AcquisitionMode, Spectrum, SpectrumRepresentation, SpectrumSummary};
 use protein_copilot_dia_extraction::{
     extract_dia_precursors as run_dia_extraction, extract_single_spectrum_precursors,
     DiaExtractionConfig, IsotopePatternExtractor, SingleSpectrumExtractionResult,
@@ -4471,6 +4471,7 @@ mod tests {
             precursors: vec![],
             mz_array: vec![100.0, 200.0],
             intensity_array: vec![10.0, 20.0],
+            representation: SpectrumRepresentation::Centroid,
         }
     }
 

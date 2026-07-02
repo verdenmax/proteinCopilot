@@ -167,6 +167,7 @@ async fn sage_search_with_nonexistent_fasta_returns_error() {
         }],
         mz_array: vec![100.0, 200.0, 300.0],
         intensity_array: vec![1000.0, 2000.0, 3000.0],
+        representation: protein_copilot_core::spectrum::SpectrumRepresentation::Centroid,
     };
 
     let on_progress: protein_copilot_core::progress::ProgressCallback = Box::new(|_| {});

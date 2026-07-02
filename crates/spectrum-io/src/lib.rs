@@ -39,6 +39,7 @@ pub use indexed_mzml::IndexedMzMLReader;
 pub use indexed_pfb::IndexedPfbReader;
 pub use reader::ScanMetaInfo;
 pub use reader::SpectrumReader;
+pub use util::centroid_spectrum;
 
 use std::path::Path;
 

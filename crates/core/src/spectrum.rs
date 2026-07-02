@@ -167,6 +167,35 @@ pub struct PrecursorInfo {
 }
 
 // ---------------------------------------------------------------------------
+// SpectrumRepresentation
+// ---------------------------------------------------------------------------
+
+/// Spectral data representation (whether peaks are centroided or still in
+/// profile mode).  Corresponds to the mzML CV terms `MS:1000127 centroid
+/// spectrum` and `MS:1000128 profile spectrum`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema, Default)]
+pub enum SpectrumRepresentation {
+    /// Peaks have been reduced to discrete ions (centroided / peak-picked).
+    Centroid,
+    /// Raw profile-mode data (continuous data points).
+    Profile,
+    /// Representation is explicitly unknown (missing CV param, ambiguous
+    /// metadata, or the format simply does not carry this information).
+    #[default]
+    Unknown,
+}
+
+impl std::fmt::Display for SpectrumRepresentation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SpectrumRepresentation::Centroid => write!(f, "centroid"),
+            SpectrumRepresentation::Profile => write!(f, "profile"),
+            SpectrumRepresentation::Unknown => write!(f, "unknown"),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Spectrum
 // ---------------------------------------------------------------------------
 
@@ -192,10 +221,23 @@ pub struct Spectrum {
     pub mz_array: Vec<f64>,
     /// Array of intensity values (detector counts), same length as `mz_array`.
     pub intensity_array: Vec<f64>,
+    /// Whether this spectrum is centroided, in profile mode, or unknown.
+    ///
+    /// This field is set by the reader during parsing (from mzML CV terms when
+    /// available; MGF is always treated as centroided; PFB is always treated as
+    /// centroided).  When set to `Profile`, the reader automatically centroids
+    /// the data on-load so downstream consumers never receive profile data.
+    #[serde(default)]
+    pub representation: SpectrumRepresentation,
 }
 
 impl Spectrum {
     /// Creates a new `Spectrum` with validation.
+    ///
+    /// Representation defaults to [`SpectrumRepresentation::Centroid`]
+    /// (the common case for MGF, PFB, and already-centroided mzML data).
+    /// Use [`Spectrum::new_with_rep`] when the caller needs to set the
+    /// representation field explicitly.
     ///
     /// Returns `SpectrumError` if any invariant is violated.
     pub fn new(
@@ -206,6 +248,28 @@ impl Spectrum {
         mz_array: Vec<f64>,
         intensity_array: Vec<f64>,
     ) -> Result<Self, SpectrumError> {
+        Self::new_with_rep(
+            scan_number,
+            ms_level,
+            retention_time_min,
+            precursors,
+            mz_array,
+            intensity_array,
+            SpectrumRepresentation::Centroid,
+        )
+    }
+
+    /// Same as [`Spectrum::new`], but lets the caller set the
+    /// representation field explicitly.
+    pub fn new_with_rep(
+        scan_number: u32,
+        ms_level: MsLevel,
+        retention_time_min: f64,
+        precursors: Vec<PrecursorInfo>,
+        mz_array: Vec<f64>,
+        intensity_array: Vec<f64>,
+        representation: SpectrumRepresentation,
+    ) -> Result<Self, SpectrumError> {
         let spectrum = Self {
             scan_number,
             ms_level,
@@ -213,6 +277,7 @@ impl Spectrum {
             precursors,
             mz_array,
             intensity_array,
+            representation,
         };
         spectrum.validate()?;
         Ok(spectrum)
@@ -481,7 +546,7 @@ mod tests {
             120.5,
             vec![sample_precursor()],
             vec![100.0, 200.0, 300.0, 400.0],
-            vec![1000.0, 2000.0, 500.0, 750.0],
+            vec![1000.0, 2000.0, 500.0, 750.0]
         )
         .expect("test data should be valid")
     }
@@ -569,7 +634,7 @@ mod tests {
             60.0,
             vec![],
             vec![200.0, 400.0],
-            vec![1e5, 2e5],
+            vec![1e5, 2e5]
         )
         .unwrap();
         let json = serde_json::to_string(&spectrum).unwrap();
@@ -783,6 +848,7 @@ mod tests {
 
     #[test]
     fn validate_rejects_nan_retention_time() {
+
         let result = Spectrum::new(1, MsLevel::MS2, f64::NAN, vec![], vec![100.0], vec![1000.0]);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("retention_time"));
@@ -796,7 +862,7 @@ mod tests {
             10.0,
             vec![],
             vec![100.0, f64::INFINITY],
-            vec![1000.0, 2000.0],
+            vec![1000.0, 2000.0]
         );
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("mz_array"));
@@ -810,7 +876,7 @@ mod tests {
             10.0,
             vec![],
             vec![100.0, 200.0],
-            vec![1000.0, f64::NAN],
+            vec![1000.0, f64::NAN]
         );
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("intensity_array"));
@@ -830,7 +896,7 @@ mod tests {
                 source_scan: None,
             }],
             vec![100.0],
-            vec![1000.0],
+            vec![1000.0]
         );
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("precursors"));
@@ -850,7 +916,7 @@ mod tests {
                 source_scan: None,
             }],
             vec![100.0],
-            vec![1000.0],
+            vec![1000.0]
         );
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("precursors"));
@@ -866,7 +932,7 @@ mod tests {
             10.0,
             vec![],
             vec![300.0, 100.0, 200.0], // not sorted
-            vec![1000.0, 2000.0, 500.0],
+            vec![1000.0, 2000.0, 500.0]
         );
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("not sorted"));
@@ -881,7 +947,7 @@ mod tests {
             10.0,
             vec![],
             vec![100.0, 100.0, 200.0],
-            vec![1000.0, 2000.0, 500.0],
+            vec![1000.0, 2000.0, 500.0]
         );
         assert!(result.is_ok());
     }
@@ -918,7 +984,7 @@ mod tests {
                 source_scan: None,
             }],
             vec![100.0, 200.0, 300.0],
-            vec![500.0, 1000.0, 750.0],
+            vec![500.0, 1000.0, 750.0]
         )
         .unwrap();
         assert_eq!(spectrum.precursors.len(), 1);
@@ -962,7 +1028,7 @@ mod tests {
                 source_scan: None,
             }],
             vec![100.0],
-            vec![1000.0],
+            vec![1000.0]
         );
         assert!(result.is_err());
     }
@@ -985,7 +1051,7 @@ mod tests {
                 source_scan: None,
             }],
             vec![100.0],
-            vec![1000.0],
+            vec![1000.0]
         );
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("isolation_window"));
@@ -999,7 +1065,7 @@ mod tests {
             10.0,
             vec![],
             vec![0.0, 200.0],
-            vec![1000.0, 2000.0],
+            vec![1000.0, 2000.0]
         );
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("non-positive"));
@@ -1013,7 +1079,7 @@ mod tests {
             10.0,
             vec![],
             vec![-100.0, 200.0],
-            vec![1000.0, 2000.0],
+            vec![1000.0, 2000.0]
         );
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("non-positive"));
@@ -1027,7 +1093,7 @@ mod tests {
             10.0,
             vec![],
             vec![100.0, 200.0],
-            vec![1000.0, -500.0],
+            vec![1000.0, -500.0]
         );
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("negative"));
@@ -1042,7 +1108,7 @@ mod tests {
             10.0,
             vec![],
             vec![100.0, 200.0],
-            vec![0.0, 2000.0],
+            vec![0.0, 2000.0]
         );
         assert!(result.is_ok());
     }
@@ -1061,7 +1127,7 @@ mod tests {
                 source_scan: None,
             }],
             vec![100.0],
-            vec![1000.0],
+            vec![1000.0]
         );
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("non-positive"));
@@ -1081,7 +1147,7 @@ mod tests {
                 source_scan: None,
             }],
             vec![100.0],
-            vec![1000.0],
+            vec![1000.0]
         );
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("negative"));
@@ -1105,7 +1171,7 @@ mod tests {
                 source_scan: None,
             }],
             vec![100.0],
-            vec![1000.0],
+            vec![1000.0]
         );
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("non-positive"));
@@ -1135,7 +1201,7 @@ mod tests {
                 },
             ],
             vec![100.0, 200.0],
-            vec![1000.0, 2000.0],
+            vec![1000.0, 2000.0]
         );
         assert!(result.is_ok());
         assert_eq!(result.unwrap().precursors.len(), 2);

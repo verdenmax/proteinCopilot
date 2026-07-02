@@ -5,7 +5,8 @@
 
 use protein_copilot_core::label::LabelType;
 use protein_copilot_core::search_params::{MassTolerance, ToleranceUnit};
-use protein_copilot_core::spectrum::{IsolationWindow, MsLevel, PrecursorInfo, Spectrum};
+use protein_copilot_core::spectrum::{IsolationWindow, MsLevel, PrecursorInfo, Spectrum,
+    SpectrumRepresentation};
 
 /// Standard SILAC label: ¹³C₆¹⁵N₂-Lys (+8.014 Da), ¹³C₆¹⁵N₄-Arg (+10.008 Da)
 pub fn silac_label() -> LabelType {
@@ -75,6 +76,7 @@ pub fn make_ms2(
         }],
         mz_array,
         intensity_array,
+        representation: SpectrumRepresentation::Centroid,
     }
 }
 
@@ -92,6 +94,7 @@ pub fn make_ms1(scan_number: u32, rt_min: f64, peaks: Vec<(f64, f64)>) -> Spectr
         precursors: vec![],
         mz_array,
         intensity_array,
+        representation: SpectrumRepresentation::Centroid,
     }
 }
 
