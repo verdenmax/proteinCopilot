@@ -27,8 +27,8 @@ use std::io::BufRead;
 use std::path::Path;
 
 use protein_copilot_core::spectrum::{
-    IsolationWindow, MsLevel, PrecursorInfo, Spectrum, SpectrumFormat,
-    SpectrumRepresentation, SpectrumSummary,
+    IsolationWindow, MsLevel, PrecursorInfo, Spectrum, SpectrumFormat, SpectrumRepresentation,
+    SpectrumSummary,
 };
 use quick_xml::events::Event;
 use quick_xml::Reader;
@@ -138,11 +138,8 @@ impl SpectrumBuilder {
         // data.  Spectra already marked centroid or with unknown
         // representation are left as-is.
         if self.representation == SpectrumRepresentation::Profile {
-            let (cent_mz, cent_int) = crate::util::centroid_spectrum(
-                &mz_array,
-                &intensity_array,
-                1e-3,
-            );
+            let (cent_mz, cent_int) =
+                crate::util::centroid_spectrum(&mz_array, &intensity_array, 1e-3);
             if !cent_mz.is_empty() {
                 mz_array = cent_mz;
                 intensity_array = cent_int;

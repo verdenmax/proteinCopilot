@@ -74,7 +74,11 @@ pub fn centroid_spectrum(
         let denom = y0 - 2.0 * y1 + y2;
         let dx = if denom.abs() > 1e-12 {
             let d = 0.5 * (y0 - y2) / denom;
-            if d.abs() > 0.5 { 0.0 } else { d }
+            if d.abs() > 0.5 {
+                0.0
+            } else {
+                d
+            }
         } else {
             0.0
         };
@@ -389,8 +393,7 @@ mod tests {
         let intensity: Vec<f64> = mz
             .iter()
             .map(|&x| {
-                100.0 * (-(x - 3.0).powi(2) / 0.02).exp()
-                    + 80.0 * (-(x - 7.0).powi(2) / 0.02).exp()
+                100.0 * (-(x - 3.0).powi(2) / 0.02).exp() + 80.0 * (-(x - 7.0).powi(2) / 0.02).exp()
             })
             .collect();
         let (out_mz, _out_int) = centroid_spectrum(&mz, &intensity, 1e-3);

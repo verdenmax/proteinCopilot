@@ -546,7 +546,7 @@ mod tests {
             120.5,
             vec![sample_precursor()],
             vec![100.0, 200.0, 300.0, 400.0],
-            vec![1000.0, 2000.0, 500.0, 750.0]
+            vec![1000.0, 2000.0, 500.0, 750.0],
         )
         .expect("test data should be valid")
     }
@@ -634,7 +634,7 @@ mod tests {
             60.0,
             vec![],
             vec![200.0, 400.0],
-            vec![1e5, 2e5]
+            vec![1e5, 2e5],
         )
         .unwrap();
         let json = serde_json::to_string(&spectrum).unwrap();
@@ -848,7 +848,6 @@ mod tests {
 
     #[test]
     fn validate_rejects_nan_retention_time() {
-
         let result = Spectrum::new(1, MsLevel::MS2, f64::NAN, vec![], vec![100.0], vec![1000.0]);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("retention_time"));
@@ -862,7 +861,7 @@ mod tests {
             10.0,
             vec![],
             vec![100.0, f64::INFINITY],
-            vec![1000.0, 2000.0]
+            vec![1000.0, 2000.0],
         );
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("mz_array"));
@@ -876,7 +875,7 @@ mod tests {
             10.0,
             vec![],
             vec![100.0, 200.0],
-            vec![1000.0, f64::NAN]
+            vec![1000.0, f64::NAN],
         );
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("intensity_array"));
@@ -896,7 +895,7 @@ mod tests {
                 source_scan: None,
             }],
             vec![100.0],
-            vec![1000.0]
+            vec![1000.0],
         );
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("precursors"));
@@ -916,7 +915,7 @@ mod tests {
                 source_scan: None,
             }],
             vec![100.0],
-            vec![1000.0]
+            vec![1000.0],
         );
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("precursors"));
@@ -932,7 +931,7 @@ mod tests {
             10.0,
             vec![],
             vec![300.0, 100.0, 200.0], // not sorted
-            vec![1000.0, 2000.0, 500.0]
+            vec![1000.0, 2000.0, 500.0],
         );
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("not sorted"));
@@ -947,7 +946,7 @@ mod tests {
             10.0,
             vec![],
             vec![100.0, 100.0, 200.0],
-            vec![1000.0, 2000.0, 500.0]
+            vec![1000.0, 2000.0, 500.0],
         );
         assert!(result.is_ok());
     }
@@ -984,7 +983,7 @@ mod tests {
                 source_scan: None,
             }],
             vec![100.0, 200.0, 300.0],
-            vec![500.0, 1000.0, 750.0]
+            vec![500.0, 1000.0, 750.0],
         )
         .unwrap();
         assert_eq!(spectrum.precursors.len(), 1);
@@ -1028,7 +1027,7 @@ mod tests {
                 source_scan: None,
             }],
             vec![100.0],
-            vec![1000.0]
+            vec![1000.0],
         );
         assert!(result.is_err());
     }
@@ -1051,7 +1050,7 @@ mod tests {
                 source_scan: None,
             }],
             vec![100.0],
-            vec![1000.0]
+            vec![1000.0],
         );
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("isolation_window"));
@@ -1065,7 +1064,7 @@ mod tests {
             10.0,
             vec![],
             vec![0.0, 200.0],
-            vec![1000.0, 2000.0]
+            vec![1000.0, 2000.0],
         );
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("non-positive"));
@@ -1079,7 +1078,7 @@ mod tests {
             10.0,
             vec![],
             vec![-100.0, 200.0],
-            vec![1000.0, 2000.0]
+            vec![1000.0, 2000.0],
         );
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("non-positive"));
@@ -1093,7 +1092,7 @@ mod tests {
             10.0,
             vec![],
             vec![100.0, 200.0],
-            vec![1000.0, -500.0]
+            vec![1000.0, -500.0],
         );
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("negative"));
@@ -1108,7 +1107,7 @@ mod tests {
             10.0,
             vec![],
             vec![100.0, 200.0],
-            vec![0.0, 2000.0]
+            vec![0.0, 2000.0],
         );
         assert!(result.is_ok());
     }
@@ -1127,7 +1126,7 @@ mod tests {
                 source_scan: None,
             }],
             vec![100.0],
-            vec![1000.0]
+            vec![1000.0],
         );
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("non-positive"));
@@ -1147,7 +1146,7 @@ mod tests {
                 source_scan: None,
             }],
             vec![100.0],
-            vec![1000.0]
+            vec![1000.0],
         );
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("negative"));
@@ -1171,7 +1170,7 @@ mod tests {
                 source_scan: None,
             }],
             vec![100.0],
-            vec![1000.0]
+            vec![1000.0],
         );
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("non-positive"));
@@ -1201,7 +1200,7 @@ mod tests {
                 },
             ],
             vec![100.0, 200.0],
-            vec![1000.0, 2000.0]
+            vec![1000.0, 2000.0],
         );
         assert!(result.is_ok());
         assert_eq!(result.unwrap().precursors.len(), 2);

@@ -3,7 +3,7 @@
     "protein-copilot": {
       "command": "cargo",
       "args": ["run", "--release", "-p", "protein-copilot-mcp-server"],
-      "timeout": 300,
+      "timeout": 600000,
       "env": {
         "RUST_LOG": "info"
       }
