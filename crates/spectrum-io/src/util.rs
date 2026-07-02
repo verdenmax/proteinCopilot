@@ -67,9 +67,9 @@ pub fn centroid_spectrum(
     let mut out_intensity: Vec<f64> = Vec::with_capacity(len);
 
     for &idx in &peak_indices {
-        let y0 = intensity[idx - 1] as f64;
-        let y1 = intensity[idx] as f64;
-        let y2 = intensity[idx + 1] as f64;
+        let y0 = intensity[idx - 1];
+        let y1 = intensity[idx];
+        let y2 = intensity[idx + 1];
 
         let denom = y0 - 2.0 * y1 + y2;
         let dx = if denom.abs() > 1e-12 {

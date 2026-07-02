@@ -7,7 +7,7 @@
 use crate::extract::TargetIon;
 use crate::IonType;
 use protein_copilot_core::label::{residue_heavy_delta, total_heavy_delta, LabelType};
-use protein_copilot_core::spectrum::{IsolationWindow, Spectrum, SpectrumRepresentation};
+use protein_copilot_core::spectrum::{IsolationWindow, Spectrum};
 
 /// Compute heavy-label m/z for a precursor ion.
 ///
@@ -329,7 +329,7 @@ mod tests {
     }
 
     fn make_dda_spec(scan: u32, rt_min: f64, precursor_mz: f64) -> Spectrum {
-        use protein_copilot_core::spectrum::{MsLevel, PrecursorInfo};
+        use protein_copilot_core::spectrum::{MsLevel, PrecursorInfo, SpectrumRepresentation};
         Spectrum {
             scan_number: scan,
             ms_level: MsLevel::MS2,
@@ -352,7 +352,7 @@ mod tests {
     }
 
     fn make_ms2_spec(scan: u32, rt_min: f64, center_mz: f64, half_width: f64) -> Spectrum {
-        use protein_copilot_core::spectrum::{MsLevel, PrecursorInfo};
+        use protein_copilot_core::spectrum::{MsLevel, PrecursorInfo, SpectrumRepresentation};
         Spectrum {
             scan_number: scan,
             ms_level: MsLevel::MS2,
