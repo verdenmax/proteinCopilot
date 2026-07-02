@@ -1,0 +1,20 @@
+{
+  "name": "PLATFORM_PKG_NAME",
+  "version": "0.0.0",
+  "description": "Platform-specific binary for protein-copilot-mcp",
+  "license": "MIT",
+  "author": "verdenmax",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/verdenmax/proteinCopilot"
+  },
+  "os": ["PLATFORM_OS"],
+  "cpu": ["PLATFORM_CPU"],
+  "files": [
+    "protein-copilot-mcp",
+    "protein-copilot-mcp.exe"
+  ],
+  "publishConfig": {
+    "provenance": true
+  }
+}

@@ -37,24 +37,47 @@ AI 驱动的蛋白质组学质谱搜索与结果解释平台。
 
 ## 安装与使用
 
-ProteinCopilot 以**单个 MCP 二进制** `protein-copilot-mcp` 发布。用户在自己的 MCP 客户端
-（GitHub Copilot CLI / Claude Desktop 等）里登记该二进制即可使用，无需阅读源码。
+ProteinCopilot 以**单个 MCP 二进制** `protein-copilot-mcp` 发布。用户在自己的 MCP 客户端中登记该二进制即可使用，无需阅读源码。
 
-> 下文仓库地址 `verdenmax/proteinCopilot` 为占位，请替换为实际公开仓库。
+### 安装二进制
 
-**方式一：下载预编译二进制（推荐，免装 Rust）**
+**方式一：npm（推荐，无需安装 Rust/手动下载）**
 
-到 Releases 页下载对应平台的压缩包并解压：
+```bash
+# 直接运行（无需安装）
+npx protein-copilot-mcp --list-tools
+
+# 或全局安装
+npm install -g protein-copilot-mcp
+protein-copilot-mcp --list-tools
+```
+
+`npx` 会自动下载对应平台的预编译二进制并运行，支持 Linux (x64 glibc/musl)、macOS (Intel/Apple Silicon)、Windows (x64)。
+
+**方式二：下载预编译二进制**
+
+从 [GitHub Releases](https://github.com/verdenmax/proteinCopilot/releases) 下载对应平台的压缩包并解压：
 
 | 平台 | 资产 |
 |------|------|
-| Linux x86_64（静态） | `protein-copilot-mcp-x86_64-unknown-linux-musl.tar.gz` |
+| Linux x86_64（静态链接，推荐） | `protein-copilot-mcp-x86_64-unknown-linux-musl.tar.gz` |
 | Linux x86_64（glibc） | `protein-copilot-mcp-x86_64-unknown-linux-gnu.tar.gz` |
-| macOS (Intel) | `protein-copilot-mcp-x86_64-apple-darwin.tar.gz` |
-| macOS (Apple Silicon) | `protein-copilot-mcp-aarch64-apple-darwin.tar.gz` |
+| macOS Intel | `protein-copilot-mcp-x86_64-apple-darwin.tar.gz` |
+| macOS Apple Silicon | `protein-copilot-mcp-aarch64-apple-darwin.tar.gz` |
 | Windows x86_64 | `protein-copilot-mcp-x86_64-pc-windows-msvc.zip` |
 
-**方式二：用 Cargo 从源码安装**（需 Rust 1.85+）
+```bash
+# Linux/macOS 安装示例
+tar xzf protein-copilot-mcp-*.tar.gz
+sudo cp protein-copilot-mcp-*/protein-copilot-mcp /usr/local/bin/
+chmod +x /usr/local/bin/protein-copilot-mcp
+
+# Windows 安装示例（PowerShell）
+Expand-Archive protein-copilot-mcp-*.zip -DestinationPath .
+# 将 protein-copilot-mcp.exe 放到 PATH 中的目录，如 C:\Users\<你>\bin\
+```
+
+**方式三：用 Cargo 从源码安装**（需 Rust 1.85+）
 
 ```bash
 cargo install --git https://github.com/verdenmax/proteinCopilot.git \
@@ -62,32 +85,114 @@ cargo install --git https://github.com/verdenmax/proteinCopilot.git \
 # 安装后二进制名为 protein-copilot-mcp
 ```
 
-**方式三：Docker**
+**方式四：Docker**
 
 ```bash
 docker build -t protein-copilot-mcp .
 docker run -i --rm protein-copilot-mcp        # 通过 stdio 提供 MCP 服务
 ```
 
-**接入 MCP 客户端**：在客户端配置中登记该二进制（命令路径换成你的实际路径）：
+### 配置 MCP 客户端
+
+以下配置均使用 `npx protein-copilot-mcp`（无需手动安装二进制）。如果手动安装了二进制，将 `"command"` 改为 `"<path>/protein-copilot-mcp"` 并去掉 `"args"`。如果用 Docker，将 `"command"` 替换为 `"docker"`，`"args"` 设置为 `["run", "-i", "--rm", "protein-copilot-mcp"]`。
+
+#### Claude Code
+
+**项目级**（在项目根目录创建 `.mcp.json`，可提交到 git）：
 
 ```json
 {
   "mcpServers": {
     "protein-copilot": {
-      "command": "/path/to/protein-copilot-mcp",
-      "env": { "RUST_LOG": "info" }
+      "command": "npx",
+      "args": ["-y", "protein-copilot-mcp"],
+      "timeout": 300,
+      "env": {
+        "RUST_LOG": "info"
+      }
     }
   }
 }
 ```
 
-**查看工具契约**（无需客户端，直接在终端）：
+> 如果你手动安装了二进制（npm install -g / Cargo / 下载），将 `"command"` 改为 `"<path>/protein-copilot-mcp"` 并去掉 `"args"`。
+
+**用户级**（全局生效，写入 `~/.claude.json` 的 `"mcpServers"` 字段）：
+
+```json
+{
+  "mcpServers": {
+    "protein-copilot": {
+      "command": "<path>/protein-copilot-mcp",
+      "timeout": 300,
+      "env": {
+        "RUST_LOG": "info"
+      }
+    }
+  }
+}
+```
+
+#### Claude Desktop
+
+在 Claude Desktop 的配置文件（`~/Library/Application Support/Claude/claude_desktop_config.json`（macOS）或 `%APPDATA%\Claude\claude_desktop_config.json`（Windows））中添加：
+
+```json
+{
+  "mcpServers": {
+    "protein-copilot": {
+      "command": "npx",
+      "args": ["-y", "protein-copilot-mcp"],
+      "env": {
+        "RUST_LOG": "info"
+      }
+    }
+  }
+}
+```
+
+#### GitHub Copilot (VS Code)
+
+在项目根目录的 `.vscode/mcp.json` 中配置（支持工作区级共享）：
+
+```json
+{
+  "servers": {
+    "protein-copilot": {
+      "command": "npx",
+      "args": ["-y", "protein-copilot-mcp"],
+      "env": {
+        "RUST_LOG": "info"
+      }
+    }
+  }
+}
+```
+
+> **注意**：需要 VS Code 1.99+、Copilot Agent mode 开启，且 `chat.mcp.discovery.enabled` 设为 `true`。配置完成后在 Agent mode 下点击 tools 图标即可看到 `protein-copilot` 工具。
+
+#### OpenAI Codex CLI
+
+在 `~/.codex/config.toml` 中添加（需 Codex CLI ≥ 0.43）：
+
+```toml
+[mcp_servers.protein-copilot]
+command = "npx"
+args = ["-y", "protein-copilot-mcp"]
+env = { RUST_LOG = "info" }
+startup_timeout_ms = 300_000
+```
+
+### 验证安装
 
 ```bash
-protein-copilot-mcp --list-tools          # 文本目录：每个工具的参数/类型/范围/默认/输出
+# 在终端直接查看工具列表，确认二进制可用
+protein-copilot-mcp --list-tools          # 文本目录：每个工具的摘要
 protein-copilot-mcp --list-tools --json   # 完整 JSON Schema
 protein-copilot-mcp --help                # 用法
+
+# 测试 MCP 通信（启动 stdio server 后发送 initialize 请求）
+echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}' | protein-copilot-mcp
 ```
 
 完整接口契约见 [`docs/mcp-tools.md`](docs/mcp-tools.md)；分层文档见 [`docs/levels/`](docs/levels/README.md)。

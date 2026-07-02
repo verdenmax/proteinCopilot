@@ -1,0 +1,57 @@
+{
+  "name": "protein-copilot-mcp",
+  "version": "0.0.0",
+  "description": "ProteinCopilot — AI-driven proteomics mass spectrometry search MCP server",
+  "license": "MIT",
+  "author": "verdenmax",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/verdenmax/proteinCopilot"
+  },
+  "homepage": "https://github.com/verdenmax/proteinCopilot#readme",
+  "keywords": [
+    "proteomics",
+    "mass-spectrometry",
+    "mcp",
+    "mcp-server",
+    "protein",
+    "search-engine",
+    "spectra",
+    "dda",
+    "dia",
+    "xic",
+    "fdr",
+    "sage",
+    "model-context-protocol"
+  ],
+  "bin": {
+    "protein-copilot-mcp": "bin/protein-copilot-mcp.js"
+  },
+  "files": [
+    "bin/",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=14.21.3"
+  },
+  "os": [
+    "linux",
+    "darwin",
+    "win32"
+  ],
+  "cpu": [
+    "x64",
+    "arm64"
+  ],
+  "publishConfig": {
+    "provenance": true
+  },
+  "optionalDependencies": {
+    "protein-copilot-mcp-linux-x64-gnu": "0.0.0",
+    "protein-copilot-mcp-linux-x64-musl": "0.0.0",
+    "protein-copilot-mcp-darwin-x64": "0.0.0",
+    "protein-copilot-mcp-darwin-arm64": "0.0.0",
+    "protein-copilot-mcp-win32-x64": "0.0.0"
+  }
+}

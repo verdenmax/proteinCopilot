@@ -33,3 +33,6 @@ output/
 .worktrees/
 mcp_stderr.log
 .superpowers/
+
+# npm build output
+npm/dist/
