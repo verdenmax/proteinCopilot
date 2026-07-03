@@ -140,10 +140,15 @@ impl SpectrumBuilder {
         if self.representation == SpectrumRepresentation::Profile {
             let (cent_mz, cent_int) =
                 crate::util::centroid_spectrum(&mz_array, &intensity_array, 1e-3);
-            if !cent_mz.is_empty() {
-                mz_array = cent_mz;
-                intensity_array = cent_int;
+            if cent_mz.is_empty() {
+                return Err(SpectrumIoError::CentroidEmptyError {
+                    path: _path.to_path_buf(),
+                    scan,
+                    detail: format!("{} peaks → 0 after centroiding", mz_array.len()),
+                });
             }
+            mz_array = cent_mz;
+            intensity_array = cent_int;
         }
 
         let rep = if self.representation == SpectrumRepresentation::Profile {
