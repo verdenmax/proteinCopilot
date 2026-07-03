@@ -77,6 +77,18 @@ pub enum SpectrumIoError {
         detail: String,
     },
 
+    /// Spectrum was in profile mode but centroiding produced an empty result,
+    /// likely due to corrupt or severely noise-dominated data.
+    #[error("centroiding produced empty result (scan {scan}) in {path}: {detail}")]
+    CentroidEmptyError {
+        /// The file path.
+        path: PathBuf,
+        /// Scan number.
+        scan: u32,
+        /// Diagnostic detail.
+        detail: String,
+    },
+
     /// Requested scan number was not found in the file.
     #[error("scan {scan} not found in {path}")]
     ScanNotFound {
@@ -167,6 +179,21 @@ impl From<SpectrumIoError> for protein_copilot_core::error::CoreError {
                     suggestion: "Check spectrum data integrity".to_string(),
                 }
             }
+            SpectrumIoError::CentroidEmptyError {
+                path,
+                scan,
+                detail: _,
+            } => protein_copilot_core::error::CoreError::SpectrumParseError {
+                format: "mzML".to_string(),
+                detail: format!(
+                    "scan {scan}: centroiding produced empty result — \
+                         profile data may be corrupt or noise-dominated"
+                ),
+                suggestion: format!(
+                    "File: {}. Try disabling centroiding or check data quality.",
+                    path.display()
+                ),
+            },
             SpectrumIoError::ScanNotFound { path, scan } => {
                 protein_copilot_core::error::CoreError::SpectrumParseError {
                     format: path
