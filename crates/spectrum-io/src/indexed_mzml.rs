@@ -7,7 +7,7 @@ use std::io::{BufReader, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
 use protein_copilot_core::spectrum::{
-    IsolationWindow, MsLevel, PrecursorInfo, Spectrum, SpectrumSummary,
+    IsolationWindow, MsLevel, PrecursorInfo, Spectrum, SpectrumRepresentation, SpectrumSummary,
 };
 use quick_xml::events::Event;
 use quick_xml::Reader;
@@ -246,6 +246,7 @@ fn parse_single_spectrum<R: std::io::BufRead>(
     let mut scan_number: Option<u32> = None;
     let mut ms_level: Option<u8> = None;
     let mut rt_min: Option<f64> = None;
+    let mut representation = SpectrumRepresentation::Unknown;
 
     let mut precursors: Vec<PrecursorInfo> = Vec::new();
     let mut cur_precursor_mz: Option<f64> = None;
@@ -372,6 +373,12 @@ fn parse_single_spectrum<R: std::io::BufRead>(
                         "MS:1000576" if in_binary_data_array => {
                             array_meta.is_zlib = false;
                         }
+                        "MS:1000127" if in_spectrum => {
+                            representation = SpectrumRepresentation::Centroid;
+                        }
+                        "MS:1000128" if in_spectrum => {
+                            representation = SpectrumRepresentation::Profile;
+                        }
                         _ => {}
                     }
                 }
@@ -392,13 +399,30 @@ fn parse_single_spectrum<R: std::io::BufRead>(
 
                         crate::util::sort_peaks_by_mz(&mut mz_array, &mut intensity_array);
 
-                        return Spectrum::new(
+                        // On-load centroiding for profile-mode spectra
+                        if representation == SpectrumRepresentation::Profile {
+                            let (cent_mz, cent_int) =
+                                crate::util::centroid_spectrum(&mz_array, &intensity_array, 1e-3);
+                            if !cent_mz.is_empty() {
+                                mz_array = cent_mz;
+                                intensity_array = cent_int;
+                            }
+                        }
+
+                        let rep = if representation == SpectrumRepresentation::Profile {
+                            SpectrumRepresentation::Centroid
+                        } else {
+                            representation
+                        };
+
+                        return Spectrum::new_with_rep(
                             scan,
                             level,
                             rt_min.unwrap_or(0.0),
                             precursors,
                             mz_array,
                             intensity_array,
+                            rep,
                         )
                         .map_err(|e| SpectrumIoError::ValidationError {
                             scan,
