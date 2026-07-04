@@ -508,7 +508,8 @@ struct DiaExtractionOutput {
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct GetDiaCacheStatusInput {
-    /// The dia_run_id returned by extract_dia_precursors
+    /// The dia_run_id returned by extract_dia_precursors. Set to empty string to list all cached extractions.
+    #[serde(default)]
     dia_run_id: String,
 }
 
@@ -521,6 +522,22 @@ struct DiaCacheStatusOutput {
     /// Number of spectra (only available if in memory)
     spectrum_count: Option<usize>,
     /// When the extraction was performed
+    extracted_at: Option<String>,
+}
+
+/// Output for listing all cached DIA extraction runs.
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+#[allow(dead_code)]
+struct ListDiaCachesOutput {
+    total: usize,
+    cached: Vec<DiaCacheEntry>,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct DiaCacheEntry {
+    dia_run_id: String,
+    location: String,
+    spectrum_count: Option<usize>,
     extracted_at: Option<String>,
 }
 
@@ -745,7 +762,7 @@ struct PreparedDatabaseInfo {
 struct ImportSearchResultsInput {
     /// Path to external search result file (.json, .parquet, .spectra, .tsv).
     result_file: String,
-    /// Result file format. 'auto' detects from extension. Options: auto, custom_json, diann_parquet, pfind_spectra, pfind_tsv.
+    /// Result file format. 'auto' detects from extension. Options: auto, custom_json, diann_parquet, pfind_tsv.
     #[serde(default = "default_import_format")]
     format: String,
     /// Directory containing mzML files. File association: raw_name + '.mzML'.
@@ -903,7 +920,7 @@ struct FindSimilarTargetsOutput {
 #[derive(Debug, Serialize, schemars::JsonSchema)]
 struct AnnotateProvenanceOutput {
     /// Path to the generated HTML mirror plot.
-    output_file: String,
+    output_path: String,
     /// Trap peptide sequence.
     trap_sequence: String,
     /// Target peptide sequence (empty if L4).
@@ -1411,6 +1428,17 @@ impl OrderedDiaCache {
                 DiaCacheLocation::NotFound
             }
         }
+    }
+
+    /// List all cached DIA extraction run IDs with their status.
+    fn list_ids(&self) -> Vec<(Uuid, DiaCacheLocation)> {
+        self.order
+            .iter()
+            .map(|id| {
+                let location = self.status(id);
+                (*id, location)
+            })
+            .collect()
     }
 }
 
@@ -2023,7 +2051,7 @@ impl ProteinCopilotServer {
     /// Read a single spectrum by scan number.
     #[rmcp::tool(
         name = "get_spectrum",
-        description = "Read a single spectrum from a file by scan number (1-based). Returns the spectrum with m/z array, intensity array, precursor info, and MS level."
+        description = "Read a single spectrum from a file by scan number (1-based). Supports mzML, MGF, and PFB formats. Returns the spectrum with m/z array, intensity array, precursor info, and MS level."
     )]
     fn get_spectrum(
         &self,
@@ -2045,7 +2073,7 @@ impl ProteinCopilotServer {
     /// Recommend search parameters based on spectrum characteristics.
     #[rmcp::tool(
         name = "recommend_params",
-        description = "Recommend search parameters based on spectrum file characteristics. Input: SpectrumSummary from read_spectra + optional UserHints (experiment_type, instrument_type, enzyme). Output: recommended SearchParams with confidence score and explanation. Note: set database_path in params to the FASTA file path."
+        description = "Recommend search parameters based on spectrum file characteristics. Input: SpectrumSummary from read_spectra + optional UserHints (experiment_type, instrument_type, enzyme). Output: recommended SearchParams with confidence score and explanation. Note: set database_path in params to the FASTA file path. For a one-shot convenience tool that combines reading, recommending, and database resolution, use prepare_search."
     )]
     fn recommend_params(
         &self,
@@ -2660,7 +2688,7 @@ impl ProteinCopilotServer {
     /// Check the status of a running search.
     #[rmcp::tool(
         name = "get_search_status",
-        description = "Check the status of a search started by run_search. Returns progress percentage and elapsed time. When status is Completed, use generate_summary(run_id) to get results."
+        description = "Check the status of a search started by run_search. Returns progress percentage and elapsed time. When status is Completed, use generate_summary(run_id) to get results. If the search failed or has warnings, call diagnose_search(run_id) for a diagnostic report."
     )]
     fn get_search_status(
         &self,
@@ -2681,7 +2709,7 @@ impl ProteinCopilotServer {
     /// Cancel a running search.
     #[rmcp::tool(
         name = "cancel_search",
-        description = "Cancel a running search. The search task is immediately terminated and status is set to Cancelled."
+        description = "Cancel a running search started by run_search. The search task is immediately terminated and status is set to Cancelled. Partial results may still be available via generate_summary."
     )]
     fn cancel_search(
         &self,
@@ -2766,7 +2794,7 @@ impl ProteinCopilotServer {
     /// Generate a statistical summary with FDR filtering.
     #[rmcp::tool(
         name = "generate_summary",
-        description = "Generate a statistical summary from search results with 1% FDR filtering. Includes identification rate, median score, median delta ppm, modification and charge distributions. Use this after run_search to interpret results."
+        description = "Generate a statistical summary from search results with 1% FDR filtering (provide either result or run_id, not both). Includes identification rate, median score, median delta ppm, modification and charge distributions. Use this after run_search to interpret results. To export raw data as TSV/JSON files, use export_results."
     )]
     fn generate_summary(
         &self,
@@ -2790,7 +2818,7 @@ impl ProteinCopilotServer {
     /// Export search results as TSV and JSON files.
     #[rmcp::tool(
         name = "export_results",
-        description = "Export search results to files. Creates psm.tsv, peptide.tsv, protein.tsv, result.json, and run_metadata.json in the specified output directory."
+        description = "Export search results from run_search to files (provide run_id). Creates psm.tsv, peptide.tsv, protein.tsv, result.json, and run_metadata.json in the specified output directory. For a statistical overview, call generate_summary first."
     )]
     fn export_results(
         &self,
@@ -2905,7 +2933,7 @@ impl ProteinCopilotServer {
     /// Annotate a single spectrum with peptide fragment ion matching.
     #[rmcp::tool(
         name = "annotate_spectrum",
-        description = "Annotate a single spectrum with peptide fragment ion matching. Generates an interactive HTML file showing matched b/y ions. Two modes: (1) provide run_id + scan_number to annotate an existing PSM, or (2) provide file_path + scan_number + peptide_sequence + charge for manual annotation. In mode 2, set scan_number=0 with retention_time_min to auto-find the nearest scan. Supports mzML, MGF, and PFB formats. mzML and PFB enable XIC extraction (configure via n_cycles, top_n_ions, extraction_tolerance) and SILAC heavy/light comparison (set label_type). MGF provides basic fragment annotation only."
+        description = "Annotate a single spectrum with peptide fragment ion matching. Generates an interactive HTML file showing matched b/y ions. Two modes (choose one): Mode 1 (from search) — provide run_id + scan_number to annotate an existing PSM. Mode 2 (manual) — provide file_path + scan_number + peptide_sequence + charge. In mode 2 only: set scan_number=0 with retention_time_min to auto-find the nearest scan. Supports mzML, MGF, and PFB formats. mzML and PFB enable XIC extraction (set n_cycles, top_n_ions, extraction_tolerance) and SILAC heavy/light comparison (set label_type). MGF provides basic fragment annotation only. For batch annotation, use batch_annotate_spectra."
     )]
     fn annotate_spectrum(
         &self,
@@ -3377,7 +3405,7 @@ impl ProteinCopilotServer {
     /// Failed items are recorded in the result with error messages; the batch continues.
     #[rmcp::tool(
         name = "batch_annotate_spectra",
-        description = "Annotate multiple spectra with peptide fragment ion matching. Two input modes: (1) provide `items` as a JSON array of {scan_number, peptide_sequence, charge, modifications?}, or (2) provide `annotations_file` pointing to a TSV file with columns: scan_number, peptide_sequence, charge, modifications (optional). Supports mzML, MGF, PFB formats. Set label_type for SILAC, n_cycles for DIA XIC extraction. Output: one HTML per scan in output_dir."
+        description = "Annotate multiple spectra with peptide fragment ion matching — batch version of annotate_spectrum. Two input modes: (1) provide `items` as a JSON array of {scan_number, peptide_sequence, charge, modifications?}, or (2) provide `annotations_file` pointing to a TSV file with columns: scan_number, peptide_sequence, charge, modifications (optional). Supports mzML, MGF, PFB formats. Set label_type for SILAC, n_cycles for DIA XIC extraction. Output: one HTML per scan in output_dir."
     )]
     fn batch_annotate_spectra(
         &self,
@@ -3598,7 +3626,7 @@ impl ProteinCopilotServer {
     /// Extract candidate precursor ions from DIA mass spectrometry data.
     #[rmcp::tool(
         name = "extract_dia_precursors",
-        description = "Extract candidate precursor ions from DIA mass spectrometry data. Reads spectrum file (mzML recommended; requires MS1+MS2 and isolation window metadata), detects DIA mode from isolation window widths, extracts precursor candidates from MS1 isotope patterns, and caches enhanced spectra for use with run_search. Returns extraction statistics."
+        description = "Extract candidate precursor ions from DIA mass spectrometry data. Reads spectrum file (mzML recommended; requires MS1+MS2 and isolation window metadata), detects DIA mode from isolation window widths, extracts precursor candidates from MS1 isotope patterns, and caches enhanced spectra for use with run_search. Returns a dia_run_id. Check cache status with get_dia_cache_status. For single-spectrum precursor extraction, use extract_spectrum_precursors."
     )]
     fn extract_dia_precursors(
         &self,
@@ -3642,11 +3670,26 @@ impl ProteinCopilotServer {
         }
 
         // Configure extraction
-        let acq_mode = input.acquisition_mode.as_deref().and_then(|m| match m {
-            "DDA" | "dda" => Some(AcquisitionMode::DDA),
-            "DIA" | "dia" => Some(AcquisitionMode::DIA),
-            _ => None,
-        });
+        let acq_mode = match input.acquisition_mode.as_deref() {
+            Some(m) => {
+                let upper = m.to_uppercase();
+                match upper.as_str() {
+                    "DDA" => Some(AcquisitionMode::DDA),
+                    "DIA" => Some(AcquisitionMode::DIA),
+                    _ => {
+                        return Err(mcp_err(
+                            ErrorCode::INVALID_PARAMS,
+                            format!(
+                                "invalid acquisition_mode '{}': expected 'DDA' or 'DIA' (case-insensitive). \
+                                 Omit the field or set to 'auto' for automatic detection.",
+                                m
+                            ),
+                        ));
+                    }
+                }
+            }
+            None => None,
+        };
         let config = DiaExtractionConfig {
             acquisition_mode: acq_mode,
             ..DiaExtractionConfig::default()
@@ -3657,10 +3700,18 @@ impl ProteinCopilotServer {
         let detected_mode = result.detected_mode;
         let stats = result.stats.clone();
 
-        let output_spectra = if input.output_mode == "multi" {
-            result.into_enhanced_spectra()
-        } else {
-            result.into_pseudo_spectra()
+        let output_spectra = match input.output_mode.as_str() {
+            "multi" => result.into_enhanced_spectra(),
+            "pseudo" => result.into_pseudo_spectra(),
+            other => {
+                return Err(mcp_err(
+                    ErrorCode::INVALID_PARAMS,
+                    format!(
+                        "invalid output_mode '{}': expected 'multi' or 'pseudo'",
+                        other
+                    ),
+                ));
+            }
         };
 
         let output_count = output_spectra.len() as u32;
@@ -3693,7 +3744,7 @@ impl ProteinCopilotServer {
     /// Extract precursor candidates for a single MS2 spectrum from an mzML file.
     #[rmcp::tool(
         name = "extract_spectrum_precursors",
-        description = "Extract candidate precursor ions from a single MS2 spectrum. Reads the spectrum file (mzML recommended; requires MS1+MS2 scans), finds the target MS2 by scan number, correlates it to the nearest MS1, and runs isotope pattern analysis within the isolation window. Returns extracted precursor candidates with charge states and the correlation method used."
+        description = "Extract candidate precursor ions from a single MS2 spectrum — single-spectrum version of extract_dia_precursors. Reads the spectrum file (mzML recommended; requires MS1+MS2 scans), finds the target MS2 by scan number, correlates it to the nearest MS1, and runs isotope pattern analysis within the isolation window. Returns extracted precursor candidates with charge states and the correlation method used."
     )]
     fn extract_spectrum_precursors(
         &self,
@@ -3771,7 +3822,7 @@ impl ProteinCopilotServer {
     /// Check if a DIA extraction result is still cached.
     #[rmcp::tool(
         name = "get_dia_cache_status",
-        description = "Check if a DIA extraction result is still cached and available for use with run_search. Returns cache location (memory/disk/not_found) and spectrum count. Call this before run_search(dia_run_id=...) to verify the extraction hasn't been evicted."
+        description = "Check if a DIA extraction result is still cached for use with run_search. Set dia_run_id='' (empty string) to list all cached DIA extractions. Call this before run_search(dia_run_id=...) to verify the extraction hasn't been evicted."
     )]
     fn get_dia_cache_status(
         &self,
@@ -3779,6 +3830,47 @@ impl ProteinCopilotServer {
     ) -> Result<Json<DiaCacheStatusOutput>, ErrorData> {
         let _span = tracing::info_span!("mcp_tool", name = "get_dia_cache_status").entered();
         tracing::info!(dia_run_id = %input.dia_run_id, "started");
+
+        // If dia_run_id is empty, list all cached extractions
+        if input.dia_run_id.trim().is_empty() {
+            let cache = self.dia_cache.lock().unwrap_or_else(|e| e.into_inner());
+            let entries: Vec<DiaCacheEntry> = cache
+                .list_ids()
+                .into_iter()
+                .map(|(id, loc)| {
+                    let (location, spectrum_count, extracted_at) = match loc {
+                        DiaCacheLocation::Memory {
+                            spectrum_count: sc,
+                            extracted_at: ts,
+                        } => ("memory".to_string(), Some(sc), ts),
+                        DiaCacheLocation::Disk { extracted_at: ts } => {
+                            ("disk".to_string(), None, ts)
+                        }
+                        DiaCacheLocation::NotFound => {
+                            ("not_found".to_string(), None, None)
+                        }
+                    };
+                    DiaCacheEntry {
+                        dia_run_id: id.to_string(),
+                        location,
+                        spectrum_count,
+                        extracted_at: extracted_at.map(|t| t.to_rfc3339()),
+                    }
+                })
+                .collect();
+            let _total = entries.len();
+            return Ok(Json(DiaCacheStatusOutput {
+                exists: !entries.is_empty(),
+                location: if entries.is_empty() {
+                    "no_entries".to_string()
+                } else {
+                    "list".to_string()
+                },
+                spectrum_count: entries.iter().filter_map(|e| e.spectrum_count).next(),
+                extracted_at: None,
+            }));
+        }
+
         let dia_uuid = Uuid::parse_str(&input.dia_run_id)
             .map_err(|_| mcp_err(ErrorCode::INVALID_PARAMS, "invalid dia_run_id format"))?;
 
@@ -3815,7 +3907,7 @@ impl ProteinCopilotServer {
     /// Extract XIC (Extracted Ion Chromatogram) for a peptide from an mzML file.
     #[rmcp::tool(
         name = "extract_xic",
-        description = "Extract XIC (Extracted Ion Chromatogram) for a peptide from a spectrum file (mzML recommended; requires MS1+MS2 and retention time data). Generates an interactive HTML file with Plotly.js showing MS1 precursor and MS2 fragment ion chromatograms. Supports SILAC heavy-label comparison. Two modes: (1) provide run_id + scan_number to use PSM context, or (2) provide file_path + scan_number + peptide_sequence + charge + precursor_mz. In mode 2, set scan_number=0 with retention_time_min to auto-find scan. Set view='3d' for a 3D MS2 overview (RT x m/z x intensity sticks) plus per-scan b/y annotated spectra with total peak counts (output: xic3d_scan{N}.html)."
+        description = "Extract XIC (Extracted Ion Chromatogram) for a peptide from a spectrum file (mzML recommended; requires MS1+MS2 and retention time data). Generates an interactive HTML file with Plotly.js showing MS1 precursor and MS2 fragment ion chromatograms. Supports SILAC heavy-label comparison. Two modes (choose one): Mode 1 (from search) — provide run_id + scan_number to use PSM context. Mode 2 (manual REQUIRES: file_path + scan_number + peptide_sequence + charge + precursor_mz). In mode 2 only: set scan_number=0 with retention_time_min to auto-find scan. Set view='3d' for a 3D MS2 overview (output: xic3d_scan{N}.html). For fragment ion annotation (not chromatograms), see annotate_spectrum."
     )]
     fn extract_xic(
         &self,
@@ -4127,7 +4219,7 @@ impl ProteinCopilotServer {
                 return Err(mcp_err(
                     ErrorCode::INVALID_PARAMS,
                     format!(
-                        "unknown format: '{other}'. Supported: auto, custom_json, diann_parquet, pfind_spectra, pfind_tsv"
+                        "unknown format: '{other}'. Supported: auto, custom_json, diann_parquet, pfind_tsv"
                     ),
                 ));
             }
@@ -4337,7 +4429,7 @@ impl ProteinCopilotServer {
     /// Run protein inference on search results.
     #[rmcp::tool(
         name = "infer_proteins",
-        description = "Run protein inference on search results. Performs parsimony analysis, razor peptide assignment, protein-level FDR, and optional sequence coverage. Input: run_id from a previous search or direct SearchResult. Returns protein groups with scores, q-values, and peptide assignments."
+        description = "Run protein inference on search results from run_search (provide run_id). Performs parsimony analysis, razor peptide assignment, protein-level FDR, and optional sequence coverage. Input: run_id from a previous search or direct SearchResult. Returns protein groups with scores, q-values, and peptide assignments."
     )]
     fn infer_proteins(
         &self,
@@ -4636,7 +4728,7 @@ impl ProteinCopilotServer {
     /// Get diagnostic report for a search run.
     #[rmcp::tool(
         name = "diagnose_search",
-        description = "Get diagnostic report for a search run. Works for both failed searches (error analysis) and completed searches (quality assessment). Returns stage metrics, detected anomalies, and repair suggestions. Call after get_search_status shows the search has finished (status is Completed, Failed, or Cancelled). Use has_diagnostics=true from get_search_status to confirm diagnostics are available."
+        description = "Get diagnostic report for a search started by run_search. Works for both failed searches (error analysis) and completed searches (quality assessment). Returns stage metrics, detected anomalies, and repair suggestions. Call after get_search_status shows the search has finished (status is Completed, Failed, or Cancelled). Use has_diagnostics=true from get_search_status to confirm diagnostics are available."
     )]
     fn diagnose_search(
         &self,
@@ -4694,7 +4786,7 @@ impl ProteinCopilotServer {
 
     #[rmcp::tool(
         name = "classify_entrapment_hits",
-        description = "Classify trap-database PSM hits by homology to target proteome. Reads search results, applies target/trap rules from YAML config, digests target FASTA, and classifies each trap PSM as L0-L4. Optionally traces fragment ion provenance when mzml_dir is provided. Outputs classified.tsv, razor_errors.tsv, run_metadata.json, and entrapment_report.html. Returns summary statistics."
+        description = "Classify trap-database PSM hits by homology to target proteome. Reads search results, applies target/trap rules from YAML config, digests target FASTA, and classifies each trap PSM as L0-L4. Optionally traces fragment ion provenance when mzml_dir is provided. Outputs classified.tsv, razor_errors.tsv, run_metadata.json, and entrapment_report.html. Follow up with analyze_entrapment_stats for detailed statistics, find_similar_targets to investigate specific PSMs, or annotate_provenance for fragment ion mirror plots."
     )]
     fn classify_entrapment_hits(
         &self,
@@ -4942,7 +5034,7 @@ impl ProteinCopilotServer {
 
     #[rmcp::tool(
         name = "find_similar_targets",
-        description = "Find similar target peptides for a given sequence. Digests the target FASTA, compares the query peptide against target peptides using edit distance (Hamming for same-length, Levenshtein for cross-length). Returns closest matches with mass differences and substitution type annotations. Useful for investigating individual trap PSMs."
+        description = "Find similar target peptides for a given sequence — use after classify_entrapment_hits to investigate individual trap PSMs. Digests the target FASTA, compares the query peptide against target peptides using edit distance (Hamming for same-length, Levenshtein for cross-length). Returns closest matches with mass differences and substitution type annotations."
     )]
     fn find_similar_targets(
         &self,
@@ -5015,7 +5107,7 @@ impl ProteinCopilotServer {
 
     #[rmcp::tool(
         name = "annotate_provenance",
-        description = "Annotate a single spectrum with fragment ion provenance analysis. Generates a mirror plot HTML file showing which peaks come from the trap peptide, target peptide, both (shared), or neither (unassigned)."
+        description = "Annotate a single spectrum with fragment ion provenance analysis — part of the entrapment workflow (use after classify_entrapment_hits). Generates a mirror plot HTML file showing which peaks come from the trap peptide, target peptide, both (shared), or neither (unassigned). Supports mzML, MGF, and PFB formats."
     )]
     fn annotate_provenance(
         &self,
@@ -5104,7 +5196,7 @@ impl ProteinCopilotServer {
 
         tracing::info!("completed");
         Ok(Json(AnnotateProvenanceOutput {
-            output_file: output_path.display().to_string(),
+            output_path: output_path.display().to_string(),
             trap_sequence: provenance.trap_sequence,
             target_sequence: provenance.target_sequence,
             trap_matched_count: provenance.trap_matched_count,
