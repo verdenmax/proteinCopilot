@@ -1257,19 +1257,28 @@ fn parse_annotations_file(path: &str) -> Result<Vec<BatchAnnotateItem>, ErrorDat
                 if parts.len() != 2 {
                     return Err(mcp_err(
                         ErrorCode::INVALID_PARAMS,
-                        format!("line {row_num}: invalid modification '{}' (expected pos:delta)", pair),
+                        format!(
+                            "line {row_num}: invalid modification '{}' (expected pos:delta)",
+                            pair
+                        ),
                     ));
                 }
                 let pos: usize = parts[0].trim().parse().map_err(|e| {
                     mcp_err(
                         ErrorCode::INVALID_PARAMS,
-                        format!("line {row_num}: invalid modification position '{}': {e}", parts[0]),
+                        format!(
+                            "line {row_num}: invalid modification position '{}': {e}",
+                            parts[0]
+                        ),
                     )
                 })?;
                 let delta: f64 = parts[1].trim().parse().map_err(|e| {
                     mcp_err(
                         ErrorCode::INVALID_PARAMS,
-                        format!("line {row_num}: invalid modification delta '{}': {e}", parts[1]),
+                        format!(
+                            "line {row_num}: invalid modification delta '{}': {e}",
+                            parts[1]
+                        ),
                     )
                 })?;
                 mods.push((pos, delta));
@@ -1715,8 +1724,7 @@ impl ProteinCopilotServer {
 
         // ── SILAC: find and annotate heavy scan ──
         if let Some(label) = label_type {
-            let heavy_delta =
-                protein_copilot_core::label::total_heavy_delta(peptide_seq, label);
+            let heavy_delta = protein_copilot_core::label::total_heavy_delta(peptide_seq, label);
 
             if heavy_delta.abs() > 1e-6 {
                 let is_dia = spectrum
@@ -1735,11 +1743,21 @@ impl ProteinCopilotServer {
 
                 let heavy_scan_result = if is_dia {
                     reader
-                        .find_by_rt(spectrum_file, spectrum.retention_time_min, heavy_prec_mz, 0.5)
+                        .find_by_rt(
+                            spectrum_file,
+                            spectrum.retention_time_min,
+                            heavy_prec_mz,
+                            0.5,
+                        )
                         .unwrap_or(None)
                 } else {
                     let candidates = reader
-                        .find_by_rt(spectrum_file, spectrum.retention_time_min, heavy_prec_mz, 0.5)
+                        .find_by_rt(
+                            spectrum_file,
+                            spectrum.retention_time_min,
+                            heavy_prec_mz,
+                            0.5,
+                        )
                         .unwrap_or(None);
                     if let Some((scan, _delta)) = candidates {
                         match reader.read_spectrum(spectrum_file, scan) {
@@ -1761,8 +1779,7 @@ impl ProteinCopilotServer {
                 };
 
                 if let Some((heavy_scan_num, _)) = heavy_scan_result {
-                    if let Ok(heavy_spectrum) =
-                        reader.read_spectrum(spectrum_file, heavy_scan_num)
+                    if let Ok(heavy_spectrum) = reader.read_spectrum(spectrum_file, heavy_scan_num)
                     {
                         match protein_copilot_search_engine::annotate::annotate_heavy_spectrum(
                             &heavy_spectrum,
@@ -1855,9 +1872,9 @@ impl ProteinCopilotServer {
                             20.0,
                         ) {
                             annotation.precursor_mz = observed;
-                            annotation.delta_mass_ppm =
-                                (observed - annotation.theoretical_mz) / annotation.theoretical_mz
-                                    * 1e6;
+                            annotation.delta_mass_ppm = (observed - annotation.theoretical_mz)
+                                / annotation.theoretical_mz
+                                * 1e6;
                         }
 
                         if let Some(ref mut ha) = annotation.heavy_annotation {
@@ -3461,8 +3478,10 @@ impl ProteinCopilotServer {
         let plotly_mode = input
             .plotly_mode
             .unwrap_or(protein_copilot_xic::PlotlyMode::Cdn);
-        let core_label: Option<&protein_copilot_core::label::LabelType> =
-            input.label_type.as_ref().map(|l| l as &protein_copilot_core::label::LabelType);
+        let core_label: Option<&protein_copilot_core::label::LabelType> = input
+            .label_type
+            .as_ref()
+            .map(|l| l as &protein_copilot_core::label::LabelType);
 
         let output_dir = input
             .output_dir
@@ -3493,10 +3512,7 @@ impl ProteinCopilotServer {
                     total_ions: None,
                     score: None,
                     delta_mass_ppm: None,
-                    protein_accessions: item
-                        .protein_accessions
-                        .clone()
-                        .unwrap_or_default(),
+                    protein_accessions: item.protein_accessions.clone().unwrap_or_default(),
                     error: Some("peptide_sequence is empty".to_string()),
                 });
                 failed += 1;
@@ -3512,10 +3528,7 @@ impl ProteinCopilotServer {
                     total_ions: None,
                     score: None,
                     delta_mass_ppm: None,
-                    protein_accessions: item
-                        .protein_accessions
-                        .clone()
-                        .unwrap_or_default(),
+                    protein_accessions: item.protein_accessions.clone().unwrap_or_default(),
                     error: Some(format!("charge must be > 0, got {}", item.charge)),
                 });
                 failed += 1;
@@ -3531,10 +3544,7 @@ impl ProteinCopilotServer {
                     total_ions: None,
                     score: None,
                     delta_mass_ppm: None,
-                    protein_accessions: item
-                        .protein_accessions
-                        .clone()
-                        .unwrap_or_default(),
+                    protein_accessions: item.protein_accessions.clone().unwrap_or_default(),
                     error: Some("scan_number must be >= 1".to_string()),
                 });
                 failed += 1;
@@ -3553,13 +3563,9 @@ impl ProteinCopilotServer {
                     position: protein_copilot_core::search_params::ModPosition::Anywhere,
                 })
                 .collect();
-            let protein_accs = item
-                .protein_accessions
-                .clone()
-                .unwrap_or_default();
+            let protein_accs = item.protein_accessions.clone().unwrap_or_default();
 
-            let out_path =
-                output_dir.join(format!("annotation_scan{}.html", item.scan_number));
+            let out_path = output_dir.join(format!("annotation_scan{}.html", item.scan_number));
 
             let scan = item.scan_number;
             let pep = item.peptide_sequence.clone();
@@ -3846,9 +3852,7 @@ impl ProteinCopilotServer {
                         DiaCacheLocation::Disk { extracted_at: ts } => {
                             ("disk".to_string(), None, ts)
                         }
-                        DiaCacheLocation::NotFound => {
-                            ("not_found".to_string(), None, None)
-                        }
+                        DiaCacheLocation::NotFound => ("not_found".to_string(), None, None),
                     };
                     DiaCacheEntry {
                         dia_run_id: id.to_string(),
