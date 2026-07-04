@@ -316,7 +316,7 @@ mod tests {
     #[test]
     fn server_exposes_all_tools() {
         let t = tools();
-        assert_eq!(t.len(), 27, "expected 27 MCP tools");
+        assert_eq!(t.len(), 28, "expected 28 MCP tools");
         assert!(t.iter().any(|x| x.name == "read_spectra"));
     }
 

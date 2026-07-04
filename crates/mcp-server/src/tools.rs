@@ -52,13 +52,13 @@ use protein_copilot_result_import::{
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct ReadSpectraInput {
-    /// Path to the spectrum file (.mgf or .mzML)
+    /// Path to the spectrum file (supports mzML, MGF, and PFB formats)
     file_path: String,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct GetSpectrumInput {
-    /// Path to the spectrum file (.mgf or .mzML)
+    /// Path to the spectrum file (supports mzML, MGF, and PFB formats)
     file_path: String,
     /// Scan number to retrieve (1-based)
     scan_number: u32,
@@ -328,10 +328,10 @@ struct AnnotateSpectrumInput {
     /// Run ID — use to annotate an existing PSM from a search result.
     #[serde(default)]
     run_id: Option<String>,
-    /// Spectrum file path — use for manual annotation mode.
+    /// Spectrum file path — use for manual annotation mode (supports mzML, MGF, and PFB).
     #[serde(default)]
     file_path: Option<String>,
-    /// Scan number (1-based) to annotate.
+    /// Scan number (1-based) to annotate. Set to 0 with retention_time_min to auto-find the nearest scan by retention time.
     scan_number: u32,
     /// Peptide sequence — required for manual mode.
     #[serde(default)]
@@ -339,7 +339,7 @@ struct AnnotateSpectrumInput {
     /// Charge state — required for manual mode.
     #[serde(default)]
     charge: Option<i32>,
-    /// Retention time in minutes — alternative to scan_number for auto scan lookup.
+    /// Retention time in minutes — used when scan_number=0 to auto-find the nearest MS2 scan at this RT.
     #[serde(default)]
     retention_time_min: Option<f64>,
     /// Protein accession(s) — optional for manual mode (e.g. ["sp|P00001|TEST_HUMAN"]).
@@ -348,22 +348,22 @@ struct AnnotateSpectrumInput {
     /// Output HTML file path. Default: ./annotation_scan{N}.html
     #[serde(default)]
     output_path: Option<String>,
-    /// Fragment mass tolerance. Default: 20 ppm.
+    /// Fragment mass tolerance as {"value": N, "unit": "Ppm"} or {"value": N, "unit": "Da"}. Default: {"value": 20.0, "unit": "Ppm"}.
     #[serde(default, deserialize_with = "deserialize_tolerance")]
     fragment_tolerance: Option<protein_copilot_core::search_params::MassTolerance>,
-    /// Number of DIA cycles before/after target for XIC (default: 5).
+    /// Number of DIA cycles before/after target for XIC extraction (default: 5). XIC requires MS1+MS2 scans and retention time data (supported by mzML and PFB with isolation windows; MGF falls back to basic annotation).
     #[serde(default)]
     n_cycles: Option<u32>,
-    /// Number of top fragment ions for XIC (default: all, zero-intensity traces excluded).
+    /// Limit XIC traces to the top N most intense fragment ions (default: all ions; zero-intensity traces are always excluded).
     #[serde(default)]
     top_n_ions: Option<usize>,
-    /// Heavy-label type for SILAC comparison.
+    /// Heavy-label type for SILAC comparison. Standard SILAC: {"Silac": {"heavy_k_delta": 8.014199, "heavy_r_delta": 10.008269}}. Custom labeling: {"Custom": {"residue_deltas": [["K", 8.014199]]}}. Enables dual light/heavy annotation and XIC comparison. Requires XIC-compatible format (mzML or PFB).
     #[serde(default, deserialize_with = "deserialize_label_type")]
     label_type: Option<protein_copilot_xic::LabelType>,
-    /// m/z extraction tolerance for XIC (default: 20 ppm).
+    /// m/z extraction tolerance for XIC as {"value": N, "unit": "Ppm"} or {"value": N, "unit": "Da"}. Default: {"value": 20.0, "unit": "Ppm"}.
     #[serde(default, deserialize_with = "deserialize_tolerance")]
     extraction_tolerance: Option<protein_copilot_core::search_params::MassTolerance>,
-    /// Plotly loading mode (default: Cdn).
+    /// Plotly.js loading mode for generated HTML: "Cdn" (default, smaller file, requires internet) or "Embedded" (larger file, works offline).
     #[serde(default)]
     plotly_mode: Option<protein_copilot_xic::PlotlyMode>,
 }
@@ -382,9 +382,89 @@ struct AnnotateResult {
     message: String,
 }
 
+/// Single annotation item for batch annotation via `batch_annotate_spectra`.
+#[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
+struct BatchAnnotateItem {
+    /// Scan number (1-based) to annotate.
+    scan_number: u32,
+    /// Peptide sequence (stripped, no modifications).
+    peptide_sequence: String,
+    /// Charge state (must be > 0).
+    charge: i32,
+    /// Optional modifications as (position, delta_mass) pairs.
+    #[serde(default)]
+    modifications: Option<Vec<(usize, f64)>>,
+    /// Optional protein accession(s).
+    #[serde(default)]
+    protein_accessions: Option<Vec<String>>,
+}
+
+/// Input for the `batch_annotate_spectra` tool. Two input modes:
+/// (1) pass `items` as a JSON array, or (2) pass `annotations_file` as a TSV path.
+/// XIC and SILAC parameters are global — all items share the same settings.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct BatchAnnotateInput {
+    /// Path to the spectrum file (supports mzML, MGF, and PFB).
+    file_path: String,
+    /// JSON array of annotation items.
+    #[serde(default)]
+    items: Option<Vec<BatchAnnotateItem>>,
+    /// Path to a TSV (tab-separated) file with columns: scan_number, peptide_sequence, charge, and optional modifications.
+    #[serde(default)]
+    annotations_file: Option<String>,
+    /// Output directory for HTML files (default: ./batch_annotations/).
+    #[serde(default)]
+    output_dir: Option<String>,
+    /// Fragment mass tolerance. Default: {"value": 20.0, "unit": "Ppm"}.
+    #[serde(default, deserialize_with = "deserialize_tolerance")]
+    fragment_tolerance: Option<protein_copilot_core::search_params::MassTolerance>,
+    /// Heavy-label type for SILAC comparison. Standard SILAC: {"Silac": {"heavy_k_delta": 8.014199, "heavy_r_delta": 10.008269}}. Requires XIC-compatible format (mzML or PFB).
+    #[serde(default, deserialize_with = "deserialize_label_type")]
+    label_type: Option<protein_copilot_xic::LabelType>,
+    /// Number of DIA cycles before/after target for XIC extraction (default: 5).
+    #[serde(default)]
+    n_cycles: Option<u32>,
+    /// Limit XIC traces to the top N most intense fragment ions (default: all).
+    #[serde(default)]
+    top_n_ions: Option<usize>,
+    /// m/z extraction tolerance for XIC. Default: {"value": 20.0, "unit": "Ppm"}.
+    #[serde(default, deserialize_with = "deserialize_tolerance")]
+    extraction_tolerance: Option<protein_copilot_core::search_params::MassTolerance>,
+    /// Plotly.js loading mode: "Cdn" (default, smaller, requires internet) or "Embedded" (larger, offline).
+    #[serde(default)]
+    plotly_mode: Option<protein_copilot_xic::PlotlyMode>,
+}
+
+/// Result for a single item within a batch annotation.
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct BatchAnnotateItemResult {
+    scan_number: u32,
+    peptide_sequence: String,
+    charge: i32,
+    /// Output HTML path (None if annotation failed).
+    output_path: Option<String>,
+    matched_ions: Option<u32>,
+    total_ions: Option<u32>,
+    score: Option<f64>,
+    delta_mass_ppm: Option<f64>,
+    protein_accessions: Vec<String>,
+    /// Error message if this item failed (None on success).
+    error: Option<String>,
+}
+
+/// Output for the `batch_annotate_spectra` tool.
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct BatchAnnotateOutput {
+    total: usize,
+    succeeded: usize,
+    failed: usize,
+    output_dir: String,
+    results: Vec<BatchAnnotateItemResult>,
+}
+
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct ExtractDiaPrecursorsInput {
-    /// Path to the spectrum file (.mzML)
+    /// Path to the spectrum file (mzML recommended; requires MS1+MS2 and isolation window metadata)
     file_path: String,
     /// Output mode: "multi" (multiple precursors per spectrum) or "pseudo" (one precursor per spectrum). Default: "pseudo"
     #[serde(default = "default_output_mode")]
@@ -403,8 +483,7 @@ fn default_output_mode() -> String {
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct ExtractSpectrumPrecursorsInput {
-    /// Path to the spectrum file (.mzML). The file is read to find both the
-    /// target MS2 scan and nearby MS1 spectra for isotope pattern extraction.
+    /// Path to the spectrum file (mzML recommended; requires MS1+MS2 scans for isotope pattern extraction)
     file_path: String,
     /// Scan number (1-based) of the MS2 spectrum to extract precursors for.
     scan_number: u32,
@@ -461,7 +540,7 @@ enum XicView {
 struct ExtractXicInput {
     /// Spectrum file path (mzML only).
     #[schemars(
-        description = "Path to the spectrum file (.mzML). XIC extraction requires mzML format for MS1+MS2 and isolation window data."
+        description = "Path to the spectrum file (mzML recommended; XIC extraction requires MS1+MS2 and retention time data)"
     )]
     file_path: Option<String>,
     /// Target scan number (1-based).
@@ -614,7 +693,7 @@ struct GetDatabaseInfoInput {
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct PrepareSearchInput {
-    /// Paths to spectrum files (.mgf or .mzML)
+    /// Paths to spectrum files (supports mzML, MGF, and PFB formats)
     input_files: Vec<String>,
     /// Optional user hints (experiment_type, instrument_type, enzyme)
     #[serde(default, deserialize_with = "deserialize_hints")]
@@ -722,7 +801,7 @@ struct FindSimilarTargetsInput {
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct AnnotateProvenanceInput {
-    /// Path to the mzML spectrum file
+    /// Path to the spectrum file (supports mzML, MGF, and PFB formats)
     file_path: String,
     /// Scan number (1-based)
     scan_number: u32,
@@ -1073,12 +1152,139 @@ struct RunState {
 /// Maximum number of cached runs before eviction.
 const MAX_CACHE_SIZE: usize = 100;
 
-/// DIA isolation window detection threshold (Da).
-/// Spectra with median isolation window wider than this are classified as DIA.
-const DIA_ISOLATION_WINDOW_THRESHOLD_DA: f64 = 5.0;
+/// Parse a TSV/CSV annotations file into a list of `BatchAnnotateItem`.
+///
+/// Supports tab-separated files with columns:
+///   scan_number, peptide_sequence, charge, modifications (optional)
+///
+/// - First line is treated as a header if it starts with a non-numeric character.
+/// - The modifications column uses format: `pos:delta;pos:delta` (e.g. `0:42.011;5:79.966`).
+fn parse_annotations_file(path: &str) -> Result<Vec<BatchAnnotateItem>, ErrorData> {
+    let content = std::fs::read_to_string(path).map_err(|e| {
+        mcp_err(
+            ErrorCode::INVALID_PARAMS,
+            format!("cannot read annotations file '{path}': {e}"),
+        )
+    })?;
+    let lines: Vec<&str> = content.lines().filter(|l| !l.trim().is_empty()).collect();
+    if lines.is_empty() {
+        return Err(mcp_err(
+            ErrorCode::INVALID_PARAMS,
+            "annotations file is empty",
+        ));
+    }
+
+    // Auto-detect header: if first char is non-numeric, skip line 0 as header
+    let start = if lines[0]
+        .chars()
+        .next()
+        .map(|c| !c.is_ascii_digit())
+        .unwrap_or(false)
+    {
+        1
+    } else {
+        0
+    };
+    if start >= lines.len() {
+        return Err(mcp_err(
+            ErrorCode::INVALID_PARAMS,
+            "annotations file has header only, no data rows",
+        ));
+    }
+
+    let mut items = Vec::new();
+    for (i, line) in lines[start..].iter().enumerate() {
+        let row_num = start + i + 1; // 1-based for error messages
+        let fields: Vec<&str> = line.split('\t').collect();
+        if fields.len() < 3 {
+            return Err(mcp_err(
+                ErrorCode::INVALID_PARAMS,
+                format!("line {row_num}: expected at least 3 tab-separated fields (scan_number, peptide_sequence, charge), got {}", fields.len()),
+            ));
+        }
+        let scan_number: u32 = fields[0].trim().parse().map_err(|e| {
+            mcp_err(
+                ErrorCode::INVALID_PARAMS,
+                format!("line {row_num}: invalid scan_number '{}': {e}", fields[0]),
+            )
+        })?;
+        let peptide_sequence = fields[1].trim().to_string();
+        if peptide_sequence.is_empty() {
+            return Err(mcp_err(
+                ErrorCode::INVALID_PARAMS,
+                format!("line {row_num}: peptide_sequence is empty"),
+            ));
+        }
+        let charge: i32 = fields[2].trim().parse().map_err(|e| {
+            mcp_err(
+                ErrorCode::INVALID_PARAMS,
+                format!("line {row_num}: invalid charge '{}': {e}", fields[2]),
+            )
+        })?;
+        if charge <= 0 {
+            return Err(mcp_err(
+                ErrorCode::INVALID_PARAMS,
+                format!("line {row_num}: charge must be > 0, got {charge}"),
+            ));
+        }
+
+        let modifications = if fields.len() >= 4 && !fields[3].trim().is_empty() {
+            let mods_str = fields[3].trim();
+            let mut mods = Vec::new();
+            for pair in mods_str.split(';') {
+                let pair = pair.trim();
+                if pair.is_empty() {
+                    continue;
+                }
+                let parts: Vec<&str> = pair.splitn(2, ':').collect();
+                if parts.len() != 2 {
+                    return Err(mcp_err(
+                        ErrorCode::INVALID_PARAMS,
+                        format!("line {row_num}: invalid modification '{}' (expected pos:delta)", pair),
+                    ));
+                }
+                let pos: usize = parts[0].trim().parse().map_err(|e| {
+                    mcp_err(
+                        ErrorCode::INVALID_PARAMS,
+                        format!("line {row_num}: invalid modification position '{}': {e}", parts[0]),
+                    )
+                })?;
+                let delta: f64 = parts[1].trim().parse().map_err(|e| {
+                    mcp_err(
+                        ErrorCode::INVALID_PARAMS,
+                        format!("line {row_num}: invalid modification delta '{}': {e}", parts[1]),
+                    )
+                })?;
+                mods.push((pos, delta));
+            }
+            Some(mods)
+        } else {
+            None
+        };
+
+        items.push(BatchAnnotateItem {
+            scan_number,
+            peptide_sequence,
+            charge,
+            modifications,
+            protein_accessions: None,
+        });
+    }
+    if items.is_empty() {
+        return Err(mcp_err(
+            ErrorCode::INVALID_PARAMS,
+            "no valid annotation items found in file",
+        ));
+    }
+    Ok(items)
+}
 
 /// Default RT tolerance (minutes) for auto-scanning MS2 lookup.
 const RT_AUTO_LOOKUP_TOLERANCE_MIN: f64 = 0.5;
+
+/// DIA isolation window detection threshold (Da).
+/// Spectra with median isolation window wider than this are classified as DIA.
+const DIA_ISOLATION_WINDOW_THRESHOLD_DA: f64 = 5.0;
 
 /// Default FDR threshold (1%) for protein inference filtering.
 const FDR_1PCT_THRESHOLD: f64 = 0.01;
@@ -1432,6 +1638,311 @@ impl ProteinCopilotServer {
             "provide either 'result' or 'run_id'",
         ))
     }
+
+    /// Core annotation logic shared by `annotate_spectrum` and `batch_annotate_spectra`.
+    /// Takes already-resolved parameters (spectrum file, scan, peptide, etc.) and
+    /// performs: read spectrum → fragment matching → SILAC heavy (optional) →
+    /// XIC extraction (optional) → HTML render.
+    #[allow(clippy::too_many_arguments)]
+    fn annotate_one_spectrum(
+        &self,
+        spectrum_file: &Path,
+        scan_number: u32,
+        peptide_seq: &str,
+        charge: i32,
+        modifications: &[protein_copilot_core::search_params::Modification],
+        protein_accs: Vec<String>,
+        frag_tol: &protein_copilot_core::search_params::MassTolerance,
+        label_type: Option<&protein_copilot_core::label::LabelType>,
+        n_cycles: u32,
+        top_n_ions: usize,
+        extraction_tolerance: &protein_copilot_core::search_params::MassTolerance,
+        plotly_mode: protein_copilot_xic::PlotlyMode,
+        output_path: &Path,
+    ) -> Result<AnnotateResult, ErrorData> {
+        // Read the spectrum
+        let reader = self.get_or_create_reader(spectrum_file)?;
+        let spectrum = reader
+            .read_spectrum(spectrum_file, scan_number)
+            .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
+
+        // Perform fragment ion matching
+        let annotation = protein_copilot_search_engine::annotate::annotate_spectrum(
+            &spectrum,
+            peptide_seq,
+            charge,
+            frag_tol,
+            modifications,
+            protein_accs.clone(),
+            false,
+            false,
+        )
+        .map_err(|e| mcp_err(ErrorCode::INTERNAL_ERROR, e))?;
+
+        let mut annotation = annotation;
+        annotation.source_file = spectrum_file
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+
+        // ── SILAC: find and annotate heavy scan ──
+        if let Some(label) = label_type {
+            let heavy_delta =
+                protein_copilot_core::label::total_heavy_delta(peptide_seq, label);
+
+            if heavy_delta.abs() > 1e-6 {
+                let is_dia = spectrum
+                    .precursors
+                    .first()
+                    .and_then(|p| p.isolation_window.as_ref())
+                    .map(|w| (w.lower_offset + w.upper_offset) > 1.0)
+                    .unwrap_or(false);
+
+                let heavy_prec_mz = protein_copilot_core::label::compute_heavy_precursor_mz(
+                    annotation.theoretical_mz,
+                    charge,
+                    peptide_seq,
+                    label,
+                );
+
+                let heavy_scan_result = if is_dia {
+                    reader
+                        .find_by_rt(spectrum_file, spectrum.retention_time_min, heavy_prec_mz, 0.5)
+                        .unwrap_or(None)
+                } else {
+                    let candidates = reader
+                        .find_by_rt(spectrum_file, spectrum.retention_time_min, heavy_prec_mz, 0.5)
+                        .unwrap_or(None);
+                    if let Some((scan, _delta)) = candidates {
+                        match reader.read_spectrum(spectrum_file, scan) {
+                            Ok(spec) => {
+                                let prec_mz = spec.precursors.first().map(|p| p.mz).unwrap_or(0.0);
+                                let ppm_err =
+                                    ((prec_mz - heavy_prec_mz) / heavy_prec_mz * 1e6).abs();
+                                if ppm_err < 20.0 {
+                                    Some((scan, 0.0))
+                                } else {
+                                    None
+                                }
+                            }
+                            Err(_) => None,
+                        }
+                    } else {
+                        None
+                    }
+                };
+
+                if let Some((heavy_scan_num, _)) = heavy_scan_result {
+                    if let Ok(heavy_spectrum) =
+                        reader.read_spectrum(spectrum_file, heavy_scan_num)
+                    {
+                        match protein_copilot_search_engine::annotate::annotate_heavy_spectrum(
+                            &heavy_spectrum,
+                            peptide_seq,
+                            charge,
+                            frag_tol,
+                            modifications,
+                            label,
+                            false,
+                            false,
+                        ) {
+                            Ok(heavy_ann) => {
+                                tracing::info!(
+                                    heavy_scan = heavy_scan_num,
+                                    matched = heavy_ann.matched_ions,
+                                    total = heavy_ann.total_ions,
+                                    is_dia = is_dia,
+                                    "Heavy annotation complete"
+                                );
+                                annotation.heavy_annotation = Some(heavy_ann);
+                            }
+                            Err(e) => {
+                                tracing::warn!("Heavy annotation failed: {e}");
+                            }
+                        }
+                    }
+                } else {
+                    tracing::info!(
+                        heavy_prec_mz = format!("{:.4}", heavy_prec_mz),
+                        is_dia = is_dia,
+                        "No heavy scan found"
+                    );
+                }
+            } else {
+                tracing::info!(peptide = peptide_seq, "Skipping heavy: no K/R residues");
+            }
+        }
+
+        let source_file = spectrum_file
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| spectrum_file.display().to_string());
+
+        let annotation_theo_mz = annotation.theoretical_mz;
+
+        // ── XIC extraction (mzML / PFB) or basic render (MGF) ──
+        let is_xic_format = spectrum_file
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.eq_ignore_ascii_case("mzml") || e.eq_ignore_ascii_case("pfb"))
+            .unwrap_or(false);
+
+        let mut render_mode = "annotation";
+
+        if is_xic_format {
+            let xic_params = protein_copilot_xic::ExtractionParams {
+                mz_tolerance: extraction_tolerance.clone(),
+                n_cycles,
+                top_n_ions,
+                label_type: label_type.cloned(),
+                intensity_rule: protein_copilot_xic::IntensityRule::MaxInWindow,
+            };
+
+            let cached_reader = self.get_or_create_reader(spectrum_file)?;
+
+            match protein_copilot_xic::extract::extract_xic_unified(
+                cached_reader.as_ref(),
+                spectrum_file,
+                scan_number,
+                peptide_seq,
+                charge,
+                annotation.theoretical_mz,
+                modifications,
+                &xic_params,
+                20.0,
+            ) {
+                Ok(unified_result) => {
+                    let xic_meaningful = unified_result
+                        .xic_data
+                        .fragment_xic_traces
+                        .first()
+                        .map(|t| t.data_points.len() > 1)
+                        .unwrap_or(false);
+
+                    if xic_meaningful {
+                        if let Some(observed) = find_precursor_in_ms1(
+                            &unified_result.raw_scans.ms1_scans,
+                            annotation.retention_time_min,
+                            annotation.theoretical_mz,
+                            20.0,
+                        ) {
+                            annotation.precursor_mz = observed;
+                            annotation.delta_mass_ppm =
+                                (observed - annotation.theoretical_mz) / annotation.theoretical_mz
+                                    * 1e6;
+                        }
+
+                        if let Some(ref mut ha) = annotation.heavy_annotation {
+                            let heavy_theo = ha.precursor_mz;
+                            if let Some(obs_heavy) = find_precursor_in_ms1(
+                                &unified_result.raw_scans.ms1_scans,
+                                annotation.retention_time_min,
+                                heavy_theo,
+                                20.0,
+                            ) {
+                                ha.delta_mass_ppm =
+                                    Some((obs_heavy - heavy_theo) / heavy_theo * 1e6);
+                            } else {
+                                ha.delta_mass_ppm = None;
+                            }
+                        }
+
+                        let peptide_info = protein_copilot_report::unified_types::PeptideInfo {
+                            sequence: peptide_seq.to_string(),
+                            charge,
+                            precursor_mz: annotation_theo_mz,
+                            total_k: peptide_seq.chars().filter(|&c| c == 'K').count() as u32,
+                            total_r: peptide_seq.chars().filter(|&c| c == 'R').count() as u32,
+                        };
+                        let unified_data = protein_copilot_report::unified_types::UnifiedViewData {
+                            source_file: source_file.clone(),
+                            annotation: annotation.clone(),
+                            xic: Some(unified_result.xic_data),
+                            raw_scans: Some(unified_result.raw_scans),
+                            ion_metadata: unified_result.ion_metadata,
+                            peptide_info,
+                        };
+                        ReportGenerator::render_unified(&unified_data, output_path, plotly_mode)
+                            .map_err(|e| {
+                                mcp_core_err(protein_copilot_core::error::CoreError::from(e))
+                            })?;
+                        render_mode = "unified+xic";
+                    } else {
+                        let peptide_info = protein_copilot_report::unified_types::PeptideInfo {
+                            sequence: peptide_seq.to_string(),
+                            charge,
+                            precursor_mz: annotation_theo_mz,
+                            total_k: peptide_seq.chars().filter(|&c| c == 'K').count() as u32,
+                            total_r: peptide_seq.chars().filter(|&c| c == 'R').count() as u32,
+                        };
+                        let unified_data = protein_copilot_report::unified_types::UnifiedViewData {
+                            source_file: source_file.clone(),
+                            annotation: annotation.clone(),
+                            xic: None,
+                            raw_scans: None,
+                            ion_metadata: vec![],
+                            peptide_info,
+                        };
+                        ReportGenerator::render_unified(&unified_data, output_path, plotly_mode)
+                            .map_err(|e| {
+                                mcp_core_err(protein_copilot_core::error::CoreError::from(e))
+                            })?;
+                        render_mode = "unified";
+                    }
+                }
+                Err(_) => {
+                    let peptide_info = protein_copilot_report::unified_types::PeptideInfo {
+                        sequence: peptide_seq.to_string(),
+                        charge,
+                        precursor_mz: annotation_theo_mz,
+                        total_k: peptide_seq.chars().filter(|&c| c == 'K').count() as u32,
+                        total_r: peptide_seq.chars().filter(|&c| c == 'R').count() as u32,
+                    };
+                    let unified_data = protein_copilot_report::unified_types::UnifiedViewData {
+                        source_file: source_file.clone(),
+                        annotation: annotation.clone(),
+                        xic: None,
+                        raw_scans: None,
+                        ion_metadata: vec![],
+                        peptide_info,
+                    };
+                    ReportGenerator::render_unified(&unified_data, output_path, plotly_mode)
+                        .map_err(|e| {
+                            mcp_core_err(protein_copilot_core::error::CoreError::from(e))
+                        })?;
+                    render_mode = "unified";
+                }
+            }
+        } else {
+            // Non-mzML/PFB file (e.g. MGF) — basic annotation
+            ReportGenerator::render_annotation(&annotation, output_path)
+                .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
+        }
+
+        Ok(AnnotateResult {
+            output_path: output_path.display().to_string(),
+            scan_number: annotation.scan_number,
+            peptide_sequence: annotation.peptide_sequence.clone(),
+            charge: annotation.charge,
+            score: annotation.score,
+            matched_ions: annotation.matched_ions,
+            total_ions: annotation.total_ions,
+            delta_mass_ppm: annotation.delta_mass_ppm,
+            protein_accessions: annotation.protein_accessions.clone(),
+            message: format!(
+                "Annotation saved to {}. Matched {}/{} ions (score: {:.3}). {}",
+                output_path.display(),
+                annotation.matched_ions,
+                annotation.total_ions,
+                annotation.score,
+                match render_mode {
+                    "unified+xic" => "Includes XIC + SILAC controls.",
+                    "unified" => "Unified view (annotation only).",
+                    _ => "Open in browser to view.",
+                },
+            ),
+        })
+    }
 }
 
 #[rmcp::tool_handler]
@@ -1486,7 +1997,7 @@ impl ProteinCopilotServer {
     /// Read a mass spectrometry file and return a statistical summary.
     #[rmcp::tool(
         name = "read_spectra",
-        description = "Read a mass spectrometry file (mgf/mzML) and return a statistical summary including spectrum count, m/z range, RT range, charge distribution, and median peaks per spectrum. Use this as the first step to understand input data."
+        description = "Read a mass spectrometry file (supports mzML, MGF, and PFB) and return a statistical summary including spectrum count, m/z range, RT range, charge distribution, and median peaks per spectrum. Use this as the first step to understand input data."
     )]
     fn read_spectra(
         &self,
@@ -2394,7 +2905,7 @@ impl ProteinCopilotServer {
     /// Annotate a single spectrum with peptide fragment ion matching.
     #[rmcp::tool(
         name = "annotate_spectrum",
-        description = "Annotate a single spectrum with peptide fragment ion matching. Generates an interactive HTML file showing matched b/y ions. Two modes: (1) provide run_id + scan_number to annotate an existing PSM, or (2) provide file_path + scan_number + peptide_sequence + charge for manual annotation. In mode 2, you can set scan_number=0 and provide retention_time_min to auto-find the matching scan."
+        description = "Annotate a single spectrum with peptide fragment ion matching. Generates an interactive HTML file showing matched b/y ions. Two modes: (1) provide run_id + scan_number to annotate an existing PSM, or (2) provide file_path + scan_number + peptide_sequence + charge for manual annotation. In mode 2, set scan_number=0 with retention_time_min to auto-find the nearest scan. Supports mzML, MGF, and PFB formats. mzML and PFB enable XIC extraction (configure via n_cycles, top_n_ions, extraction_tolerance) and SILAC heavy/light comparison (set label_type). MGF provides basic fragment annotation only."
     )]
     fn annotate_spectrum(
         &self,
@@ -2695,7 +3206,7 @@ impl ProteinCopilotServer {
         let is_mzml = spectrum_file
             .extension()
             .and_then(|e| e.to_str())
-            .map(|e| e.eq_ignore_ascii_case("mzml"))
+            .map(|e| e.eq_ignore_ascii_case("mzml") || e.eq_ignore_ascii_case("pfb"))
             .unwrap_or(false);
 
         let source_file = spectrum_file
@@ -2824,7 +3335,7 @@ impl ProteinCopilotServer {
                 }
             }
         } else {
-            // Non-mzML file — legacy annotation only
+            // Non-mzML/PFB file (e.g. MGF) — basic annotation only, no XIC
             ReportGenerator::render_annotation(&annotation, &out_path)
                 .map_err(|e| mcp_core_err(protein_copilot_core::error::CoreError::from(e)))?;
         }
@@ -2855,10 +3366,239 @@ impl ProteinCopilotServer {
         }))
     }
 
+    /// Batch-annotate multiple spectra with peptide fragment ion matching.
+    ///
+    /// Two input modes:
+    /// (1) pass `items` as a JSON array of {scan_number, peptide_sequence, charge, modifications?} objects,
+    /// (2) pass `annotations_file` pointing to a TSV file with the same columns.
+    ///
+    /// XIC and SILAC parameters are global — all items share the same settings.
+    /// Generates one HTML file per spectrum in `output_dir` (default: ./batch_annotations/).
+    /// Failed items are recorded in the result with error messages; the batch continues.
+    #[rmcp::tool(
+        name = "batch_annotate_spectra",
+        description = "Annotate multiple spectra with peptide fragment ion matching. Two input modes: (1) provide `items` as a JSON array of {scan_number, peptide_sequence, charge, modifications?}, or (2) provide `annotations_file` pointing to a TSV file with columns: scan_number, peptide_sequence, charge, modifications (optional). Supports mzML, MGF, PFB formats. Set label_type for SILAC, n_cycles for DIA XIC extraction. Output: one HTML per scan in output_dir."
+    )]
+    fn batch_annotate_spectra(
+        &self,
+        Parameters(input): Parameters<BatchAnnotateInput>,
+    ) -> Result<Json<BatchAnnotateOutput>, ErrorData> {
+        let _span = tracing::info_span!("mcp_tool", name = "batch_annotate_spectra").entered();
+        tracing::info!(
+            file = %input.file_path,
+            items = input.items.as_ref().map(|v| v.len()).unwrap_or(0),
+            annotations_file = input.annotations_file.as_deref().unwrap_or("none"),
+            "started"
+        );
+
+        validate_file_path(&input.file_path)?;
+        let spectrum_file = PathBuf::from(&input.file_path);
+
+        // Resolve items from JSON array or TSV file
+        let items: Vec<BatchAnnotateItem> = match (&input.items, &input.annotations_file) {
+            (Some(json_items), None) => {
+                if json_items.is_empty() {
+                    return Err(mcp_err(ErrorCode::INVALID_PARAMS, "items array is empty"));
+                }
+                json_items.to_vec()
+            }
+            (None, Some(file)) => parse_annotations_file(file)?,
+            (Some(_), Some(_)) => {
+                return Err(mcp_err(
+                    ErrorCode::INVALID_PARAMS,
+                    "provide either 'items' or 'annotations_file', not both",
+                ));
+            }
+            (None, None) => {
+                return Err(mcp_err(
+                    ErrorCode::INVALID_PARAMS,
+                    "provide either 'items' (JSON array) or 'annotations_file' (TSV path)",
+                ));
+            }
+        };
+        let total = items.len();
+
+        // Defaults
+        use protein_copilot_core::search_params::{MassTolerance, Modification, ToleranceUnit};
+        let frag_tol = input.fragment_tolerance.unwrap_or(MassTolerance {
+            value: 20.0,
+            unit: ToleranceUnit::Ppm,
+        });
+        let extraction_tolerance = input.extraction_tolerance.unwrap_or(MassTolerance {
+            value: 20.0,
+            unit: ToleranceUnit::Ppm,
+        });
+        let n_cycles = input.n_cycles.unwrap_or(5);
+        let top_n_ions = input.top_n_ions.unwrap_or(usize::MAX);
+        let plotly_mode = input
+            .plotly_mode
+            .unwrap_or(protein_copilot_xic::PlotlyMode::Cdn);
+        let core_label: Option<&protein_copilot_core::label::LabelType> =
+            input.label_type.as_ref().map(|l| l as &protein_copilot_core::label::LabelType);
+
+        let output_dir = input
+            .output_dir
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("./batch_annotations"));
+        std::fs::create_dir_all(&output_dir).map_err(|e| {
+            mcp_err(
+                ErrorCode::INTERNAL_ERROR,
+                format!("cannot create output_dir '{}': {e}", output_dir.display()),
+            )
+        })?;
+        let output_dir = output_dir.canonicalize().unwrap_or(output_dir);
+
+        // Progress tracking
+        let mut results: Vec<BatchAnnotateItemResult> = Vec::with_capacity(total);
+        let mut succeeded = 0usize;
+        let mut failed = 0usize;
+
+        for (_idx, item) in items.iter().enumerate() {
+            // Validate per-item
+            if item.peptide_sequence.trim().is_empty() {
+                results.push(BatchAnnotateItemResult {
+                    scan_number: item.scan_number,
+                    peptide_sequence: item.peptide_sequence.clone(),
+                    charge: item.charge,
+                    output_path: None,
+                    matched_ions: None,
+                    total_ions: None,
+                    score: None,
+                    delta_mass_ppm: None,
+                    protein_accessions: item
+                        .protein_accessions
+                        .clone()
+                        .unwrap_or_default(),
+                    error: Some("peptide_sequence is empty".to_string()),
+                });
+                failed += 1;
+                continue;
+            }
+            if item.charge <= 0 {
+                results.push(BatchAnnotateItemResult {
+                    scan_number: item.scan_number,
+                    peptide_sequence: item.peptide_sequence.clone(),
+                    charge: item.charge,
+                    output_path: None,
+                    matched_ions: None,
+                    total_ions: None,
+                    score: None,
+                    delta_mass_ppm: None,
+                    protein_accessions: item
+                        .protein_accessions
+                        .clone()
+                        .unwrap_or_default(),
+                    error: Some(format!("charge must be > 0, got {}", item.charge)),
+                });
+                failed += 1;
+                continue;
+            }
+            if item.scan_number == 0 {
+                results.push(BatchAnnotateItemResult {
+                    scan_number: item.scan_number,
+                    peptide_sequence: item.peptide_sequence.clone(),
+                    charge: item.charge,
+                    output_path: None,
+                    matched_ions: None,
+                    total_ions: None,
+                    score: None,
+                    delta_mass_ppm: None,
+                    protein_accessions: item
+                        .protein_accessions
+                        .clone()
+                        .unwrap_or_default(),
+                    error: Some("scan_number must be >= 1".to_string()),
+                });
+                failed += 1;
+                continue;
+            }
+
+            let modifications: Vec<Modification> = item
+                .modifications
+                .clone()
+                .unwrap_or_default()
+                .into_iter()
+                .map(|(pos, delta)| Modification {
+                    name: format!("Mod@{}", pos),
+                    mass_delta: delta,
+                    residues: vec![item.peptide_sequence.chars().nth(pos).unwrap_or('*')],
+                    position: protein_copilot_core::search_params::ModPosition::Anywhere,
+                })
+                .collect();
+            let protein_accs = item
+                .protein_accessions
+                .clone()
+                .unwrap_or_default();
+
+            let out_path =
+                output_dir.join(format!("annotation_scan{}.html", item.scan_number));
+
+            let scan = item.scan_number;
+            let pep = item.peptide_sequence.clone();
+            let ch = item.charge;
+
+            match self.annotate_one_spectrum(
+                &spectrum_file,
+                scan,
+                &pep,
+                ch,
+                &modifications,
+                protein_accs.clone(),
+                &frag_tol,
+                core_label,
+                n_cycles,
+                top_n_ions,
+                &extraction_tolerance,
+                plotly_mode,
+                &out_path,
+            ) {
+                Ok(ann) => {
+                    results.push(BatchAnnotateItemResult {
+                        scan_number: scan,
+                        peptide_sequence: pep,
+                        charge: ch,
+                        output_path: Some(ann.output_path),
+                        matched_ions: Some(ann.matched_ions),
+                        total_ions: Some(ann.total_ions),
+                        score: Some(ann.score),
+                        delta_mass_ppm: Some(ann.delta_mass_ppm),
+                        protein_accessions: ann.protein_accessions,
+                        error: None,
+                    });
+                    succeeded += 1;
+                }
+                Err(e) => {
+                    results.push(BatchAnnotateItemResult {
+                        scan_number: scan,
+                        peptide_sequence: pep,
+                        charge: ch,
+                        output_path: None,
+                        matched_ions: None,
+                        total_ions: None,
+                        score: None,
+                        delta_mass_ppm: None,
+                        protein_accessions: protein_accs,
+                        error: Some(format!("{e}")),
+                    });
+                    failed += 1;
+                }
+            }
+        }
+
+        tracing::info!(total, succeeded, failed, "completed");
+        Ok(Json(BatchAnnotateOutput {
+            total,
+            succeeded,
+            failed,
+            output_dir: output_dir.display().to_string(),
+            results,
+        }))
+    }
+
     /// Extract candidate precursor ions from DIA mass spectrometry data.
     #[rmcp::tool(
         name = "extract_dia_precursors",
-        description = "Extract candidate precursor ions from DIA mass spectrometry data. Reads mzML file, detects DIA mode from isolation window widths, extracts precursor candidates from MS1 isotope patterns, and caches enhanced spectra for use with run_search. Returns extraction statistics."
+        description = "Extract candidate precursor ions from DIA mass spectrometry data. Reads spectrum file (mzML recommended; requires MS1+MS2 and isolation window metadata), detects DIA mode from isolation window widths, extracts precursor candidates from MS1 isotope patterns, and caches enhanced spectra for use with run_search. Returns extraction statistics."
     )]
     fn extract_dia_precursors(
         &self,
@@ -2953,7 +3693,7 @@ impl ProteinCopilotServer {
     /// Extract precursor candidates for a single MS2 spectrum from an mzML file.
     #[rmcp::tool(
         name = "extract_spectrum_precursors",
-        description = "Extract candidate precursor ions from a single MS2 spectrum. Reads the mzML file, finds the target MS2 by scan number, correlates it to the nearest MS1, and runs isotope pattern analysis within the isolation window. Returns extracted precursor candidates with charge states and the correlation method used."
+        description = "Extract candidate precursor ions from a single MS2 spectrum. Reads the spectrum file (mzML recommended; requires MS1+MS2 scans), finds the target MS2 by scan number, correlates it to the nearest MS1, and runs isotope pattern analysis within the isolation window. Returns extracted precursor candidates with charge states and the correlation method used."
     )]
     fn extract_spectrum_precursors(
         &self,
@@ -3075,7 +3815,7 @@ impl ProteinCopilotServer {
     /// Extract XIC (Extracted Ion Chromatogram) for a peptide from an mzML file.
     #[rmcp::tool(
         name = "extract_xic",
-        description = "Extract XIC (Extracted Ion Chromatogram) for a peptide from an mzML file. Generates an interactive HTML file with Plotly.js showing MS1 precursor and MS2 fragment ion chromatograms. Supports SILAC heavy-label comparison. Two modes: (1) provide run_id + scan_number to use PSM context, or (2) provide file_path + scan_number + peptide_sequence + charge + precursor_mz. In mode 2, set scan_number=0 with retention_time_min to auto-find scan. Set view='3d' for a 3D MS2 overview (RT x m/z x intensity sticks) plus per-scan b/y annotated spectra with total peak counts (output: xic3d_scan{N}.html)."
+        description = "Extract XIC (Extracted Ion Chromatogram) for a peptide from a spectrum file (mzML recommended; requires MS1+MS2 and retention time data). Generates an interactive HTML file with Plotly.js showing MS1 precursor and MS2 fragment ion chromatograms. Supports SILAC heavy-label comparison. Two modes: (1) provide run_id + scan_number to use PSM context, or (2) provide file_path + scan_number + peptide_sequence + charge + precursor_mz. In mode 2, set scan_number=0 with retention_time_min to auto-find scan. Set view='3d' for a 3D MS2 overview (RT x m/z x intensity sticks) plus per-scan b/y annotated spectra with total peak counts (output: xic3d_scan{N}.html)."
     )]
     fn extract_xic(
         &self,
