@@ -3500,7 +3500,7 @@ impl ProteinCopilotServer {
         let mut succeeded = 0usize;
         let mut failed = 0usize;
 
-        for (_idx, item) in items.iter().enumerate() {
+        for item in items.iter() {
             // Validate per-item
             if item.peptide_sequence.trim().is_empty() {
                 results.push(BatchAnnotateItemResult {
