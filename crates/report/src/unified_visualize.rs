@@ -90,6 +90,7 @@ mod tests {
                         theoretical_mz: 200.001,
                         delta_mz: -0.001,
                         delta_ppm: -5.0,
+                        neutral_loss: None,
                     }),
                 },
                 AnnotatedPeak {
@@ -117,6 +118,9 @@ mod tests {
                 delta_ppm: None,
             }],
             modifications: vec![],
+            neutral_loss_ions: vec![],
+            matched_intensity: 1000.0,
+            total_intensity: 1500.0,
             heavy_annotation: None,
         }
     }

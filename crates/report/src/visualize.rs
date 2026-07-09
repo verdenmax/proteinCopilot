@@ -83,6 +83,7 @@ mod tests {
                         theoretical_mz: 200.001,
                         delta_mz: -0.001,
                         delta_ppm: -5.0,
+                        neutral_loss: None,
                     }),
                 },
             ],
@@ -104,6 +105,9 @@ mod tests {
                 matched_mz: None,
                 delta_ppm: None,
             }],
+            neutral_loss_ions: vec![],
+            matched_intensity: 1000.0,
+            total_intensity: 1500.0,
             modifications: vec![],
             heavy_annotation: None,
         }
