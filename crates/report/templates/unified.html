@@ -9,6 +9,10 @@
   :root {
     --b-color: #d63031;
     --y-color: #0984e3;
+    --b-h2o-color: #e17055;
+    --b-nh3-color: #fdcb6e;
+    --y-h2o-color: #74b9ff;
+    --y-nh3-color: #a29bfe;
     --unmatched-peak: #d0d0d0;
     --noise-peak: #f0f0f0;
     --unmatched-bracket: #e0e0e0;
@@ -43,12 +47,12 @@
   .score-badge.low  { background: #e74c3c; }
 
   /* ── Coverage & Spectrum Cards ─────────────────────────── */
-  .coverage-card, .spectrum-card {
+  .coverage-card, .spectrum-card, .scatter-card {
     background: var(--card-bg); border: 1px solid var(--border);
     border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;
     box-shadow: 0 1px 3px rgba(0,0,0,.06); overflow-x: auto;
   }
-  .coverage-card h2, .spectrum-card h2 {
+  .coverage-card h2, .spectrum-card h2, .scatter-card h2 {
     font-size: 16px; font-weight: 600; margin-bottom: 12px;
     color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px;
   }
@@ -166,6 +170,12 @@
 </div>
 <div id="tooltip"></div>
 
+<!-- Section 3b: Mass Error Scatter -->
+<div class="scatter-card">
+  <h2>Mass Error (ppm vs m/z)</h2>
+  <div id="scatter-container"></div>
+</div>
+
 <!-- Section 4: SILAC Controls (hidden if xic is null) -->
 <div id="silac-section" style="display:none;">
   <div id="silac-controls" class="silac-card">
@@ -257,6 +267,33 @@
   var SUBSCRIPT_DIGITS = "\u2080\u2081\u2082\u2083\u2084\u2085\u2086\u2087\u2088\u2089";
   function subscript(n) {
     return String(n).split("").map(function (c) { return SUBSCRIPT_DIGITS[parseInt(c)]; }).join("");
+  }
+
+  /* ── ion color/label helpers ─────────────────────────── */
+  function ionColor(ionType) {
+    switch (ionType) {
+      case "B": return "#d63031";
+      case "Y": return "#0984e3";
+      case "B-H2O": return "#e17055";
+      case "B-NH3": return "#fdcb6e";
+      case "Y-H2O": return "#74b9ff";
+      case "Y-NH3": return "#a29bfe";
+      default: return "#d63031";
+    }
+  }
+  function ionLabelHtml(ann) {
+    var prefix = (ann.ion_type === "B" || ann.ion_type === "B-H2O" || ann.ion_type === "B-NH3") ? "b" : "y";
+    var label = prefix + "<sub>" + ann.ion_number + "</sub>";
+    if (ann.ion_type.indexOf("H2O") >= 0) label += "-H₂O";
+    if (ann.ion_type.indexOf("NH3") >= 0) label += "-NH₃";
+    return label;
+  }
+  function ionLabelText(ann) {
+    var prefix = (ann.ion_type === "B" || ann.ion_type === "B-H2O" || ann.ion_type === "B-NH3") ? "b" : "y";
+    var label = prefix + subscript(ann.ion_number);
+    if (ann.ion_type.indexOf("H2O") >= 0) label += "-H₂O";
+    if (ann.ion_type.indexOf("NH3") >= 0) label += "-NH₃";
+    return label;
   }
 
   /* ── 1. Info Panel ────────────────────────────────────── */
@@ -656,15 +693,14 @@
         var peakH = relInt * lightH;
         if (peakH < minMatchedH) peakH = minMatchedH;
         var y2m = lightBaseline - peakH;
-        var col = ann.ion_type === "B" ? "#d63031" : "#0984e3";
+        var col = ionColor(ann.ion_type);
 
         gMatched.appendChild(svgEl("line", {
           x1: x, y1: lightBaseline, x2: x, y2: y2m,
           stroke: col, "stroke-width": "3", "stroke-linecap": "round"
         }));
 
-        var ionPrefix = ann.ion_type === "B" ? "b" : "y";
-        var labelText = ionPrefix + subscript(ann.ion_number);
+        var labelText = ionLabelText(ann);
         var labelY = y2m - 6;
 
         for (var li = 0; li < labelPositions.length; li++) {
@@ -710,7 +746,7 @@
           cursor: "pointer"
         });
 
-        var ionId = ann2 ? ((ann2.ion_type === "B" ? "b" : "y") + ann2.ion_number) : null;
+        var ionId = ann2 ? ((ann2.ion_type === "B" || ann2.ion_type === "B-H2O" || ann2.ion_type === "B-NH3" ? "b" : "y") + ann2.ion_number) : null;
 
         hitbox.addEventListener("mouseenter", function () {
           var relI = (peak.intensity / intMax * 100);
@@ -721,7 +757,7 @@
           }
           if (ann2) {
             html += "<hr class=\"tip-sep\">";
-            var lbl = (ann2.ion_type === "B" ? "b" : "y") + "<sub>" + ann2.ion_number + "</sub>";
+            var lbl = ionLabelHtml(ann2);
             html += "<div class=\"tip-row\"><span class=\"tip-label\">Ion</span><span class=\"tip-val\">" + lbl + "</span></div>";
             html += "<div class=\"tip-row\"><span class=\"tip-label\">\u0394 ppm</span><span class=\"tip-val\">" + fmt(ann2.delta_ppm, 2) + "</span></div>";
           }
@@ -765,15 +801,14 @@
           var peakHH = relIntH * heavyH;
           if (peakHH < minMatchedH) peakHH = minMatchedH;
           var y2mH = lightBaseline + peakHH;
-          var colH = annH.ion_type === "B" ? "#d35400" : "#e67e22";
+          var colH = ionColor(annH.ion_type);
 
           gMatched.appendChild(svgEl("line", {
             x1: xH, y1: lightBaseline, x2: xH, y2: y2mH,
             stroke: colH, "stroke-width": "3", "stroke-linecap": "round"
           }));
 
-          var ionPrefH = annH.ion_type === "B" ? "b" : "y";
-          var labelTxtH = ionPrefH + subscript(annH.ion_number);
+          var labelTxtH = ionLabelText(annH);
           var labelYH = y2mH + 16;
 
           for (var liH = 0; liH < heavyLabelPositions.length; liH++) {
@@ -822,7 +857,7 @@
             html += "<div class=\"tip-row\"><span class=\"tip-label\">Source</span><span class=\"tip-val\" style=\"color:#e67e22\">Heavy Scan " + DH.scan_number + "</span></div>";
             if (ann2) {
               html += "<hr class=\"tip-sep\">";
-              var lbl = (ann2.ion_type === "B" ? "b" : "y") + "<sub>" + ann2.ion_number + "</sub>";
+              var lbl = ionLabelHtml(ann2);
               html += "<div class=\"tip-row\"><span class=\"tip-label\">Ion</span><span class=\"tip-val\">" + lbl + " (Heavy)</span></div>";
               html += "<div class=\"tip-row\"><span class=\"tip-label\">\u0394 ppm</span><span class=\"tip-val\">" + fmt(ann2.delta_ppm, 2) + "</span></div>";
             }
