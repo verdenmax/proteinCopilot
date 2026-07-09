@@ -42,6 +42,14 @@ pub const WATER_MASS: f64 = 18.010565;
 /// Proton mass (Da).
 pub const PROTON_MASS: f64 = 1.007276;
 
+/// Mass loss for H₂O neutral loss from fragment ions (Da).
+/// Loss of water from side-chain hydroxyl or carboxyl groups (-18.010565 Da).
+pub const H2O_LOSS: f64 = 18.010565;
+
+/// Mass loss for NH₃ neutral loss from fragment ions (Da).
+/// Loss of ammonia from side-chain amine groups (-17.026549 Da).
+pub const NH3_LOSS: f64 = 17.026549;
+
 /// Calculates the monoisotopic neutral mass of a peptide sequence.
 ///
 /// Returns `None` if the sequence contains any non-standard amino acid.
