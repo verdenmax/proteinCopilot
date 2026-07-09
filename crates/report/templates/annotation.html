@@ -8,6 +8,10 @@
   :root {
     --b-color: #d63031;
     --y-color: #0984e3;
+    --b-h2o-color: #e17055;
+    --b-nh3-color: #fdcb6e;
+    --y-h2o-color: #74b9ff;
+    --y-nh3-color: #a29bfe;
     --unmatched-peak: #d0d0d0;
     --noise-peak: #f0f0f0;
     --unmatched-bracket: #e0e0e0;
@@ -42,12 +46,12 @@
   .score-badge.low  { background: #e74c3c; }
 
   /* ── Coverage & Spectrum Cards ─────────────────────────── */
-  .coverage-card, .spectrum-card {
+  .coverage-card, .spectrum-card, .scatter-card {
     background: var(--card-bg); border: 1px solid var(--border);
     border-radius: 8px; padding: 20px 24px; margin-bottom: 20px;
     box-shadow: 0 1px 3px rgba(0,0,0,.06); overflow-x: auto;
   }
-  .coverage-card h2, .spectrum-card h2 {
+  .coverage-card h2, .spectrum-card h2, .scatter-card h2 {
     font-size: 16px; font-weight: 600; margin-bottom: 12px;
     color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px;
   }
@@ -86,6 +90,10 @@
 <div class="spectrum-card">
   <h2>Spectrum</h2>
   <div id="spectrum-container"></div>
+</div>
+<div class="scatter-card">
+  <h2>Mass Error (Δ ppm vs m/z)</h2>
+  <div id="scatter-container"></div>
 </div>
 <div id="tooltip"></div>
 
@@ -146,12 +154,21 @@
     scoreWrap.appendChild(badge);
     scoreWrap.appendChild(document.createTextNode("  (" + D.matched_ions + "/" + D.total_ions + " ions)"));
 
+    // Intensity-based score
+    var intFrac = D.total_intensity > 0 ? D.matched_intensity / D.total_intensity : 0;
+    var intBadgeCls = "score-badge " + (intFrac > 0.5 ? "good" : intFrac >= 0.2 ? "mid" : "low");
+    var intBadge = el("span", { "class": intBadgeCls }, (intFrac * 100).toFixed(1) + "%");
+    var intWrap = document.createElement("span");
+    intWrap.appendChild(intBadge);
+    intWrap.appendChild(document.createTextNode(" intensity fraction"));
+
     add("Scan", String(D.scan_number));
     add("RT", fmt(D.retention_time_min, 2) + " min");
     add("Charge", D.charge + "+");
     add("Peptide", D.peptide_sequence, "peptide");
     add("Protein(s)", D.protein_accessions.join(", ") || "\u2014");
     add("Score", scoreWrap);
+    add("Intensity Score", intWrap);
     add("Precursor m/z", fmt(D.theoretical_mz, 4));
     add("\u0394 mass", fmt(D.delta_mass_ppm, 2) + " ppm");
     panel.appendChild(grid);
@@ -405,8 +422,7 @@
         }));
 
         // Label with subscript digits
-        var ionPrefix = ann.ion_type === "B" ? "b" : "y";
-        var labelText = ionPrefix + subscript(ann.ion_number);
+        var labelText = ionLabelText(ann);
         var labelY = y2m - 6;
 
         // Stagger to avoid overlap
@@ -455,7 +471,7 @@
           cursor: "pointer"
         });
 
-        var ionId = ann2 ? ((ann2.ion_type === "B" ? "b" : "y") + ann2.ion_number) : null;
+        var ionId = ann2 ? (ann2.ion_type === "B" || ann2.ion_type === "B-H2O" || ann2.ion_type === "B-NH3" ? "b" : "y") + ann2.ion_number : null;
 
         hitbox.addEventListener("mouseenter", function () {
           var relI = (peak.intensity / intMax * 100);
@@ -463,7 +479,7 @@
           html += "<div class=\"tip-row\"><span class=\"tip-label\">Intensity</span><span class=\"tip-val\">" + fmt(peak.intensity, 1) + " (" + fmt(relI, 1) + "%)</span></div>";
           if (ann2) {
             html += "<hr class=\"tip-sep\">";
-            var lbl = (ann2.ion_type === "B" ? "b" : "y") + "<sub>" + ann2.ion_number + "</sub>";
+            var lbl = ionLabelHtml(ann2);
             html += "<div class=\"tip-row\"><span class=\"tip-label\">Ion</span><span class=\"tip-val\">" + lbl + "</span></div>";
             html += "<div class=\"tip-row\"><span class=\"tip-label\">\u0394 ppm</span><span class=\"tip-val\">" + fmt(ann2.delta_ppm, 2) + "</span></div>";
           }
@@ -500,6 +516,150 @@
     svg.appendChild(gMatched);
     svg.appendChild(gLabels);
     svg.appendChild(gHitboxes);
+    container.appendChild(svg);
+  })();
+
+  /* ── 4. Mass Error Scatter Plot ────────────────────── */
+  (function renderScatter() {
+    var container = document.getElementById("scatter-container");
+
+    // Collect all matched ions from peaks
+    var matched = [];
+    for (var i = 0; i < D.peaks.length; i++) {
+      if (D.peaks[i].annotation) {
+        matched.push(D.peaks[i]);
+      }
+    }
+    if (matched.length === 0) {
+      container.innerHTML = '<p style="text-align:center;color:#999;padding:20px;">No matched ions</p>';
+      return;
+    }
+
+    // Same m/z range as spectrum plot
+    var maxMz = 0;
+    for (var i = 0; i < D.peaks.length; i++) {
+      if (D.peaks[i].mz > maxMz) maxMz = D.peaks[i].mz;
+    }
+    var mzMax = maxMz * 1.05;
+    var mzMin = 0;
+
+    var W = 1200, H = 300;
+    var margin = { top: 20, right: 30, bottom: 40, left: 65 };
+    var pw = W - margin.left - margin.right;
+    var ph = H - margin.top - margin.bottom;
+
+    // Y-axis: -20 to +20 ppm
+    var ppmMin = -20, ppmMax = 20;
+
+    function xScale(v) { return margin.left + (v - mzMin) / (mzMax - mzMin) * pw; }
+    function yScale(v) { return margin.top + ph / 2 - (v / ppmMax) * (ph / 2); }
+
+    var svg = svgEl("svg", {
+      width: "100%", height: "auto",
+      viewBox: "0 0 " + W + " " + H,
+      preserveAspectRatio: "xMidYMid meet"
+    });
+
+    // Background
+    svg.appendChild(svgEl("rect", {
+      x: margin.left, y: margin.top, width: pw, height: ph,
+      fill: "#f8f9fa"
+    }));
+
+    // Zero line
+    var zeroY = yScale(0);
+    svg.appendChild(svgEl("line", {
+      x1: margin.left, y1: zeroY, x2: margin.left + pw, y2: zeroY,
+      stroke: "#999", "stroke-width": "1", "stroke-dasharray": "6,3"
+    }));
+
+    // Horizontal grid lines at ±10 ppm
+    [10, -10].forEach(function(ppm) {
+      var gy = yScale(ppm);
+      svg.appendChild(svgEl("line", {
+        x1: margin.left, y1: gy, x2: margin.left + pw, y2: gy,
+        stroke: "#e8e8e8", "stroke-width": "0.5", "stroke-dasharray": "4,3"
+      }));
+    });
+
+    // Axis: x (m/z)
+    var gAxis = svgEl("g");
+    gAxis.appendChild(svgEl("line", {
+      x1: margin.left, y1: margin.top + ph,
+      x2: margin.left + pw, y2: margin.top + ph, stroke: "#dee2e6"
+    }));
+    var xTicks = niceRange(mzMin, mzMax, 10);
+    for (var xi = 0; xi < xTicks.length; xi++) {
+      var tx = xScale(xTicks[xi]);
+      gAxis.appendChild(svgEl("line", { x1: tx, y1: margin.top + ph, x2: tx, y2: margin.top + ph + 5, stroke: "#dee2e6" }));
+      var tl = svgEl("text", { x: tx, y: margin.top + ph + 16, "text-anchor": "middle", "font-size": "10", fill: "#7f8c8d" });
+      tl.textContent = xTicks[xi];
+      gAxis.appendChild(tl);
+    }
+
+    // Axis: y (ppm)
+    gAxis.appendChild(svgEl("line", { x1: margin.left, y1: margin.top, x2: margin.left, y2: margin.top + ph, stroke: "#dee2e6" }));
+    [20, 10, 0, -10, -20].forEach(function(tick) {
+      var ty = yScale(tick);
+      gAxis.appendChild(svgEl("line", { x1: margin.left - 5, y1: ty, x2: margin.left, y2: ty, stroke: "#dee2e6" }));
+      var yl = svgEl("text", { x: margin.left - 8, y: ty + 4, "text-anchor": "end", "font-size": "10", fill: "#7f8c8d" });
+      yl.textContent = tick + " ppm";
+      gAxis.appendChild(yl);
+    });
+
+    // Axis labels
+    gAxis.appendChild(svgEl("text", { x: margin.left + pw / 2, y: H - 4, "text-anchor": "middle", "font-size": "12", fill: "#2c3e50", "font-weight": "500" }).appendChild(document.createTextNode("m/z")));
+    var yLabel = svgEl("text", { x: 16, y: margin.top + ph / 2, "text-anchor": "middle", "font-size": "12", fill: "#2c3e50", "font-weight": "500", transform: "rotate(-90,16," + (margin.top + ph / 2) + ")" });
+    yLabel.textContent = "Δ ppm";
+    gAxis.appendChild(yLabel);
+    svg.appendChild(gAxis);
+
+    // Plot points + hitboxes
+    var gPoints = svgEl("g");
+    var gHitbox2 = svgEl("g");
+
+    for (var i = 0; i < matched.length; i++) {
+      var pk = matched[i];
+      var ann = pk.annotation;
+      var cx = xScale(pk.mz);
+      var ppm = ann.delta_ppm;
+      var displayPpm = Math.max(ppmMin, Math.min(ppmMax, ppm));
+      var cy = yScale(displayPpm);
+      var col = ionColor(ann.ion_type);
+
+      // Circle
+      gPoints.appendChild(svgEl("circle", {
+        cx: cx, cy: cy, r: "3.5",
+        fill: col, opacity: "0.85",
+        stroke: "#fff", "stroke-width": "0.5"
+      }));
+
+      // Hitbox
+      (function(peak, ax, ay, aann) {
+        var hitbox = svgEl("circle", {
+          cx: ax, cy: ay, r: "8",
+          fill: "transparent", cursor: "pointer"
+        });
+        hitbox.addEventListener("mouseenter", function() {
+          var lbl = ionLabelHtml(aann);
+          tooltip.innerHTML =
+            "<div class="tip-row"><span class="tip-label">Ion</span><span class="tip-val">" + lbl + "</span></div>" +
+            "<div class="tip-row"><span class="tip-label">Δ ppm</span><span class="tip-val">" + fmt(aann.delta_ppm, 2) + "</span></div>" +
+            "<div class="tip-row"><span class="tip-label">Δ Da</span><span class="tip-val">" + fmt(aann.delta_mz, 4) + "</span></div>" +
+            "<div class="tip-row"><span class="tip-label">Observed m/z</span><span class="tip-val">" + fmt(peak.mz, 4) + "</span></div>";
+          tooltip.style.display = "block";
+        });
+        hitbox.addEventListener("mousemove", function(ev) {
+          tooltip.style.left = (ev.clientX + 14) + "px";
+          tooltip.style.top = (ev.clientY - 28) + "px";
+        });
+        hitbox.addEventListener("mouseleave", function() { tooltip.style.display = "none"; });
+        gHitbox2.appendChild(hitbox);
+      })(pk, cx, cy, ann);
+    }
+
+    svg.appendChild(gPoints);
+    svg.appendChild(gHitbox2);
     container.appendChild(svg);
   })();
 
